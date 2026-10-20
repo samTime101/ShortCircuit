@@ -2618,3 +2618,77 @@ kbd {
   justify-content: flex-end;
   gap: 8px;
 }
+
+.waveform-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.waveform-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 16px 18px;
+}
+
+.waveform {
+  display: block;
+}
+
+.wave-axis {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.wave-row {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.wave-signal {
+  fill: none;
+  stroke-width: 1.4;
+}
+
+.wave-signal.is-high {
+  stroke: var(--accent);
+}
+
+.wave-signal.is-low {
+  stroke: var(--line-strong);
+}
+
+.wave-name {
+  fill: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+.wave-width {
+  fill: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.wave-bus {
+  fill: rgba(108, 158, 255, 0.08);
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.wave-bus-value {
+  fill: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+}
+
+.wave-edge {
+  fill: var(--accent);
+  font-size: 11px;
+}
+
+.wave-edge.is-falling {
+  fill: var(--violet);
+}

@@ -120,6 +120,12 @@ export const Info = (p: IconProps) => (
     <path d="M12 11v6M12 7.5h.01" />
   </Icon>
 );
+export const Activity = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M3 12h4l2.5-6 4 12 2.5-6h5" />
+  </Icon>
+);
+
 export const Circle = (p: IconProps) => (
   <Icon {...p}>
     <circle cx="12" cy="12" r="7.5" />

@@ -31,8 +31,10 @@ import { Modal } from "./components/Modal";
 import { SimulatorDock } from "./components/SimulatorDock";
 import { TestsPanel } from "./components/TestsPanel";
 import { TruthTablePanel } from "./components/TruthTablePanel";
+import { WaveformPanel } from "./components/WaveformPanel";
 import { DocsPage } from "./pages/DocsPage";
 import {
+  Activity,
   AlertTriangle,
   ArrowUpRight,
   Book,
@@ -52,6 +54,7 @@ import {
 import type { SourceEditorHandle } from "./editor/SourceEditor";
 import { DEFAULT_EXAMPLE, EXAMPLES, type Example } from "./lib/examples";
 import { insertRecordedCase, suggestCaseName } from "./lib/recordTest";
+import { appendSample, sampleFromSnapshot, type TraceSample } from "./lib/trace";
 import { useRoute } from "./lib/router";
 
 const STORAGE_KEY = "shortcircuit.source.v1";
@@ -63,7 +66,7 @@ const SourceEditor = lazy(() =>
   import("./editor/SourceEditor").then((module) => ({ default: module.SourceEditor })),
 );
 
-type Tab = "circuit" | "truth" | "tests" | "ir";
+type Tab = "circuit" | "truth" | "waveform" | "tests" | "ir";
 
 const EMPTY_TESTS: TestRunResult = {
   ok: true,
@@ -110,6 +113,7 @@ function Studio({ onOpenDocs }: { onOpenDocs(): void }) {
   const [recording, setRecording] = useState<{ circuit: string; lines: string[] } | null>(null);
   const [recordingName, setRecordingName] = useState("");
   const [recordingOpen, setRecordingOpen] = useState(false);
+  const [trace, setTrace] = useState<TraceSample[]>([]);
   const [truthTable, setTruthTable] = useState<TruthTable | null>(null);
   const [testResult, setTestResult] = useState<TestRunResult | null>(null);
   const [examplesOpen, setExamplesOpen] = useState(false);
@@ -147,6 +151,7 @@ function Studio({ onOpenDocs }: { onOpenDocs(): void }) {
     setTruthTable(generateTruthTable(circuit));
     setRuntimeError(null);
     setRunning(false);
+    setTrace([]);
     try {
       const nextSimulator = new Simulator(circuit);
       const nextSnapshot = nextSimulator.snapshot();
@@ -249,12 +254,14 @@ function Studio({ onOpenDocs }: { onOpenDocs(): void }) {
     );
     try {
       simulator.setInput(selectedClock, "0");
-      const next = simulator.setInput(selectedClock, "1");
+      const rising = simulator.setInput(selectedClock, "1");
       const after = simulator.setInput(selectedClock, "0");
       setSnapshot(after);
       setInputValues(simulator.getInputValues());
       setRuntimeError(null);
-      void next;
+      // Keep both halves of the pulse so the edge that fired is on the trace.
+      setTrace((current) => appendSample(current, sampleFromSnapshot(rising, selectedClock)));
+      setTrace((current) => appendSample(current, sampleFromSnapshot(after, selectedClock)));
     } catch (error) {
       setSnapshot(null);
       setRuntimeError(errorText(error));
@@ -303,6 +310,7 @@ function Studio({ onOpenDocs }: { onOpenDocs(): void }) {
         const next = simulator.setState(name, value);
         setSnapshot(next);
         setRuntimeError(null);
+        setTrace((current) => appendSample(current, sampleFromSnapshot(next, name)));
       } catch (error) {
         setRuntimeError(errorText(error));
       }
@@ -370,6 +378,7 @@ function Studio({ onOpenDocs }: { onOpenDocs(): void }) {
       setSnapshot(next);
       setInputValues(simulator.getInputValues());
       setRuntimeError(null);
+      setTrace((current) => appendSample(current, sampleFromSnapshot(next, name)));
     } catch (error) {
       setSnapshot(null);
       setRuntimeError(errorText(error));
@@ -383,6 +392,7 @@ function Studio({ onOpenDocs }: { onOpenDocs(): void }) {
       setSnapshot(next);
       setInputValues(simulator.getInputValues());
       setRuntimeError(null);
+      setTrace([]);
       notify("Stored state returned to its initial value");
     } catch (error) {
       setSnapshot(null);
@@ -424,6 +434,16 @@ function Studio({ onOpenDocs }: { onOpenDocs(): void }) {
     compileNow(example.source, example.focusCircuit);
     notify(`Loaded ${example.title}`);
   };
+
+  const downloadText = useCallback((filename: string, contents: string, mime: string) => {
+    const blob = new Blob([contents], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }, []);
 
   const downloadSource = () => {
     const filename = matchingExample ? `${matchingExample.id}.lf` : "scratch.lf";
@@ -471,6 +491,12 @@ function Studio({ onOpenDocs }: { onOpenDocs(): void }) {
       label: "Truth table",
       icon: <Table size={13} />,
       count: truthTable && truthTable.rows.length > 0 ? `${truthTable.rows.length}` : undefined,
+    },
+    {
+      id: "waveform",
+      label: "Waveform",
+      icon: <Activity size={13} />,
+      count: trace.length > 0 ? `${trace.length}` : undefined,
     },
     {
       id: "tests",
@@ -713,6 +739,18 @@ function Studio({ onOpenDocs }: { onOpenDocs(): void }) {
             {tab === "truth" ? (
               <div className="inspection-scroll">
                 <TruthTablePanel table={result?.ok ? truthTable : null} />
+              </div>
+            ) : null}
+
+            {tab === "waveform" ? (
+              <div className="inspection-scroll">
+                {activeCircuit ? (
+                  <WaveformPanel
+                    circuit={activeCircuit}
+                    trace={trace}
+                    onDownload={downloadText}
+                  />
+                ) : null}
               </div>
             ) : null}
 
