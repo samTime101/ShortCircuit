@@ -436,6 +436,34 @@ CIRCUIT CellGrid
 END
 `;
 
+const PARAMETERIZED = `# One definition, many sizes.
+# The parameter is a compile-time number, so each copy has its own width.
+
+CIRCUIT Register(N = 8)
+  INPUT data : BUS(N)
+  INPUT clock
+
+  STATE q : BUS(N) = 0
+
+  ON RISING_EDGE(clock):
+    q = data
+  END
+
+  OUTPUT q
+END
+
+CIRCUIT RegisterPair
+  INPUT wide : BUS(16)
+  INPUT clock
+
+  low = Register(data = wide[7:0], clock = clock)
+  high = Register<16>(data = wide, clock = clock)
+
+  OUTPUT low.q
+  OUTPUT high.q
+END
+`;
+
 export const EXAMPLES: Example[] = [
   {
     id: "half-adder",
@@ -499,6 +527,15 @@ export const EXAMPLES: Example[] = [
     description: "A constant and a loop stamp out four identical cells, so a wider grid is one edit.",
     focusCircuit: "CellGrid",
     source: CELL_GRID,
+  },
+  {
+    id: "parameterized",
+    title: "Parameterized register",
+    tag: "Compile time",
+    level: "Digital systems",
+    description: "One register definition, two instances, each with the width it was given.",
+    focusCircuit: "RegisterPair",
+    source: PARAMETERIZED,
   },
   {
     id: "register-8",

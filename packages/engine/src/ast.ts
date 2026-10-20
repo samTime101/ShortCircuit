@@ -45,8 +45,17 @@ export type Path = PathSegment[];
 export interface CircuitAst {
   kind: "Circuit";
   name: string;
+  /** Compile-time parameters, as in CIRCUIT Register(N = 8). */
+  params: CircuitParamAst[];
   span: SourceSpan;
   body: CircuitItemAst[];
+}
+
+/** A parameter of a circuit, with its default value. */
+export interface CircuitParamAst {
+  name: string;
+  default: ConstExprAst;
+  span: SourceSpan;
 }
 
 export type CircuitItemAst =
@@ -149,6 +158,15 @@ export interface CallAst {
   kind: "Call";
   name: string;
   args: CallArgumentAst[];
+  /** Parameter values, as in Register<16>(data, clock). */
+  params: CallParamAst[];
+  span: SourceSpan;
+}
+
+/** A parameter value given at an instantiation. */
+export interface CallParamAst {
+  name: string | null;
+  value: ConstExprAst;
   span: SourceSpan;
 }
 

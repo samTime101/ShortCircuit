@@ -835,6 +835,65 @@ END`, { maxLoopDepth: 2 });
   });
 });
 
+describe("parameterized circuits", () => {
+  it("elaborates one copy per parameter set", () => {
+    const result = compile(`CIRCUIT Register(N = 8)
+  INPUT data : BUS(N)
+  INPUT clock
+  STATE q : BUS(N) = 0
+  ON RISING_EDGE(clock):
+    q = data
+  END
+  OUTPUT q
+END
+
+CIRCUIT Main
+  INPUT wide : BUS(16)
+  INPUT clock
+  small = Register(data = wide[7:0], clock = clock)
+  big = Register<16>(data = wide, clock = clock)
+  OUTPUT small.q
+  OUTPUT big.q
+END`);
+    expect(result.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
+    const main = result.circuits.find((entry) => entry.name === "Main")!;
+    const small = result.circuits.find((entry) => entry.name === "Register<N=8>")!;
+    const big = result.circuits.find((entry) => entry.name === "Register<N=16>")!;
+    expect(small).toBeDefined();
+    expect(big).toBeDefined();
+    expect(small.inputs[0]?.width).toBe(8);
+    expect(big.inputs[0]?.width).toBe(16);
+    expect(main.outputs).toHaveLength(2);
+  });
+
+  it("uses the defaults when no value is given", () => {
+    const result = compile(`CIRCUIT Register(N = 4)
+  INPUT data : BUS(N)
+  OUTPUT q
+  q = data
+END`);
+    expect(result.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
+    const circuit = result.circuits[0]!;
+    expect(circuit.inputs[0]?.width).toBe(4);
+  });
+
+  it("reports a parameter that does not exist", () => {
+    const result = compile(`CIRCUIT Register(N = 8)
+  INPUT data : BUS(N)
+  OUTPUT q
+  q = data
+END
+
+CIRCUIT Main
+  INPUT data : BUS(8)
+  r = Register<M = 8>(data = data)
+  OUTPUT r.q
+END`);
+    expect(result.ok).toBe(false);
+    expect(result.diagnostics.some((item) => item.code === "E408")).toBe(true);
+  });
+});
+
 describe("literal clarity", () => {
   it("warns when a bare number could be read two ways", () => {
     const result = compile(`CIRCUIT Ambiguous

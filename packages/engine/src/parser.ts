@@ -2,6 +2,8 @@ import type {
   AssignmentAst,
   CallArgumentAst,
   CallAst,
+  CallParamAst,
+  CircuitParamAst,
   CircuitAst,
   CircuitItemAst,
   ConstDeclAst,
@@ -125,6 +127,12 @@ export class Parser {
   private parseCircuit(): CircuitAst {
     const start = this.expectKeyword("CIRCUIT");
     const name = this.expectIdentifier("a circuit name");
+    const rawParams = this.parseParamList("(");
+    const params: CircuitParamAst[] = rawParams.map((param) => ({
+      name: param.name ?? "",
+      default: param.value,
+      span: param.span,
+    }));
     this.finishStatement();
     const body: CircuitItemAst[] = [];
     let closed = false;
@@ -164,6 +172,7 @@ export class Parser {
     return {
       kind: "Circuit",
       name: name.value,
+      params,
       span: mergeSpan(start, this.previous()),
       body,
     };
@@ -742,6 +751,34 @@ export class Parser {
     return { kind: "ConstNumber", value: 0, span: tokenSpan(token) };
   }
 
+  /**
+   * Reads a parameter list, as in (N = 8) for a circuit or <16> for a call.
+   * The same syntax covers positional and named values.
+   */
+  private parseParamList(
+    opening: "(" | "<",
+  ): Array<{ name: string | null; value: ConstExprAst; span: SourceSpan }> {
+    if (!this.checkSymbol(opening)) return [];
+    const closing = opening === "<" ? ">" : ")";
+    this.advance();
+    const params: Array<{ name: string | null; value: ConstExprAst; span: SourceSpan }> = [];
+
+    while (!this.atEnd() && !this.checkSymbol(closing)) {
+      let name: string | null = null;
+      if (isIdentifier(this.peek()) && this.peek(1)?.kind === "symbol" && this.peek(1)?.value === "=") {
+        name = this.advance().value;
+        this.advance();
+      }
+      const value = this.parseConstExpr();
+      params.push({ name, value, span: value.span });
+      if (this.matchSymbol(",")) continue;
+      break;
+    }
+
+    this.expectSymbol(closing);
+    return params;
+  }
+
   private parseTestInput(): TestInputAst {
     const start = this.expectKeyword("INPUT");
     const nameToken = this.expectIdentifier("an input name");
@@ -800,7 +837,7 @@ export class Parser {
     if (token.kind === "number") {
       expression = this.parseLiteral();
     } else if (isIdentifier(token)) {
-      if (this.peek(1)?.value === "(") {
+      if (this.peek(1)?.value === "(" || this.peek(1)?.value === "<") {
         expression = this.parseCall();
       } else {
         expression = this.parseReference();
@@ -881,6 +918,12 @@ export class Parser {
   private parseCall(): CallAst {
     const name = this.advance();
     const start = name;
+    const rawParams = this.parseParamList("<");
+    const params: CallParamAst[] = rawParams.map((param) => ({
+      name: param.name,
+      value: param.value,
+      span: param.span,
+    }));
     this.expectSymbol("(");
     this.skipNewlines();
     const args: CallArgumentAst[] = [];
@@ -937,6 +980,7 @@ export class Parser {
       kind: "Call",
       name: name.value,
       args,
+      params,
       span: mergeSpan(start, this.previous()),
     };
   }

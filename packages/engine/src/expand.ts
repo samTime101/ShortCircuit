@@ -1,4 +1,5 @@
 import type {
+  CallAst,
   CircuitItemAst,
   CircuitAst,
   ConstExprAst,
@@ -50,6 +51,14 @@ class Expander {
   private unrolled = 0;
   /** Names created by an indexed assignment inside a loop, such as cell. */
   private readonly arrayNames = new Set<string>();
+  /** Every circuit in the program, by name. */
+  private readonly circuitsByName = new Map<string, CircuitAst>();
+  /** The constants declared at the top level. */
+  private readonly constants = new Map<string, number>();
+  /** Specialized copies of parameterized circuits, by their parameter set. */
+  private readonly specializations = new Map<string, { name: string; circuit: CircuitAst }>();
+  /** Copies created while expanding, added to the program at the end. */
+  private readonly created: CircuitAst[] = [];
 
   constructor(private readonly options: Required<ExpandOptions>) {
     this.bag = new DiagnosticBag(100);
@@ -57,6 +66,8 @@ class Expander {
 
   run(program: ProgramAst): { program: ProgramAst; diagnostics: Diagnostic[] } {
     const env = new Map<string, number>();
+
+    for (const circuit of program.circuits) this.circuitsByName.set(circuit.name, circuit);
 
     for (const declaration of program.constants) {
       const value = this.evaluate(declaration.value, env);
@@ -78,16 +89,113 @@ class Expander {
     const tests = program.tests.map((test) => this.expandTest(test, env));
 
     return {
-      program: { kind: "Program", constants: [], circuits, tests },
+      program: {
+        kind: "Program",
+        constants: [],
+        circuits: [...circuits, ...this.created],
+        tests,
+      },
       diagnostics: this.bag.sorted(),
     };
   }
 
+  /**
+   * Expands a circuit, binding its parameter defaults.
+   *
+   * A parameterized circuit is compiled once per parameter set. The copies get
+   * their own names, such as Register&lt;N=16&gt;, so the graph can hold them
+   * side by side.
+   */
   private expandCircuit(circuit: CircuitAst, env: Map<string, number>): CircuitAst {
-    return {
-      ...circuit,
-      body: this.expandItems(circuit.body, env, 0),
-    };
+    const scope = new Map(env);
+    for (const parameter of circuit.params) {
+      const value = this.evaluate(parameter.default, scope);
+      if (value === null) continue;
+      scope.set(parameter.name, value);
+    }
+    return { ...circuit, body: this.expandItems(circuit.body, scope, 0) };
+  }
+
+  /** The values a call gives to a circuit, over the declared defaults. */
+  private parameterValues(
+    target: CircuitAst,
+    call: CallAst,
+    env: Map<string, number>,
+  ): Map<string, number> | null {
+    const values = new Map<string, number>();
+    const declared = new Map(target.params.map((parameter) => [parameter.name, parameter]));
+
+    for (const parameter of target.params) {
+      const value = this.evaluate(parameter.default, env);
+      if (value === null) return null;
+      values.set(parameter.name, value);
+    }
+
+    let positional = 0;
+    for (const given of call.params) {
+      if (given.name === null) {
+        const name = target.params[positional]?.name;
+        positional += 1;
+        if (!name) {
+          this.bag.error(
+            "E407",
+            `${target.name} takes ${target.params.length} parameter${target.params.length === 1 ? "" : "s"}.`,
+            given.span.line,
+            given.span.column,
+            { hint: "Give the parameter by name, or use the defaults." },
+          );
+          return null;
+        }
+        const value = this.evaluate(given.value, env);
+        if (value === null) return null;
+        values.set(name, value);
+        continue;
+      }
+      if (!declared.has(given.name)) {
+        this.bag.error(
+          "E408",
+          `${target.name} has no parameter "${given.name}".`,
+          given.span.line,
+          given.span.column,
+          {
+            hint: `Parameters: ${[...declared.keys()].join(", ") || "none"}.`,
+          },
+        );
+        return null;
+      }
+      const value = this.evaluate(given.value, env);
+      if (value === null) return null;
+      values.set(given.name, value);
+    }
+
+    return values;
+  }
+
+  /** Creates, or reuses, the copy of a circuit for one parameter set. */
+  private specialize(
+    target: CircuitAst,
+    values: Map<string, number>,
+    env: Map<string, number>,
+  ): string | null {
+    const key = `${target.name}|${[...values.entries()]
+      .sort((left, right) => left[0].localeCompare(right[0]))
+      .map(([name, value]) => `${name}=${value}`)
+      .join(",")}`;
+    const existing = this.specializations.get(key);
+    if (existing) return existing.name;
+
+    const label = [...values.entries()]
+      .map(([name, value]) => `${name}=${value}`)
+      .join(", ");
+    const name = `${target.name}<${label}>`;
+
+    const scope = new Map(env);
+    for (const [parameter, value] of values) scope.set(parameter, value);
+    const body = this.expandItems(target.body, scope, 0);
+
+    this.created.push({ ...target, name, params: [], body });
+    this.specializations.set(key, { name, circuit: this.created[this.created.length - 1]! });
+    return name;
   }
 
   private expandItems(
@@ -183,6 +291,8 @@ class Expander {
           target: this.rewritePath(item.target, env),
           value: this.foldExpression(item.value, env),
         };
+      case "For":
+        return item;
       case "On":
         return {
           ...item,
@@ -249,6 +359,36 @@ class Expander {
     }
   }
 
+  /**
+   * Resolves a call to a parameterized circuit.
+   *
+   * Each parameter set gets its own copy of the circuit, so two instances with
+   * different widths stay independent.
+   */
+  private resolveCall(call: CallAst, env: Map<string, number>): CallAst {
+    const target = this.circuitsByName.get(call.name);
+    if (!target) return call;
+
+    if (target.params.length === 0) {
+      if (call.params.length > 0) {
+        this.bag.error(
+          "E409",
+          `${target.name} does not take parameters.`,
+          call.params[0]!.span.line,
+          call.params[0]!.span.column,
+          { hint: "Remove the parameter list, or declare the parameters on the circuit." },
+        );
+      }
+      return call;
+    }
+
+    const values = this.parameterValues(target, call, env);
+    if (values === null) return call;
+    const name = this.specialize(target, values, env);
+    if (!name) return call;
+    return { ...call, name, params: [] };
+  }
+
   /** Rewrites indexed path segments into plain names, such as cell[0] to cell_0. */
   private rewritePath(path: Path, env: Map<string, number>): Path {
     return path.map((segment) => {
@@ -266,11 +406,13 @@ class Expander {
         return expression;
       case "Reference":
         return { ...expression, path: this.rewritePath(expression.path, env) };
-      case "Call":
-        return {
+      case "Call": {
+        const folded = {
           ...expression,
           args: expression.args.map((arg) => ({ ...arg, value: this.foldExpression(arg.value, env) })),
         };
+        return this.resolveCall(folded, env);
+      }
       case "Index": {
         // bit[0] reads a signal created by a loop, when such an array exists.
         if (expression.target.kind === "Reference" && expression.target.path.length === 1) {

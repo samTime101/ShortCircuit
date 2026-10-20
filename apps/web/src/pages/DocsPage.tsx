@@ -30,6 +30,7 @@ const SECTIONS: SectionDef[] = [
   { id: "reference", label: "Function reference", group: "Language" },
   { id: "widths", label: "Width policy", group: "Language" },
   { id: "constants", label: "Constants and loops", group: "Language" },
+  { id: "parameters", label: "Parameterized circuits", group: "Language" },
   { id: "composition", label: "Composition", group: "Language" },
   { id: "clocking", label: "State and clocks", group: "Language" },
   { id: "testing", label: "Tests and truth tables", group: "Language" },
@@ -767,6 +768,58 @@ END`}
                 </ul>
               </div>
             </div>
+          </Section>
+
+          <Section
+            id="parameters"
+            index="09"
+            eyebrow="Language"
+            title="Parameterized circuits"
+            lead="One definition, many sizes. A parameter is a compile-time whole number that a circuit can use anywhere a constant can."
+          >
+            <CodeBlock
+              code={`CIRCUIT Register(N = 8)
+  INPUT data : BUS(N)
+  INPUT clock
+
+  STATE q : BUS(N) = 0
+
+  ON RISING_EDGE(clock):
+    q = data
+  END
+
+  OUTPUT q
+END
+
+CIRCUIT Main
+  INPUT wide : BUS(16)
+  INPUT clock
+
+  small = Register(data = wide[7:0], clock = clock)
+  big = Register<16>(data = wide, clock = clock)
+
+  OUTPUT small.q
+  OUTPUT big.q
+END`}
+            />
+            <ul className="docs-list">
+              <li>
+                Parameters are declared with the circuit and may have a default, such as{" "}
+                <code>CIRCUIT Register(N = 8)</code>.
+              </li>
+              <li>
+                A parameter works like a constant inside the circuit: in widths, indexes,
+                and slice bounds.
+              </li>
+              <li>
+                An instance gives values with <code>Name&lt;16&gt;(...)</code> or by
+                name.
+              </li>
+              <li>
+                Each parameter set becomes its own copy, so two widths can live side by
+                side.
+              </li>
+            </ul>
           </Section>
 
           <Section

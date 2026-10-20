@@ -27,6 +27,8 @@ const SYMBOLS = new Set([
   "*",
   "/",
   "%",
+  "<",
+  ">",
 ]);
 const SINGLE_SYMBOLS = new Set([
   "(",
@@ -42,6 +44,8 @@ const SINGLE_SYMBOLS = new Set([
   "*",
   "/",
   "%",
+  "<",
+  ">",
 ]);
 
 function isIdentifierStart(char: string): boolean {

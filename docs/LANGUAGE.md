@@ -948,6 +948,50 @@ END
 
 ---
 
+## 8c. Parameterized circuits
+
+A circuit can take compile-time parameters, usually a width, so one definition
+serves many sizes.
+
+```logicflow
+CIRCUIT Register(N = 8)
+  INPUT data : BUS(N)
+  INPUT clock
+
+  STATE q : BUS(N) = 0
+
+  ON RISING_EDGE(clock):
+    q = data
+  END
+
+  OUTPUT q
+END
+
+CIRCUIT Main
+  INPUT wide : BUS(16)
+  INPUT clock
+
+  small = Register(data = wide[7:0], clock = clock)
+  big = Register<16>(data = wide, clock = clock)
+
+  OUTPUT small.q
+  OUTPUT big.q
+END
+```
+
+- Parameters are whole numbers with an optional default, declared in the
+  circuit's parentheses: `CIRCUIT Register(N = 8)`.
+- A parameter is used like a constant inside the circuit: in widths, indexes,
+  and slice bounds.
+- An instance gives values with `Name<16>(...)` or by name,
+  `Name<N = 16>(...)`. A value that is not given uses the default.
+- Each parameter set elaborates to its own copy of the circuit, so two
+  instances with different widths stay independent.
+- A parameter that does not exist is E408, and parameters on a circuit that
+  has none is E409.
+
+---
+
 ## 9. State and clocking
 
 ### 9.1 Edge blocks
