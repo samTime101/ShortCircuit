@@ -52,7 +52,7 @@ Assignments describe wires, not steps. The compiler validates names, widths, wir
 
 ## Run it
 
-Requires Node.js 20+ and npm.
+Requires **Node.js 22.19+** (or 24) and npm. The studio tests run in jsdom, which needs a Node with zstd support, so older releases cannot start the test workers.
 
 ```bash
 npm install

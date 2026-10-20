@@ -291,8 +291,6 @@ class Expander {
           target: this.rewritePath(item.target, env),
           value: this.foldExpression(item.value, env),
         };
-      case "For":
-        return item;
       case "On":
         return {
           ...item,

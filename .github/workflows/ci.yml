@@ -8,14 +8,19 @@ on:
 
 jobs:
   check:
-    name: Typecheck, test, build
+    name: Node ${{ matrix.node }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # jsdom pulls in undici, which needs Node 22.19 or newer for zstd.
+        node: ["22", "24"]
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ matrix.node }}
           cache: npm
 
       - name: Install dependencies
