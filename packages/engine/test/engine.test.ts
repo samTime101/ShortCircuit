@@ -721,6 +721,119 @@ END`);
   });
 });
 
+describe("constants and loops", () => {
+  it("unrolls a loop into instances", () => {
+    const result = compile(`CONST W = 4
+
+CIRCUIT Cell
+  INPUT a
+  OUTPUT doubled
+  doubled = AND(a, a)
+END
+
+CIRCUIT Grid
+  INPUT data : BUS(W)
+  FOR i IN 0..W-1
+    cell[i] = Cell(data[i])
+  END
+  OUTPUT cell[0].doubled
+  OUTPUT cell[1].doubled
+END`);
+    expect(result.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
+    const grid = result.circuits.find((entry) => entry.name === "Grid")!;
+    expect(grid.outputs.map((output) => output.name)).toEqual(["cell_0.doubled", "cell_1.doubled"]);
+    expect(grid.stats.nodes).toBeGreaterThan(4);
+  });
+
+  it("unrolls a loop into signals and reads them back", () => {
+    const result = compile(`CIRCUIT Bits
+  INPUT data : BUS(4)
+  FOR i IN 0..3
+    bit[i] = data[i]
+  END
+  OUTPUT bit[0]
+  OUTPUT bit[3]
+END`);
+    expect(result.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
+    const circuit = result.circuits[0]!;
+    expect(circuit.outputs.map((output) => output.name)).toEqual(["bit_0", "bit_3"]);
+    const simulator = new Simulator(circuit);
+    const outputs = simulator.setInputs({ data: "1010" }).outputs;
+    expect(outputs.bit_0?.binary).toBe("0");
+    expect(outputs.bit_3?.binary).toBe("1");
+  });
+
+  it("uses constants in widths and expressions", () => {
+    const result = compile(`CONST W = 4
+CONST H = W + 1
+
+CIRCUIT Sized
+  INPUT data : BUS(W * 2)
+  OUTPUT value
+  value = data[H - 1]
+END`);
+    expect(result.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
+    const circuit = result.circuits[0]!;
+    expect(circuit.inputs[0]?.width).toBe(8);
+    const simulator = new Simulator(circuit);
+    const outputs = simulator.setInputs({ data: "00010000" }).outputs;
+    expect(outputs.value?.binary).toBe("1");
+  });
+
+  it("skips a reversed range with a warning", () => {
+    const result = compile(`CIRCUIT Empty
+  INPUT a
+  FOR i IN 3..1
+    x[i] = a
+  END
+  OUTPUT a
+END`);
+    expect(result.diagnostics.some((item) => item.code === "W401")).toBe(true);
+    expect(result.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
+  });
+
+  it("reports an unknown constant", () => {
+    const result = compile(`CIRCUIT Unknown
+  INPUT a : BUS(MISSING)
+  OUTPUT a
+END`);
+    expect(result.ok).toBe(false);
+    expect(result.diagnostics.some((item) => item.code === "E401")).toBe(true);
+  });
+
+  it("requires an index for assignments inside a loop", () => {
+    const result = compile(`CIRCUIT Collide
+  INPUT a
+  FOR i IN 0..3
+    value = a
+  END
+  OUTPUT a
+END`);
+    expect(result.ok).toBe(false);
+    expect(result.diagnostics.some((item) => item.code === "E406")).toBe(true);
+  });
+
+  it("rejects a loop that is nested too deeply", () => {
+    const result = compile(`CIRCUIT Deep
+  INPUT a
+  FOR i IN 0..1
+    FOR j IN 0..1
+      FOR k IN 0..1
+        FOR l IN 0..1
+          FOR m IN 0..1
+            x[i] = a
+          END
+        END
+      END
+    END
+  END
+  OUTPUT a
+END`, { maxLoopDepth: 2 });
+    expect(result.ok).toBe(false);
+    expect(result.diagnostics.some((item) => item.code === "E404")).toBe(true);
+  });
+});
+
 describe("language metadata", () => {
   it("documents every built-in with a signature, width rule, and tip", () => {
     for (const spec of BUILTINS) {

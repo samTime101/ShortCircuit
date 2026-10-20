@@ -890,6 +890,64 @@ END
 
 ---
 
+## 8b. Constants and loops
+
+Some structure is easier to write than to draw. `CONST` names a compile-time
+whole number, and `FOR` repeats a block once per value. Both are resolved
+before the design is analysed, so every limit still applies to the finished
+circuit.
+
+### 8b.1 Constants
+
+```logicflow
+CONST W = 4
+CONST H = W + 1
+
+CIRCUIT Sized
+  INPUT data : BUS(W * 2)
+
+  OUTPUT value
+  value = data[H - 1]
+END
+```
+
+- `CONST` is declared at the top level, before the circuits.
+- A constant is a whole number. Compile-time arithmetic supports `+`, `-`,
+  `*`, `/`, and `%`, with parentheses for grouping.
+- Constants can be used in widths, bit indexes, slice bounds, loop bounds, and
+  other constants.
+- A name that is not a constant or a loop variable is E401.
+
+### 8b.2 Loops
+
+```logicflow
+CIRCUIT Bits
+  INPUT data : BUS(4)
+
+  FOR i IN 0..3
+    bit[i] = data[i]
+  END
+
+  OUTPUT bit[0]
+  OUTPUT bit[3]
+END
+```
+
+- The range is inclusive at both ends: `0..3` runs four times.
+- The loop variable is a compile-time value. It can be used in bit indexes,
+  slice bounds, widths, and names.
+- An assignment inside a loop needs an index, such as `bit[i]`, so each
+  iteration gets its own signal. A plain name is E406.
+- An indexed name becomes a plain one: `bit[0]` is written `bit_0`, and
+  `cell[0].out` is written `cell_0.out`.
+- Instances made in a loop are read back with the same indexed form, for
+  example `cell[0].next`.
+- A reversed or empty range is skipped with a warning (W401).
+- Loops can be nested up to four deep (E404), and a loop that expands to more
+  than 20,000 statements is E405.
+
+---
+
 ## 9. State and clocking
 
 ### 9.1 Edge blocks

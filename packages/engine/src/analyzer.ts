@@ -2,12 +2,14 @@ import type {
   AssignmentAst,
   CallAst,
   CircuitAst,
+  ConstExprAst,
   ExpressionAst,
   IfAst,
   InputDeclAst,
   LiteralAst,
   OnBlockAst,
   OutputDeclAst,
+  Path,
   ProgramAst,
   ReferenceAst,
   SequentialStatementAst,
@@ -145,6 +147,8 @@ const DEFAULT_OPTIONS: Required<CompileOptions> = {
   maxInstances: 500,
   maxWidth: 4096,
   maxDiagnostics: 100,
+  maxLoopDepth: 4,
+  maxUnrolledItems: 20_000,
 };
 
 function spanLine(span: SourceSpan): number {
@@ -159,18 +163,22 @@ function joinName(scope: string[], name: string): string {
   return [...scope, name].join(".");
 }
 
+function pathName(path: Path): string {
+  return path.map((segment) => segment.name).join(".");
+}
+
 function exprDescription(expr: ExpressionAst): string {
   switch (expr.kind) {
     case "Literal":
       return expr.raw;
     case "Reference":
-      return expr.path.join(".");
+      return pathName(expr.path);
     case "Call":
       return `${expr.name}(...)`;
     case "Index":
-      return `${exprDescription(expr.target)}[${expr.index}]`;
+      return `${exprDescription(expr.target)}[?]`;
     case "Slice":
-      return `${exprDescription(expr.target)}[${expr.hi}:${expr.lo}]`;
+      return `${exprDescription(expr.target)}[?]`;
   }
 }
 
@@ -329,7 +337,7 @@ export class ProgramAnalyzer {
 
     for (const item of ast.body) {
       if (item.kind === "Input") {
-        const width = item.width ?? 1;
+        const width = this.constNumber(item.width, `Width of input "${item.name}"`) ?? 1;
         this.checkWidth(width, item.span, `Input ${item.name}`);
         const declared = declare({
           kind: "input",
@@ -373,7 +381,7 @@ export class ProgramAnalyzer {
           );
           continue;
         }
-        const name = item.target[0]!;
+        const name = item.target[0]!.name;
         const declared = declare({
           kind: "assignment",
           name,
@@ -384,7 +392,7 @@ export class ProgramAnalyzer {
         });
         if (declared) assignments.set(name, item);
       } else if (item.kind === "Output") {
-        const fullName = item.path.join(".");
+        const fullName = pathName(item.path);
         if (outputFullNames.has(fullName)) {
           this.bag.error(
             "E208",
@@ -420,7 +428,7 @@ export class ProgramAnalyzer {
 
   private buildStateSpec(item: StateDeclAst): StateSpec {
     const init = item.init ? this.readLiteral(item.init, `initial value of ${item.name}`) : null;
-    let width = item.width;
+    let width = this.constNumber(item.width, `Width of state "${item.name}"`);
     if (width === null && init === null) {
       this.bag.error(
         "E304",
@@ -769,10 +777,12 @@ export class ProgramAnalyzer {
       }
 
       if (statement.kind === "TestExpect") {
-        const fullName = statement.path.join(".");
+        const fullName = pathName(statement.path);
         const output =
           context.outputByName.get(fullName) ??
-          (statement.path.length === 1 ? context.outputByPort.get(statement.path[0]!) : undefined);
+          (statement.path.length === 1
+            ? context.outputByPort.get(statement.path[0]!.name)
+            : undefined);
         const state = context.stateByName.get(fullName);
 
         if (!output && !state) {
@@ -844,7 +854,7 @@ export class ProgramAnalyzer {
       }
 
       if (statement.kind === "TestLoad") {
-        const fullName = statement.path.join(".");
+        const fullName = pathName(statement.path);
         const state = context.stateByName.get(fullName);
         if (!state) {
           const candidates = [...context.stateByName.keys()];
@@ -1131,6 +1141,24 @@ export class ProgramAnalyzer {
     }
   }
 
+  /**
+   * Reads a compile-time value. After expansion every constant expression is
+   * already a number, so anything else is a constant that could not be
+   * resolved.
+   */
+  constNumber(expression: ConstExprAst | null, context: string): number | null {
+    if (!expression) return null;
+    if (expression.kind === "ConstNumber") return expression.value;
+    this.bag.error(
+      "E403",
+      `${context} must be a compile-time constant.`,
+      expression.span.line,
+      expression.span.column,
+      { hint: "Use a number, a CONST, or a loop variable." },
+    );
+    return null;
+  }
+
   private checkWidth(width: number, span: SourceSpan, context: string): void {
     if (!Number.isSafeInteger(width) || width < 1) {
       this.bag.error(
@@ -1321,8 +1349,9 @@ class ScopeBuilder {
   }
 
   private resolveReference(reference: ReferenceAst): ValueRef {
-    const [base, ...rest] = reference.path;
-    if (!base) return this.fallbackRef(reference.span.line, reference.span.column);
+    const [first, ...rest] = reference.path;
+    if (!first) return this.fallbackRef(reference.span.line, reference.span.column);
+    const base = first.name;
     const entry = this.entries.get(base);
     if (!entry) {
       const suggestion = suggestName(base, this.entries.keys(), 2);
@@ -1348,7 +1377,7 @@ class ScopeBuilder {
       if (rest.length > 0) {
         this.analyzer.error(
           "E212",
-          `Signal "${base}" has no ports, so "${reference.path.join(".")}" cannot be accessed.`,
+          `Signal "${base}" has no ports, so "${pathName(reference.path)}" cannot be accessed.`,
           reference.span.line,
           reference.span.column,
           "Only a circuit instance exposes named outputs. Use a scalar signal directly.",
@@ -1375,11 +1404,13 @@ class ScopeBuilder {
       return this.fallbackRef(reference.span.line, reference.span.column);
     }
 
-    const full = rest.join(".");
-    const output = resolved.outputs.get(full) ?? (rest.length === 1 ? resolved.shortOutputs.get(rest[0]!) : undefined);
+    const full = rest.map((segment) => segment.name).join(".");
+    const output =
+      resolved.outputs.get(full) ??
+      (rest.length === 1 ? resolved.shortOutputs.get(rest[0]!.name) : undefined);
     if (!output) {
       const candidates = [...new Set([...resolved.outputs.keys(), ...resolved.shortOutputs.keys()])];
-      const suggestion = suggestName(rest.join("."), candidates, 3);
+      const suggestion = suggestName(full, candidates, 3);
       this.analyzer.errorWithSuggestion(
         "E204",
         `Circuit instance "${base}" has no output "${full}".`,
@@ -1412,10 +1443,17 @@ class ScopeBuilder {
         return this.resolveReference(expr);
       case "Call":
         return this.compileCall(expr, preferredLabel);
-      case "Index":
-        return this.compileSlice(expr.target, expr.index, expr.index, expr.span, preferredLabel);
-      case "Slice":
-        return this.compileSlice(expr.target, expr.hi, expr.lo, expr.span, preferredLabel);
+      case "Index": {
+        const index = this.analyzer.constNumber(expr.index, "Bit index");
+        if (index === null) return this.fallbackRef(expr.span.line, expr.span.column);
+        return this.compileSlice(expr.target, index, index, expr.span, preferredLabel);
+      }
+      case "Slice": {
+        const hi = this.analyzer.constNumber(expr.hi, "Slice bound");
+        const lo = this.analyzer.constNumber(expr.lo, "Slice bound");
+        if (hi === null || lo === null) return this.fallbackRef(expr.span.line, expr.span.column);
+        return this.compileSlice(expr.target, hi, lo, expr.span, preferredLabel);
+      }
     }
   }
 
@@ -2031,17 +2069,17 @@ class ScopeBuilder {
           column: this.locateName(
             declaration.span.line,
             declaration.span.column,
-            declaration.path[0] ?? "",
+            declaration.path[0]?.name ?? "",
           ),
         },
       };
       const ref = this.resolveReference(reference);
-      const name = declaration.path.join(".");
+      const name = pathName(declaration.path);
       if (seen.has(name)) continue;
       seen.add(name);
       outputs.push({
         name,
-        portName: declaration.path[declaration.path.length - 1] ?? name,
+        portName: declaration.path[declaration.path.length - 1]?.name ?? name,
         node: ref.node,
         width: ref.width,
         line: declaration.span.line,
@@ -2121,15 +2159,15 @@ class ScopeBuilder {
       outputs.set(output.name, { node: output.node, width: output.width });
     }
     for (const declaration of structure.outputs) {
-      const fullName = declaration.path.join(".");
+      const fullName = pathName(declaration.path);
       if (!outputs.has(fullName)) {
         outputs.set(fullName, this.fallbackRef(span.line, span.column));
       }
     }
     const grouped = new Map<string, Array<[string, ValueRef]>>();
     for (const declaration of structure.outputs) {
-      const port = declaration.path[declaration.path.length - 1]!;
-      const ref = outputs.get(declaration.path.join("."))!;
+      const port = declaration.path[declaration.path.length - 1]!.name;
+      const ref = outputs.get(pathName(declaration.path))!;
       const list = grouped.get(port) ?? [];
       list.push([port, ref]);
       grouped.set(port, list);
@@ -2412,7 +2450,7 @@ class ScopeBuilder {
       if (clock.width !== 1) {
         this.analyzer.error(
           "E303",
-          `Clock "${block.clock.path.join(".")}" must be 1 bit, but is ${clock.width} bits.`,
+          `Clock "${pathName(block.clock.path)}" must be 1 bit, but is ${clock.width} bits.`,
           block.clock.span.line,
           block.clock.span.column,
         );
@@ -2470,7 +2508,7 @@ class ScopeBuilder {
           );
           continue;
         }
-        const name = statement.target[0]!;
+        const name = statement.target[0]!.name;
         const state = this.stateRefs.get(name);
         if (!state) {
           const available = [...this.stateRefs.keys()];

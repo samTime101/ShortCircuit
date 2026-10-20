@@ -411,6 +411,31 @@ END
 END
 `;
 
+const CELL_GRID = `# Compile-time constants and loops stamp out repeated structure.
+# Changing W gives a wider grid with no other edits.
+
+CONST W = 4
+
+CIRCUIT Cell
+  INPUT a
+  OUTPUT doubled
+  doubled = AND(a, a)
+END
+
+CIRCUIT CellGrid
+  INPUT data : BUS(W)
+
+  FOR i IN 0..W-1
+    cell[i] = Cell(data[i])
+  END
+
+  OUTPUT cell[0].doubled
+  OUTPUT cell[1].doubled
+  OUTPUT cell[2].doubled
+  OUTPUT cell[3].doubled
+END
+`;
+
 export const EXAMPLES: Example[] = [
   {
     id: "half-adder",
@@ -465,6 +490,15 @@ export const EXAMPLES: Example[] = [
     description: "Arithmetic, bitwise logic, comparison, and nested MUXes in one component.",
     focusCircuit: "ALU8",
     source: ALU_8,
+  },
+  {
+    id: "cell-grid",
+    title: "Cell grid",
+    tag: "Compile time",
+    level: "Digital systems",
+    description: "A constant and a loop stamp out four identical cells, so a wider grid is one edit.",
+    focusCircuit: "CellGrid",
+    source: CELL_GRID,
   },
   {
     id: "register-8",

@@ -216,6 +216,34 @@ const TEMPLATES: Record<string, Template> = {
     headline: "That would make the value narrower",
     detail: "ZEXT and SEXT only widen a value. Use SLICE(value, 3, 0) to narrow it.",
   },
+  E401: {
+    headline: "That name is not known here",
+    detail: "Compile-time values come from a CONST declaration or a loop variable that is in scope.",
+  },
+  E402: {
+    headline: "This constant is declared twice",
+    detail: "Give every constant a unique name.",
+  },
+  E403: {
+    headline: "This has to be a compile-time value",
+    detail: "Use a number, a CONST, or a loop variable. Arithmetic uses + - * / %.",
+  },
+  E404: {
+    headline: "These loops are nested too deeply",
+    detail: "Flatten the loops, or compute the values with a constant.",
+  },
+  E405: {
+    headline: "This loop expands to too much",
+    detail: "Narrow the loop range, or split the design up.",
+  },
+  E406: {
+    headline: "This signal is assigned in a loop without an index",
+    detail: "Write name[i] = ... so every iteration gets its own signal.",
+  },
+  W401: {
+    headline: "This loop has no values to run",
+    detail: "Write the lower bound first, for example FOR i IN 0..7.",
+  },
   R500: {
     headline: "Division by zero",
     detail: "Guard the divisor before dividing.",

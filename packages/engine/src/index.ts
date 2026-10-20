@@ -1,4 +1,5 @@
 import { ProgramAnalyzer } from "./analyzer";
+import { expandProgram } from "./expand";
 import { Parser } from "./parser";
 import type { CompileOptions, CompileResult, Diagnostic } from "./types";
 
@@ -43,6 +44,7 @@ export {
 export { BUILTINS, BUILTIN_BY_NAME, INTRINSIC_CIRCUITS } from "./builtins";
 export type { BuiltinArgument, BuiltinExample, BuiltinSpec, IntrinsicCircuit } from "./builtins";
 export { plainFor } from "./plainLanguage";
+export { expandProgram } from "./expand";
 export type { DiagnosticFix, PlainDiagnostic } from "./plainLanguage";
 export { LANGUAGE_SNIPPETS, SNIPPET_BY_ID, type LanguageSnippet, type SnippetCategory } from "./snippets";
 
@@ -60,7 +62,18 @@ export function compile(source: string, options: CompileOptions = {}): CompileRe
     const parser = new Parser(source, [], options.maxDiagnostics ?? 100);
     const program = parser.parse();
     const parserDiagnostics = parser.diagnostics;
-    const analyzer = new ProgramAnalyzer(source, program, options, parserDiagnostics);
+    // Constants and loops are resolved before analysis, so every limit applies
+    // to the unrolled design.
+    const expanded = expandProgram(program, {
+      maxLoopDepth: options.maxLoopDepth,
+      maxUnrolledItems: options.maxUnrolledItems,
+    });
+    const analyzer = new ProgramAnalyzer(
+      source,
+      expanded.program,
+      options,
+      [...parserDiagnostics, ...expanded.diagnostics],
+    );
     return analyzer.analyze();
   } catch (error) {
     const diagnostic: Diagnostic = {

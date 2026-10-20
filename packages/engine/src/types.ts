@@ -50,6 +50,10 @@ export interface CompileOptions {
   maxWidth?: number;
   /** Stop collecting diagnostics after this many entries. */
   maxDiagnostics?: number;
+  /** Maximum nesting depth of FOR loops. */
+  maxLoopDepth?: number;
+  /** Maximum number of statements a FOR loop may expand to. */
+  maxUnrolledItems?: number;
 }
 
 export interface CircuitInput {

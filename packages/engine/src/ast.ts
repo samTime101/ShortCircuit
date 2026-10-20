@@ -7,9 +7,40 @@ export interface SourceSpan {
 
 export interface ProgramAst {
   kind: "Program";
+  /** Compile-time constants declared before the circuits. */
+  constants: ConstDeclAst[];
   circuits: CircuitAst[];
   tests: TestAst[];
 }
+
+/** A compile-time integer expression. */
+export type ConstExprAst =
+  | { kind: "ConstNumber"; value: number; span: SourceSpan }
+  | { kind: "ConstName"; name: string; span: SourceSpan }
+  | {
+      kind: "ConstBinary";
+      op: "+" | "-" | "*" | "/" | "%";
+      left: ConstExprAst;
+      right: ConstExprAst;
+      span: SourceSpan;
+    }
+  | { kind: "ConstUnary"; op: "-"; operand: ConstExprAst; span: SourceSpan };
+
+/** A compile-time constant declaration. */
+export interface ConstDeclAst {
+  kind: "Const";
+  name: string;
+  value: ConstExprAst;
+  span: SourceSpan;
+}
+
+/** One segment of a path, optionally indexed as in cell[0].port. */
+export interface PathSegment {
+  name: string;
+  index: ConstExprAst | null;
+}
+
+export type Path = PathSegment[];
 
 export interface CircuitAst {
   kind: "Circuit";
@@ -23,33 +54,44 @@ export type CircuitItemAst =
   | OutputDeclAst
   | StateDeclAst
   | AssignmentAst
+  | ForAst
   | OnBlockAst;
 
 export interface InputDeclAst {
   kind: "Input";
   name: string;
-  width: number | null;
+  width: ConstExprAst | null;
   span: SourceSpan;
 }
 
 export interface OutputDeclAst {
   kind: "Output";
-  path: string[];
+  path: Path;
   span: SourceSpan;
 }
 
 export interface StateDeclAst {
   kind: "State";
   name: string;
-  width: number | null;
+  width: ConstExprAst | null;
   init: LiteralAst | null;
   span: SourceSpan;
 }
 
 export interface AssignmentAst {
   kind: "Assignment";
-  target: string[];
+  target: Path;
   value: ExpressionAst;
+  span: SourceSpan;
+}
+
+/** A compile-time loop, unrolled before analysis. */
+export interface ForAst {
+  kind: "For";
+  variable: string;
+  from: ConstExprAst;
+  to: ConstExprAst;
+  body: CircuitItemAst[];
   span: SourceSpan;
 }
 
@@ -65,7 +107,7 @@ export type SequentialStatementAst = SequentialAssignmentAst | IfAst;
 
 export interface SequentialAssignmentAst {
   kind: "SequentialAssignment";
-  target: string[];
+  target: Path;
   value: ExpressionAst;
   span: SourceSpan;
 }
@@ -93,7 +135,7 @@ export interface LiteralAst {
 
 export interface ReferenceAst {
   kind: "Reference";
-  path: string[];
+  path: Path;
   span: SourceSpan;
 }
 
@@ -113,15 +155,15 @@ export interface CallAst {
 export interface IndexAst {
   kind: "Index";
   target: ExpressionAst;
-  index: number;
+  index: ConstExprAst;
   span: SourceSpan;
 }
 
 export interface SliceAst {
   kind: "Slice";
   target: ExpressionAst;
-  hi: number;
-  lo: number;
+  hi: ConstExprAst;
+  lo: ConstExprAst;
   span: SourceSpan;
 }
 
@@ -141,7 +183,7 @@ export interface TestInputAst {
 
 export interface TestExpectAst {
   kind: "TestExpect";
-  path: string[];
+  path: Path;
   value: LiteralAst;
   span: SourceSpan;
 }
@@ -149,7 +191,7 @@ export interface TestExpectAst {
 /** Forces a state signal to a value, for tests that need a starting point. */
 export interface TestLoadAst {
   kind: "TestLoad";
-  path: string[];
+  path: Path;
   value: LiteralAst;
   span: SourceSpan;
 }

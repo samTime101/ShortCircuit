@@ -4,12 +4,17 @@ import type {
   CallAst,
   CircuitAst,
   CircuitItemAst,
+  ConstDeclAst,
+  ConstExprAst,
   ExpressionAst,
+  ForAst,
   IfAst,
   InputDeclAst,
   LiteralAst,
   OnBlockAst,
   OutputDeclAst,
+  Path,
+  PathSegment,
   ProgramAst,
   ReferenceAst,
   SequentialStatementAst,
@@ -36,6 +41,15 @@ function isIdentifier(token: Token): boolean {
 
 function keyword(token: Token, name: string): boolean {
   return token.kind === "identifier" && token.value.toUpperCase() === name;
+}
+
+function mergeSpans(start: SourceSpan, end: SourceSpan): SourceSpan {
+  return {
+    line: start.line,
+    column: start.column,
+    offset: start.offset,
+    length: Math.max(1, end.offset + end.length - start.offset),
+  };
 }
 
 function mergeSpan(start: Token, end: Token): SourceSpan {
@@ -82,6 +96,7 @@ export class Parser {
   parse(): ProgramAst {
     const circuits: CircuitAst[] = [];
     const tests: TestAst[] = [];
+    const constants: ConstDeclAst[] = [];
     this.skipNewlines();
 
     while (!this.atEnd()) {
@@ -90,6 +105,8 @@ export class Parser {
         circuits.push(this.parseCircuit());
       } else if (keyword(token, "TEST")) {
         tests.push(this.parseTest());
+      } else if (keyword(token, "CONST")) {
+        constants.push(this.parseConstDecl());
       } else {
         this.error(
           "E100",
@@ -102,7 +119,7 @@ export class Parser {
       this.skipNewlines();
     }
 
-    return { kind: "Program", circuits, tests };
+    return { kind: "Program", constants, circuits, tests };
   }
 
   private parseCircuit(): CircuitAst {
@@ -158,6 +175,7 @@ export class Parser {
     if (keyword(token, "OUTPUT")) return this.parseOutputDecl();
     if (keyword(token, "STATE")) return this.parseStateDecl();
     if (keyword(token, "ON")) return this.parseOnBlock();
+    if (keyword(token, "FOR")) return this.parseForBlock();
     if (isIdentifier(token)) {
       if (
         keyword(token, "END") ||
@@ -180,7 +198,7 @@ export class Parser {
 
     this.error(
       "E103",
-      `Expected INPUT, OUTPUT, STATE, ON, or an assignment, found "${token.raw || "end of file"}".`,
+      `Expected INPUT, OUTPUT, STATE, ON, FOR, or an assignment, found "${token.raw || "end of file"}".`,
       token,
       "A circuit line declares a signal or assigns one with name = expression.",
     );
@@ -191,7 +209,7 @@ export class Parser {
   private parseInputDecl(): InputDeclAst {
     const start = this.expectKeyword("INPUT");
     const name = this.expectIdentifier("an input name");
-    let width: number | null = null;
+    let width: ConstExprAst | null = null;
     if (this.matchSymbol(":")) {
       width = this.parseWidthSpec();
     }
@@ -217,7 +235,7 @@ export class Parser {
 
   private parseOutputDecl(): OutputDeclAst {
     const start = this.expectKeyword("OUTPUT");
-    const path = this.parsePath();
+    const path = this.parsePath("target");
     this.finishStatement();
     return {
       kind: "Output",
@@ -229,7 +247,7 @@ export class Parser {
   private parseStateDecl(): StateDeclAst {
     const start = this.expectKeyword("STATE");
     const name = this.expectIdentifier("a state name");
-    let width: number | null = null;
+    let width: ConstExprAst | null = null;
     let init: LiteralAst | null = null;
     if (this.matchSymbol(":")) width = this.parseWidthSpec();
     if (this.matchSymbol("=")) init = this.parseLiteral();
@@ -359,7 +377,7 @@ export class Parser {
 
   private parseAssignment(): AssignmentAst {
     const start = this.peek();
-    const target = this.parsePath();
+    const target = this.parsePath("target");
     this.expectSymbol("=");
     const value = this.parseExpression();
     this.finishStatement();
@@ -486,7 +504,7 @@ export class Parser {
 
   private parseTestLoad(): TestLoadAst {
     const start = this.expectKeyword("LOAD");
-    const path = this.parsePath();
+    const path = this.parsePath("target");
     this.expectSymbol("=");
     const value = this.parseLiteral();
     this.finishStatement();
@@ -573,6 +591,157 @@ export class Parser {
     };
   }
 
+  private parseConstDecl(): ConstDeclAst {
+    const start = this.expectKeyword("CONST");
+    const nameToken = this.expectIdentifier("a constant name");
+    this.expectSymbol("=");
+    const value = this.parseConstExpr();
+    this.finishStatement();
+    return {
+      kind: "Const",
+      name: nameToken.value,
+      value,
+      span: mergeSpan(start, this.previous()),
+    };
+  }
+
+  private parseForBlock(): ForAst {
+    const start = this.expectKeyword("FOR");
+    const variable = this.expectIdentifier("a loop variable");
+    if (keyword(this.peek(), "IN")) {
+      this.advance();
+    } else {
+      this.error(
+        "E401",
+        "Expected IN after the loop variable.",
+        this.peek(),
+        "Write FOR i IN 0..7 to loop over eight values.",
+      );
+    }
+    const from = this.parseConstExpr();
+    this.expectSymbol(".");
+    this.expectSymbol(".");
+    const to = this.parseConstExpr();
+    this.finishStatement();
+
+    const body: CircuitItemAst[] = [];
+    let closed = false;
+    this.skipNewlines();
+
+    while (!this.atEnd()) {
+      const token = this.peek();
+      if (keyword(token, "END")) {
+        this.advance();
+        this.finishStatement();
+        closed = true;
+        break;
+      }
+      if (keyword(token, "CIRCUIT") || keyword(token, "TEST")) break;
+      const item = this.parseCircuitItem();
+      if (item) body.push(item);
+      this.skipNewlines();
+    }
+
+    if (!closed) {
+      this.error(
+        "E402",
+        "FOR is missing its END.",
+        start,
+        "Add END to close the loop.",
+      );
+    }
+
+    return {
+      kind: "For",
+      variable: variable.value,
+      from,
+      to,
+      body,
+      span: mergeSpan(start, this.previous()),
+    };
+  }
+
+  /** Parses a compile-time integer expression. */
+  private parseConstExpr(): ConstExprAst {
+    return this.parseConstSum();
+  }
+
+  private parseConstSum(): ConstExprAst {
+    let left = this.parseConstProduct();
+    while (this.checkSymbol("+") || this.checkSymbol("-")) {
+      const op = this.advance().value as "+" | "-";
+      const right = this.parseConstProduct();
+      left = {
+        kind: "ConstBinary",
+        op,
+        left,
+        right,
+        span: mergeSpans(left.span, right.span),
+      };
+    }
+    return left;
+  }
+
+  private parseConstProduct(): ConstExprAst {
+    let left = this.parseConstPrimary();
+    while (this.checkSymbol("*") || this.checkSymbol("/") || this.checkSymbol("%")) {
+      const op = this.advance().value as "*" | "/" | "%";
+      const right = this.parseConstPrimary();
+      left = {
+        kind: "ConstBinary",
+        op,
+        left,
+        right,
+        span: mergeSpans(left.span, right.span),
+      };
+    }
+    return left;
+  }
+
+  private parseConstPrimary(): ConstExprAst {
+    const token = this.peek();
+    if (token.kind === "number") {
+      this.advance();
+      const value = Number(token.raw.replaceAll("_", ""));
+      if (!Number.isSafeInteger(value)) {
+        this.error(
+          "E403",
+          `"${token.raw}" is not a whole number.`,
+          token,
+          "Compile-time values are whole numbers.",
+        );
+      }
+      return { kind: "ConstNumber", value, span: tokenSpan(token) };
+    }
+    if (isIdentifier(token)) {
+      this.advance();
+      return { kind: "ConstName", name: token.value, span: tokenSpan(token) };
+    }
+    if (this.checkSymbol("(")) {
+      this.advance();
+      const inner = this.parseConstExpr();
+      this.expectSymbol(")");
+      return inner;
+    }
+    if (this.checkSymbol("-")) {
+      this.advance();
+      const operand = this.parseConstProduct();
+      return {
+        kind: "ConstUnary",
+        op: "-",
+        operand,
+        span: mergeSpans(tokenSpan(token), operand.span),
+      };
+    }
+    this.error(
+      "E403",
+      `Expected a compile-time value, found "${token.raw || "end of file"}".`,
+      token,
+      "Compile-time expressions use numbers, names, and + - * / %.",
+    );
+    return { kind: "ConstNumber", value: 0, span: tokenSpan(token) };
+  }
+
   private parseTestInput(): TestInputAst {
     const start = this.expectKeyword("INPUT");
     const nameToken = this.expectIdentifier("an input name");
@@ -589,7 +758,7 @@ export class Parser {
 
   private parseTestExpect(): TestExpectAst {
     const start = this.expectKeyword("EXPECT");
-    const path = this.parsePath();
+    const path = this.parsePath("target");
     this.expectSymbol("=");
     const value = this.parseLiteral();
     this.finishStatement();
@@ -601,37 +770,17 @@ export class Parser {
     };
   }
 
-  private parseWidthSpec(): number {
+  private parseWidthSpec(): ConstExprAst {
     const token = this.peek();
-    if (token.kind === "number") {
-      this.advance();
-      const width = Number(token.raw.replaceAll("_", ""));
-      if (!Number.isSafeInteger(width) || width < 1) {
-        this.error(
-          "E112",
-          `Invalid width "${token.raw}". Widths must be positive whole numbers.`,
-          token,
-        );
-        return 1;
-      }
-      return width;
-    }
     if (isIdentifier(token) && token.value.toUpperCase() === "BUS") {
       this.advance();
       this.expectSymbol("(");
-      const widthToken = this.expectKind("number", "a bus width");
+      const width = this.parseConstExpr();
       this.expectSymbol(")");
-      const width = Number(widthToken.raw.replaceAll("_", ""));
-      if (!Number.isSafeInteger(width) || width < 1) {
-        this.error(
-          "E112",
-          `Invalid width "${widthToken.raw}". Bus widths must be positive whole numbers.`,
-          widthToken,
-          "Example: INPUT data : BUS(8)",
-        );
-        return 1;
-      }
       return width;
+    }
+    if (token.kind === "number" || isIdentifier(token) || this.checkSymbol("(")) {
+      return this.parseConstExpr();
     }
 
     this.error(
@@ -641,7 +790,7 @@ export class Parser {
       "Use INPUT data : BUS(8) for an 8-bit bus.",
     );
     if (!this.atEnd() && !this.checkNewline()) this.advance();
-    return 1;
+    return { kind: "ConstNumber", value: 1, span: tokenSpan(token) };
   }
 
   private parseExpression(): ExpressionAst {
@@ -693,18 +842,16 @@ export class Parser {
     while (this.checkSymbol("[")) {
       const startToken = this.peek();
       this.advance();
-      const first = this.expectKind("number", "a bit index");
-      const firstNumber = Number(first.raw.replaceAll("_", ""));
+      const first = this.parseConstExpr();
       let result: ExpressionAst;
       if (this.matchSymbol(":")) {
-        const second = this.expectKind("number", "a slice end index");
+        const second = this.parseConstExpr();
         this.expectSymbol("]");
-        const secondNumber = Number(second.raw.replaceAll("_", ""));
         result = {
           kind: "Slice",
           target: expression,
-          hi: firstNumber,
-          lo: secondNumber,
+          hi: first,
+          lo: second,
           span: {
             line: startToken.line,
             column: startToken.column,
@@ -717,7 +864,7 @@ export class Parser {
         result = {
           kind: "Index",
           target: expression,
-          index: firstNumber,
+          index: first,
           span: {
             line: startToken.line,
             column: startToken.column,
@@ -804,15 +951,47 @@ export class Parser {
     };
   }
 
-  private parsePath(): string[] {
+  private parsePath(mode: "path" | "target" = "path"): Path {
     const first = this.expectIdentifier("a name");
-    const path = [first.value];
+    const path: Path = [{ name: first.value, index: this.parsePathIndex(mode) }];
     while (this.checkSymbol(".")) {
       this.advance();
       const segment = this.expectIdentifier("a name after the dot");
-      path.push(segment.value);
+      path.push({ name: segment.value, index: this.parsePathIndex(mode) });
     }
     return path;
+  }
+
+  /**
+   * Reads an index in a path, as in cell[0].port.
+   *
+   * In an expression, brackets are a bit index on a signal unless a dot
+   * follows the closing bracket, which makes it an indexed instance path.
+   */
+  private parsePathIndex(mode: "path" | "target"): ConstExprAst | null {
+    if (!this.checkSymbol("[")) return null;
+    if (mode === "path" && !this.bracketFollowedByDot()) return null;
+    this.advance();
+    const index = this.parseConstExpr();
+    this.expectSymbol("]");
+    return index;
+  }
+
+  private bracketFollowedByDot(): boolean {
+    let depth = 0;
+    for (let offset = 0; offset < 64; offset += 1) {
+      const token = this.peek(offset);
+      if (token.kind === "eof") return false;
+      if (token.kind === "symbol" && token.value === "[") depth += 1;
+      if (token.kind === "symbol" && token.value === "]") {
+        depth -= 1;
+        if (depth === 0) {
+          const next = this.peek(offset + 1);
+          return next.kind === "symbol" && next.value === ".";
+        }
+      }
+    }
+    return false;
   }
 
   private parseLiteral(): LiteralAst {

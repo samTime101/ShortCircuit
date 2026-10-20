@@ -29,6 +29,7 @@ const SECTIONS: SectionDef[] = [
   { id: "operations", label: "Built-in operations", group: "Language" },
   { id: "reference", label: "Function reference", group: "Language" },
   { id: "widths", label: "Width policy", group: "Language" },
+  { id: "constants", label: "Constants and loops", group: "Language" },
   { id: "composition", label: "Composition", group: "Language" },
   { id: "clocking", label: "State and clocks", group: "Language" },
   { id: "testing", label: "Tests and truth tables", group: "Language" },
@@ -691,6 +692,61 @@ STATE armed = 1`}
               rejected at compile time (E309). A divisor that becomes zero at runtime raises R500 and
               the studio stops showing outputs until it is fixed.
             </Note>
+          </Section>
+
+          <Section
+            id="constants"
+            index="08"
+            eyebrow="Language"
+            title="Constants and loops"
+            lead="Name a compile-time value, or repeat a block once per value. Both are resolved before the design is analysed."
+          >
+            <div className="docs-columns">
+              <div>
+                <h4>Constants</h4>
+                <CodeBlock
+                  code={`CONST W = 4
+CONST H = W + 1
+
+CIRCUIT Sized
+  INPUT data : BUS(W * 2)
+
+  OUTPUT value
+  value = data[H - 1]
+END`}
+                />
+                <ul className="docs-list">
+                  <li>Constants are whole numbers, declared before the circuits.</li>
+                  <li>Compile-time arithmetic supports + - * / %.</li>
+                  <li>They work in widths, bit indexes, slice bounds, and loop bounds.</li>
+                </ul>
+              </div>
+              <div>
+                <h4>Loops</h4>
+                <CodeBlock
+                  code={`CIRCUIT Bits
+  INPUT data : BUS(4)
+
+  FOR i IN 0..3
+    bit[i] = data[i]
+  END
+
+  OUTPUT bit[0]
+  OUTPUT bit[3]
+END`}
+                />
+                <ul className="docs-list">
+                  <li>The range includes both ends.</li>
+                  <li>
+                    An assignment in a loop needs an index, such as <code>bit[i]</code>.
+                  </li>
+                  <li>
+                    Indexed names become plain ones: <code>bit[0]</code> is written{" "}
+                    <code>bit_0</code>.
+                  </li>
+                </ul>
+              </div>
+            </div>
           </Section>
 
           <Section

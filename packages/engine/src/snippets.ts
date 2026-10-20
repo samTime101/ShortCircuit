@@ -144,6 +144,22 @@ export const LANGUAGE_SNIPPETS: LanguageSnippet[] = [
     preview: "CASE \"1 + 1\"\n  INPUT a = 1\n  EXPECT sum = 0\nEND",
   },
   {
+    id: "const",
+    title: "Compile-time constant",
+    category: "pattern",
+    description: "A named whole number that can be used in widths, indexes, and loop bounds.",
+    template: "CONST ${name} = ${value}",
+    preview: "CONST W = 4",
+  },
+  {
+    id: "for",
+    title: "Compile-time loop",
+    category: "pattern",
+    description: "Repeats a block once per value, from the first bound to the last.",
+    template: "FOR ${variable} IN ${from}..${to}\n  ${name}[${variable}] = ${value}\nEND",
+    preview: "FOR i IN 0..7\n  bit[i] = data[i]\nEND",
+  },
+  {
     id: "half-adder",
     title: "Half adder",
     category: "pattern",

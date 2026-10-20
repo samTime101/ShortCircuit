@@ -34,6 +34,7 @@ Assignments describe wires, not steps. The compiler validates names, widths, wir
 - **Static validation first** — undeclared/duplicate signals, width mismatches, missing ports, illegal recursion, combinational loops and clock conflicts are diagnosed before simulation.
 - **Buses** — `BUS(8)` declarations, indexing (`data[3]`), inclusive slices (`data[7:4]`), concatenation, shifts, decoder/encoder.
 - **Composition** — reusable `CIRCUIT` blocks, positional or named instance ports, nested scopes and flattened IR.
+- **Compile-time structure** — `CONST` names a whole number and `FOR` repeats a block once per value, so a grid of cells is one line instead of a hundred.
 - **Sequential logic** — explicit `STATE`, rising/falling edge blocks, conditional next-state, atomic edge commits.
 - **Verification** — in-source `TEST` cases, clocked sequences with `STEP`, `CYCLE`, and `LOAD`, plus exhaustive truth-table generation for combinational circuits.
 - **Live studio** — CodeMirror editor with diagnostics, interactive input controls, dependency graph with values, stored-state monitors, test results, and downloadable IR.
@@ -115,6 +116,7 @@ The engine has no DOM, React, or browser dependency. Another implementation can 
 | ALU8 | Arithmetic, logic, comparison and MUX composition |
 | Register 8 | Rising-edge state with enable |
 | Counter 4 | Next-state logic and edge commits |
+| Cell grid | Compile-time constants and loops |
 
 ## Roadmap
 

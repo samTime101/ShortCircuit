@@ -104,6 +104,24 @@ const KEYWORDS: KeywordSpec[] = [
     note: "Declares a bus width: INPUT data : BUS(8)",
     apply: "BUS",
   },
+  {
+    name: "CONST",
+    detail: "compile time",
+    note: "Declares a compile-time constant: CONST W = 4",
+    apply: "CONST ",
+  },
+  {
+    name: "FOR",
+    detail: "compile time",
+    note: "Repeats a block once per value. FOR i IN 0..7 ... END",
+    apply: "FOR ",
+  },
+  {
+    name: "IN",
+    detail: "loop",
+    note: "Introduces the range of a FOR loop.",
+    apply: "IN ",
+  },
 ];
 
 const CATEGORY_LABEL: Record<string, string> = {

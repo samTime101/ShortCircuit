@@ -412,6 +412,7 @@ export function CircuitGraph({ circuit, snapshot }: CircuitGraphProps) {
 
   const nodeMap = useMemo(() => new Map(layout.nodes.map((node) => [node.id, node])), [layout.nodes]);
   const selected = selectedId ? nodeMap.get(selectedId) : undefined;
+  const hovered = hoveredId ? nodeMap.get(hoveredId) : undefined;
 
   const originalSelected = selected?.sourceId
     ? circuit.nodes.find((node) => node.id === selected.sourceId)
@@ -467,6 +468,22 @@ export function CircuitGraph({ circuit, snapshot }: CircuitGraphProps) {
 
   return (
     <div className={`graph-stage ${dragging ? "is-dragging" : ""}`} ref={stageRef}>
+      {hovered ? (
+        <div className="graph-hover-card">
+          <div className="graph-hover-head">
+            <strong>{hovered.label}</strong>
+            <span>{hovered.kind === "operation" ? hovered.op : hovered.kind}</span>
+          </div>
+          <p>{nodeTitle(hovered)}</p>
+          <div className="graph-hover-meta">
+            <span>
+              {hovered.width} bit{hovered.width === 1 ? "" : "s"}
+            </span>
+            <span className="mono">{hovered.value ?? "—"}</span>
+          </div>
+        </div>
+      ) : null}
+
       <div className="graph-overlay graph-legend">
         <span className="live-values">
           <span className="live-dot" /> LIVE VALUES
@@ -592,9 +609,6 @@ export function CircuitGraph({ circuit, snapshot }: CircuitGraphProps) {
                       {node.width}b
                     </text>
                   ) : null}
-                  <title>
-                    {node.label} · {nodeTitle(node)} · {node.value ?? "unknown"}
-                  </title>
                 </g>
               );
             })}

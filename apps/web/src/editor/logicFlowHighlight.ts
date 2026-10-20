@@ -40,6 +40,9 @@ const KEYWORDS = new Set([
   "LOAD",
   "STEP",
   "CYCLE",
+  "CONST",
+  "FOR",
+  "IN",
 ]);
 
 const FUNCTIONS = new Set([
