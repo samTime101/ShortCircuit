@@ -1,0 +1,251 @@
+/**
+ * Public, serializable types shared by the LogicFlow engine and its hosts.
+ *
+ * These types intentionally contain no parser or runtime internals. The IR is
+ * the contract that lets Short Circuit's UI (or another language's tooling)
+ * execute and inspect a compiled circuit without understanding the source
+ * syntax.
+ */
+
+export type DiagnosticSeverity = "error" | "warning" | "info";
+
+export interface Diagnostic {
+  /** Stable diagnostic identifier, for example E201. */
+  code: string;
+  severity: DiagnosticSeverity;
+  message: string;
+  line: number;
+  column: number;
+  length?: number;
+  hint?: string;
+  related?: Array<{
+    message: string;
+    line: number;
+    column: number;
+  }>;
+}
+
+export interface CompileOptions {
+  /** Maximum number of graph nodes across the compiled program. */
+  maxNodes?: number;
+  /** Maximum nested circuit instantiation depth. */
+  maxDepth?: number;
+  /** Maximum number of circuit instances expanded in one top-level circuit. */
+  maxInstances?: number;
+  /** Maximum signal width, in bits. */
+  maxWidth?: number;
+  /** Stop collecting diagnostics after this many entries. */
+  maxDiagnostics?: number;
+}
+
+export interface CircuitInput {
+  name: string;
+  width: number;
+  line: number;
+  column: number;
+}
+
+export interface CircuitOutput {
+  /** Human-facing output name, preserving a dotted source path when present. */
+  name: string;
+  /** Last path segment, useful for ports of nested circuit instances. */
+  portName: string;
+  node: string;
+  width: number;
+  line: number;
+  column: number;
+}
+
+export interface CircuitState {
+  name: string;
+  node: string;
+  width: number;
+  /** Initial value as a zero-padded binary string. */
+  init: string;
+  line: number;
+  column: number;
+}
+
+export type NodeKind = "input" | "constant" | "state" | "operation";
+
+export interface CircuitNode {
+  id: string;
+  kind: NodeKind;
+  /** Primitive operation name for operation nodes, e.g. AND, ADD, MUX. */
+  op?: string;
+  width: number;
+  /** Short display label, usually the assigned signal name. */
+  label: string;
+  /** Local instantiation path. Empty for the top-level circuit. */
+  scope: string[];
+  /** Node IDs consumed by this node, in argument order. */
+  operands: string[];
+  /** Constant/initializer value for constants and state nodes. */
+  value?: string;
+  /** Source input name for input nodes. */
+  inputName?: string;
+  /** Compile-time operation parameters (slice bounds, gate arity, etc.). */
+  params?: Record<string, string | number | boolean>;
+  line: number;
+  column: number;
+}
+
+export type ClockEdge = "rising" | "falling";
+
+export interface ClockEvent {
+  id: string;
+  edge: ClockEdge;
+  /** Node whose value is observed for transitions. */
+  clock: string;
+  scope: string[];
+  updates: Array<{
+    state: string;
+    /** Combinational node evaluated against the pre-edge state. */
+    value: string;
+  }>;
+  line: number;
+  column: number;
+}
+
+export interface CircuitIR {
+  name: string;
+  line: number;
+  inputs: CircuitInput[];
+  outputs: CircuitOutput[];
+  states: CircuitState[];
+  nodes: CircuitNode[];
+  events: ClockEvent[];
+  sequential: boolean;
+  stats: {
+    nodes: number;
+    states: number;
+    events: number;
+    maxDepth: number;
+    maxWidth: number;
+  };
+}
+
+export interface TestInputIR {
+  name: string;
+  width: number;
+  /** Zero-padded binary value. */
+  value: string;
+  line: number;
+  column: number;
+}
+
+export interface TestExpectationIR extends TestInputIR {
+  actualName: string;
+}
+
+export interface TestCaseIR {
+  label: string;
+  line: number;
+  inputs: TestInputIR[];
+  expectations: TestExpectationIR[];
+}
+
+export interface TestSuiteIR {
+  name: string;
+  circuit: string;
+  line: number;
+  cases: TestCaseIR[];
+  runnable: boolean;
+  reason?: string;
+}
+
+export interface ProgramIR {
+  schema: "shortcircuit.ir/v1";
+  language: "logicflow/0.1";
+  circuits: CircuitIR[];
+  tests: TestSuiteIR[];
+}
+
+export interface CompileResult {
+  ok: boolean;
+  source: string;
+  diagnostics: Diagnostic[];
+  circuits: CircuitIR[];
+  tests: TestSuiteIR[];
+  ir: ProgramIR | null;
+  elapsedMs: number;
+}
+
+export interface SignalSnapshot {
+  width: number;
+  /** Zero-padded binary representation. */
+  binary: string;
+  /** Decimal representation as a string, safe for arbitrary bus widths. */
+  decimal: string;
+}
+
+export interface SimulationSnapshot {
+  inputs: Record<string, SignalSnapshot>;
+  outputs: Record<string, SignalSnapshot>;
+  states: Record<string, SignalSnapshot>;
+  nodes: Record<string, string>;
+  clockValues: Record<string, string>;
+  /** Events that fired on the most recent input mutation. */
+  firedEvents: Array<{ edge: ClockEdge; clock: string; scope: string[] }>;
+  /**
+   * Present when the initial all-zero input state could not be fully
+   * evaluated, currently only for DIVIDE by zero. The simulator remains usable
+   * so the host can supply a safe divisor.
+   */
+  runtimeError?: { code: string; message: string };
+}
+
+export interface TestRowResult {
+  kind: "input" | "expect";
+  name: string;
+  expected?: string;
+  actual?: string;
+  width: number;
+  pass?: boolean;
+  line: number;
+}
+
+export interface TestCaseResult {
+  label: string;
+  line: number;
+  pass: boolean;
+  rows: TestRowResult[];
+  error?: string;
+}
+
+export interface TestSuiteResult {
+  name: string;
+  circuit: string;
+  pass: boolean;
+  runnable: boolean;
+  reason?: string;
+  line: number;
+  cases: TestCaseResult[];
+}
+
+export interface TestRunResult {
+  ok: boolean;
+  suites: TestSuiteResult[];
+  passed: number;
+  failed: number;
+  unsupported: number;
+  elapsedMs: number;
+}
+
+export interface TruthTable {
+  circuit: string;
+  inputBits: number;
+  inputs: Array<{ name: string; width: number }>;
+  outputs: Array<{ name: string; width: number }>;
+  rows: Array<{
+    input: Record<string, string>;
+    output: Record<string, string>;
+  }>;
+  truncated: boolean;
+  reason?: string;
+}
+
+export interface FormatResult {
+  source: string;
+  changed: boolean;
+}
