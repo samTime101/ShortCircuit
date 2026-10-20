@@ -907,6 +907,22 @@ END`);
     expect(result.ok).toBe(true);
   });
 
+  it("stays quiet for a bit pattern in a test", () => {
+    const result = compile(`CIRCUIT Wide
+INPUT a : BUS(8)
+OUTPUT value
+value = a
+END
+
+TEST Wide
+CASE "all ones"
+  INPUT a = 11111111
+  EXPECT value = 11111111
+END
+END`);
+    expect(result.diagnostics.some((entry) => entry.code === "W402")).toBe(false);
+  });
+
   it("does not warn when both readings agree", () => {
     const result = compile(`CIRCUIT Clear
 INPUT a : BUS(4)

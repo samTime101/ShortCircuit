@@ -747,7 +747,7 @@ export class ProgramAnalyzer {
         } else {
           context.assigned.add(port.name);
         }
-        const value = this.readTestLiteral(statement.value, `test input ${port.name}`);
+        const value = this.readTestLiteral(statement.value, `test input ${port.name}`, port.width);
         if (!fitsWidth(value.value, port.width)) {
           this.bag.error(
             "E305",
@@ -821,7 +821,7 @@ export class ProgramAnalyzer {
         } else {
           context.expected.add(name);
         }
-        const value = this.readTestLiteral(statement.value, `expected value ${name}`);
+        const value = this.readTestLiteral(statement.value, `expected value ${name}`, width);
         if (!fitsWidth(value.value, width)) {
           this.bag.error(
             "E305",
@@ -886,7 +886,7 @@ export class ProgramAnalyzer {
           );
           continue;
         }
-        const value = this.readTestLiteral(statement.value, `loaded value ${state.name}`);
+        const value = this.readTestLiteral(statement.value, `loaded value ${state.name}`, state.width);
         if (!fitsWidth(value.value, state.width)) {
           this.bag.error(
             "E305",
@@ -1095,10 +1095,10 @@ export class ProgramAnalyzer {
     return this.nodeMap.get(id);
   }
 
-  readTestLiteral(literal: LiteralAst, context = "literal"): BitValue {
+  readTestLiteral(literal: LiteralAst, context = "literal", targetWidth?: number): BitValue {
     try {
       const value = parseTestLiteral(literal.raw);
-      this.warnAmbiguousLiteral(literal, "binary");
+      this.warnAmbiguousLiteral(literal, "binary", targetWidth);
       if (value.width > this.options.maxWidth) {
         this.bag.error(
           "E320",
@@ -1165,12 +1165,25 @@ export class ProgramAnalyzer {
    * Warns when a bare digit string could be read two ways, such as 10 or 11.
    * A leading zero makes both readings agree, so those are left alone.
    */
-  private warnAmbiguousLiteral(literal: LiteralAst, reading: "decimal" | "binary"): void {
+  private warnAmbiguousLiteral(
+    literal: LiteralAst,
+    reading: "decimal" | "binary",
+    targetWidth?: number,
+  ): void {
     const raw = literal.raw.replaceAll("_", "");
     if (!/^[01]+$/.test(raw) || raw.length < 2 || raw.startsWith("0")) return;
     const decimal = Number.parseInt(raw, 10);
     const binary = Number.parseInt(raw, 2);
     if (decimal === binary) return;
+    if (reading === "decimal") {
+      // Only a small number is plausibly meant as binary; a long run of digits
+      // is obviously a bit pattern.
+      if (decimal > 255) return;
+    } else if (targetWidth !== undefined) {
+      // In a test the value has to fit the port, so the two readings only clash
+      // when the decimal one fits as well.
+      if (decimal > 2 ** targetWidth - 1) return;
+    }
     this.bag.warning(
       "W402",
       reading === "decimal"
