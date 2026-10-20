@@ -17,9 +17,12 @@ import type {
   StateDeclAst,
   TestAst,
   TestCaseAst,
+  TestCycleAst,
   TestExpectAst,
   TestInputAst,
+  TestLoadAst,
   TestStatementAst,
+  TestStepAst,
 } from "./ast";
 import { DiagnosticBag } from "./diagnostics";
 import { lex, type Token } from "./lexer";
@@ -444,14 +447,20 @@ export class Parser {
         statements.push(this.parseTestInput());
       } else if (keyword(token, "EXPECT")) {
         statements.push(this.parseTestExpect());
+      } else if (keyword(token, "LOAD")) {
+        statements.push(this.parseTestLoad());
+      } else if (keyword(token, "STEP")) {
+        statements.push(this.parseTestStep());
+      } else if (keyword(token, "CYCLE")) {
+        statements.push(this.parseTestCycle());
       } else if (keyword(token, "CASE") || keyword(token, "TEST") || keyword(token, "CIRCUIT")) {
         break;
       } else {
         this.error(
           "E110",
-          `Expected INPUT, EXPECT, or END in a CASE, found "${token.raw || "end of file"}".`,
+          `Expected INPUT, EXPECT, LOAD, STEP, CYCLE, or END in a CASE, found "${token.raw || "end of file"}".`,
           token,
-          "Test cases assign INPUT signals and declare EXPECT values.",
+          "Test cases assign INPUT signals, declare EXPECT values, and can group changes with STEP or pulse a clock with CYCLE.",
         );
         this.recoverToLineEnd();
       }
@@ -471,6 +480,95 @@ export class Parser {
       kind: "Case",
       label,
       statements,
+      span: mergeSpan(start, this.previous()),
+    };
+  }
+
+  private parseTestLoad(): TestLoadAst {
+    const start = this.expectKeyword("LOAD");
+    const path = this.parsePath();
+    this.expectSymbol("=");
+    const value = this.parseLiteral();
+    this.finishStatement();
+    return {
+      kind: "TestLoad",
+      path,
+      value,
+      span: mergeSpan(start, this.previous()),
+    };
+  }
+
+  private parseTestStep(): TestStepAst {
+    const start = this.expectKeyword("STEP");
+    this.finishStatement();
+    const statements: TestStatementAst[] = [];
+    let closed = false;
+    this.skipNewlines();
+
+    while (!this.atEnd()) {
+      const token = this.peek();
+      if (keyword(token, "END")) {
+        this.advance();
+        this.finishStatement();
+        closed = true;
+        break;
+      }
+      if (keyword(token, "INPUT")) {
+        statements.push(this.parseTestInput());
+      } else if (keyword(token, "EXPECT")) {
+        statements.push(this.parseTestExpect());
+      } else if (keyword(token, "LOAD")) {
+        statements.push(this.parseTestLoad());
+      } else if (keyword(token, "STEP")) {
+        statements.push(this.parseTestStep());
+      } else if (keyword(token, "CYCLE")) {
+        statements.push(this.parseTestCycle());
+      } else {
+        this.error(
+          "E126",
+          `Expected INPUT, EXPECT, STEP, CYCLE, or END inside STEP, found "${token.raw || "end of file"}".`,
+          token,
+          "A STEP groups input changes so they are applied together.",
+        );
+        this.recoverToLineEnd();
+      }
+      this.skipNewlines();
+    }
+
+    if (!closed) {
+      this.error(
+        "E124",
+        "STEP is missing its END.",
+        start,
+        "Add END to close the step.",
+      );
+    }
+
+    return {
+      kind: "TestStep",
+      statements,
+      span: mergeSpan(start, this.previous()),
+    };
+  }
+
+  private parseTestCycle(): TestCycleAst {
+    const start = this.expectKeyword("CYCLE");
+    const nameToken = this.expectIdentifier("a clock name");
+    const countToken = this.expectKind("number", "a cycle count");
+    const count = Number(countToken.raw.replaceAll("_", ""));
+    if (!Number.isSafeInteger(count) || count < 1) {
+      this.error(
+        "E125",
+        `Invalid cycle count "${countToken.raw}". Use a positive whole number.`,
+        countToken,
+        "CYCLE clock 1 pulses the clock once.",
+      );
+    }
+    this.finishStatement();
+    return {
+      kind: "TestCycle",
+      clock: nameToken.value,
+      count,
       span: mergeSpan(start, this.previous()),
     };
   }

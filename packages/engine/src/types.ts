@@ -141,8 +141,65 @@ export interface TestExpectationIR extends TestInputIR {
 export interface TestCaseIR {
   label: string;
   line: number;
+  /** Flat view of every input used in the case. */
   inputs: TestInputIR[];
+  /** Flat view of every expectation in the case. */
   expectations: TestExpectationIR[];
+  /** Ordered program, including STEP and CYCLE blocks. */
+  program: TestInstructionIR[];
+}
+
+/** One statement in a test program. */
+export type TestInstructionIR =
+  | TestInputInstruction
+  | TestExpectInstruction
+  | TestLoadInstruction
+  | TestStepInstruction
+  | TestCycleInstruction;
+
+export interface TestInputInstruction {
+  kind: "input";
+  name: string;
+  width: number;
+  value: string;
+  line: number;
+  column: number;
+}
+
+export interface TestExpectInstruction {
+  kind: "expect";
+  name: string;
+  /** Output name or state name the value is read from. */
+  actualName: string;
+  target: "output" | "state";
+  width: number;
+  value: string;
+  line: number;
+  column: number;
+}
+
+export interface TestLoadInstruction {
+  kind: "load";
+  name: string;
+  width: number;
+  value: string;
+  line: number;
+  column: number;
+}
+
+export interface TestStepInstruction {
+  kind: "step";
+  statements: TestInstructionIR[];
+  line: number;
+  column: number;
+}
+
+export interface TestCycleInstruction {
+  kind: "cycle";
+  clock: string;
+  count: number;
+  line: number;
+  column: number;
 }
 
 export interface TestSuiteIR {
@@ -203,6 +260,8 @@ export interface TestRowResult {
   width: number;
   pass?: boolean;
   line: number;
+  /** Simulation step the row was recorded at, when the case is sequential. */
+  step?: number;
 }
 
 export interface TestCaseResult {
@@ -211,6 +270,8 @@ export interface TestCaseResult {
   pass: boolean;
   rows: TestRowResult[];
   error?: string;
+  /** Step the case stopped at, when it failed. */
+  step?: number;
 }
 
 export interface TestSuiteResult {

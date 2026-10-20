@@ -125,7 +125,12 @@ export interface SliceAst {
   span: SourceSpan;
 }
 
-export type TestStatementAst = TestInputAst | TestExpectAst;
+export type TestStatementAst =
+  | TestInputAst
+  | TestExpectAst
+  | TestLoadAst
+  | TestStepAst
+  | TestCycleAst;
 
 export interface TestInputAst {
   kind: "TestInput";
@@ -138,6 +143,29 @@ export interface TestExpectAst {
   kind: "TestExpect";
   path: string[];
   value: LiteralAst;
+  span: SourceSpan;
+}
+
+/** Forces a state signal to a value, for tests that need a starting point. */
+export interface TestLoadAst {
+  kind: "TestLoad";
+  path: string[];
+  value: LiteralAst;
+  span: SourceSpan;
+}
+
+/** Groups input changes into a single simulation step. */
+export interface TestStepAst {
+  kind: "TestStep";
+  statements: TestStatementAst[];
+  span: SourceSpan;
+}
+
+/** Pulses a clock 0 -> 1 -> 0 a number of times. */
+export interface TestCycleAst {
+  kind: "TestCycle";
+  clock: string;
+  count: number;
   span: SourceSpan;
 }
 

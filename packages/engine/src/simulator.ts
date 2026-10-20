@@ -154,6 +154,58 @@ export class Simulator {
     return this.afterInputsChanged();
   }
 
+  /**
+   * Forces a state signal to a value, the way the "set state" control does.
+   * The graph is re-evaluated against the new value; no clock edge is fired.
+   */
+  setState(name: string, value: string | number | bigint): SimulationSnapshot {
+    const state = this.circuit.states.find((entry) => entry.name === name);
+    if (!state) {
+      throw new SimulationError("R410", `Unknown state "${name}" for circuit ${this.circuit.name}.`);
+    }
+    let parsed: bigint;
+    if (typeof value === "bigint") {
+      parsed = value;
+    } else if (typeof value === "number") {
+      if (!Number.isSafeInteger(value) || value < 0) {
+        throw new SimulationError(
+          "R411",
+          `Value for state "${name}" must be a non-negative whole number or binary string.`,
+        );
+      }
+      parsed = BigInt(value);
+    } else {
+      const cleaned = value.replaceAll("_", "").replaceAll(" ", "");
+      const binaryDigits = /^(?:0[bB])?[01]+$/.test(cleaned)
+        ? cleaned.replace(/^0[bB]/, "").length
+        : -1;
+      if (binaryDigits > state.width) {
+        throw new SimulationError(
+          "R411",
+          `Value for state "${name}" is ${binaryDigits} bits wide, but the state is ${state.width} bit${state.width === 1 ? "" : "s"}.`,
+        );
+      }
+      try {
+        parsed = parseSimulationInput(value, state.width);
+      } catch (error) {
+        throw new SimulationError(
+          "R412",
+          `Invalid value for state "${name}": ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    if (parsed < 0n || parsed > maskFor(state.width)) {
+      throw new SimulationError(
+        "R411",
+        `Value for state "${name}" does not fit in ${state.width} bit${state.width === 1 ? "" : "s"}.`,
+      );
+    }
+    this.stateValues.set(state.node, parsed);
+    this.evaluate();
+    this.captureClockBaseline();
+    return this.snapshot();
+  }
+
   toggleInputBit(name: string, bit: number): SimulationSnapshot {
     const width = this.inputWidths.get(name);
     if (width === undefined) {
@@ -433,6 +485,63 @@ export class Simulator {
         const amount = BigInt(valueAsIndex(operands[1] ?? 0n));
         if (amount >= BigInt(width)) return 0n;
         return (operands[0] ?? 0n) >> amount;
+      }
+      case "ZEXT": {
+        return operands[0] ?? 0n;
+      }
+      case "SEXT": {
+        const value = operands[0] ?? 0n;
+        const sourceWidth = this.operandWidth(node, 0);
+        const signBit = (value >> BigInt(Math.max(0, sourceWidth - 1))) & 1n;
+        if (signBit === 0n) return value;
+        const extension = maskFor(width) ^ maskFor(sourceWidth);
+        return (value | extension) & mask;
+      }
+      case "POPCOUNT": {
+        let value = operands[0] ?? 0n;
+        let count = 0n;
+        while (value > 0n) {
+          count += value & 1n;
+          value >>= 1n;
+        }
+        return count;
+      }
+      case "REDUCE_AND": {
+        const sourceWidth = this.operandWidth(node, 0);
+        const value = operands[0] ?? 0n;
+        return value === maskFor(sourceWidth) ? 1n : 0n;
+      }
+      case "REDUCE_OR": {
+        return (operands[0] ?? 0n) !== 0n ? 1n : 0n;
+      }
+      case "REDUCE_XOR": {
+        let value = operands[0] ?? 0n;
+        let parity = 0n;
+        while (value > 0n) {
+          parity ^= value & 1n;
+          value >>= 1n;
+        }
+        return parity;
+      }
+      case "REPEAT": {
+        const sourceWidth = this.operandWidth(node, 0);
+        const count = Number(node.params?.count ?? 1);
+        const value = operands[0] ?? 0n;
+        let result = 0n;
+        for (let index = 0; index < count; index += 1) {
+          result = (result << BigInt(sourceWidth)) | value;
+        }
+        return result & mask;
+      }
+      case "REVERSE": {
+        const sourceWidth = this.operandWidth(node, 0);
+        const value = operands[0] ?? 0n;
+        let result = 0n;
+        for (let index = 0; index < sourceWidth; index += 1) {
+          const bit = (value >> BigInt(index)) & 1n;
+          result |= bit << BigInt(sourceWidth - 1 - index);
+        }
+        return result;
       }
       case "DECODER": {
         const select = valueAsIndex(operands[0] ?? 0n);

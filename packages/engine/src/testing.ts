@@ -2,6 +2,8 @@ import type {
   CircuitIR,
   CompileResult,
   TestCaseResult,
+  TestExpectInstruction,
+  TestInstructionIR,
   TestRowResult,
   TestRunResult,
   TestSuiteIR,
@@ -9,7 +11,7 @@ import type {
 } from "./types";
 import { Simulator } from "./simulator";
 
-/** Runs every compiled TEST block. Clocked circuits are reported as unsupported. */
+/** Runs every compiled TEST block, including clocked ones. */
 export function runTests(
   result: Pick<CompileResult, "tests" | "circuits">,
 ): TestRunResult {
@@ -21,16 +23,27 @@ export function runTests(
 
   for (const suite of result.tests) {
     const circuit = result.circuits.find((entry) => entry.name === suite.circuit);
-    if (!circuit || !suite.runnable) {
+    if (!circuit) {
       unsupported += 1;
       suites.push({
         name: suite.name,
         circuit: suite.circuit,
         pass: false,
         runnable: false,
-        reason:
-          suite.reason ??
-          (circuit ? "Test suite is not runnable." : `Circuit ${suite.circuit} was not compiled.`),
+        reason: `Circuit ${suite.circuit} was not compiled.`,
+        line: suite.line,
+        cases: [],
+      });
+      continue;
+    }
+    if (!suite.runnable) {
+      unsupported += 1;
+      suites.push({
+        name: suite.name,
+        circuit: suite.circuit,
+        pass: false,
+        runnable: false,
+        reason: suite.reason ?? "Test suite is not runnable.",
         line: suite.line,
         cases: [],
       });
@@ -42,29 +55,11 @@ export function runTests(
         return runCase(circuit, testCase);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        const rows: TestRowResult[] = testCase.inputs.map((input) => ({
-          kind: "input",
-          name: input.name,
-          actual: input.value,
-          width: input.width,
-          line: input.line,
-        }));
-        for (const expectation of testCase.expectations) {
-          rows.push({
-            kind: "expect",
-            name: expectation.name,
-            expected: expectation.value,
-            actual: "<simulation error>",
-            width: expectation.width,
-            pass: false,
-            line: expectation.line,
-          });
-        }
         return {
           label: testCase.label,
           line: testCase.line,
           pass: false,
-          rows,
+          rows: [],
           error: message,
         };
       }
@@ -93,50 +88,172 @@ export function runTests(
   };
 }
 
-function runCase(
-  circuit: CircuitIR,
-  testCase: TestSuiteIR["cases"][number],
-): TestCaseResult {
-  const simulator = new Simulator(circuit);
-  const values: Record<string, string> = {};
-  for (const input of circuit.inputs) values[input.name] = "0";
-  for (const input of testCase.inputs) values[input.name] = input.value;
-  const snapshot = simulator.setInputs(values);
+interface ExpectCheck {
+  row: TestRowResult;
+  pass: boolean;
+  message: string;
+}
 
-  const rows: TestRowResult[] = [];
-  for (const input of testCase.inputs) {
-    rows.push({
-      kind: "input",
-      name: input.name,
-      actual: input.value,
-      width: input.width,
-      line: input.line,
-    });
-  }
-
-  let pass = true;
-  for (const expectation of testCase.expectations) {
-    const actual =
-      snapshot.outputs[expectation.actualName]?.binary ??
-      snapshot.outputs[expectation.name]?.binary ??
-      "<missing>";
-    const rowPass = actual === expectation.value;
-    if (!rowPass) pass = false;
-    rows.push({
+function checkExpect(
+  simulator: Simulator,
+  instruction: TestExpectInstruction,
+  step: number,
+): ExpectCheck {
+  const snapshot = simulator.snapshot();
+  const signal =
+    instruction.target === "state"
+      ? (snapshot.states[instruction.actualName] ?? snapshot.outputs[instruction.actualName])
+      : (snapshot.outputs[instruction.actualName] ??
+        snapshot.outputs[instruction.name] ??
+        snapshot.states[instruction.actualName]);
+  const actual = signal?.binary ?? "<missing>";
+  const pass = actual === instruction.value;
+  return {
+    row: {
       kind: "expect",
-      name: expectation.actualName || expectation.name,
-      expected: expectation.value,
+      name: instruction.actualName,
+      expected: instruction.value,
       actual,
-      width: expectation.width,
-      pass: rowPass,
-      line: expectation.line,
-    });
-  }
+      width: instruction.width,
+      pass,
+      line: instruction.line,
+      step,
+    },
+    pass,
+    message: `EXPECT ${instruction.actualName}: expected ${instruction.value}, got ${actual}`,
+  };
+}
+
+/**
+ * Executes one test case.
+ *
+ * Statements run in source order. A STEP applies all of its input changes as a
+ * single transition, and CYCLE pulses a clock 0 -> 1 -> 0 the given number of
+ * times. The case stops at the first failing expectation.
+ */
+function runCase(circuit: CircuitIR, testCase: TestSuiteIR["cases"][number]): TestCaseResult {
+  const simulator = new Simulator(circuit);
+  const rows: TestRowResult[] = [];
+  let step = 0;
+
+  const fail = (message: string): TestCaseResult => ({
+    label: testCase.label,
+    line: testCase.line,
+    pass: false,
+    rows,
+    error: message,
+    step,
+  });
+
+  const run = (instructions: TestInstructionIR[]): TestCaseResult | null => {
+    for (const instruction of instructions) {
+      if (instruction.kind === "input") {
+        step += 1;
+        try {
+          simulator.setInput(instruction.name, instruction.value);
+        } catch (error) {
+          return fail(error instanceof Error ? error.message : String(error));
+        }
+        rows.push({
+          kind: "input",
+          name: instruction.name,
+          actual: instruction.value,
+          width: instruction.width,
+          line: instruction.line,
+          step,
+        });
+        continue;
+      }
+
+      if (instruction.kind === "load") {
+        step += 1;
+        try {
+          simulator.setState(instruction.name, instruction.value);
+        } catch (error) {
+          return fail(error instanceof Error ? error.message : String(error));
+        }
+        rows.push({
+          kind: "input",
+          name: instruction.name,
+          actual: instruction.value,
+          width: instruction.width,
+          line: instruction.line,
+          step,
+        });
+        continue;
+      }
+
+      if (instruction.kind === "step") {
+        step += 1;
+        const values: Record<string, string> = {};
+        for (const inner of instruction.statements) {
+          if (inner.kind === "input") values[inner.name] = inner.value;
+        }
+        try {
+          simulator.setInputs(values);
+        } catch (error) {
+          return fail(error instanceof Error ? error.message : String(error));
+        }
+        for (const inner of instruction.statements) {
+          if (inner.kind === "input") {
+            rows.push({
+              kind: "input",
+              name: inner.name,
+              actual: inner.value,
+              width: inner.width,
+              line: inner.line,
+              step,
+            });
+            continue;
+          }
+          if (inner.kind === "expect") {
+            const check = checkExpect(simulator, inner, step);
+            rows.push(check.row);
+            if (!check.pass) return fail(check.message);
+          }
+        }
+        continue;
+      }
+
+      if (instruction.kind === "cycle") {
+        try {
+          // Close a high phase first so every cycle contains a rising edge.
+          if (simulator.inputValue(instruction.clock) === 1n) {
+            simulator.setInput(instruction.clock, "0");
+          }
+          for (let index = 0; index < instruction.count; index += 1) {
+            step += 1;
+            simulator.setInput(instruction.clock, "1");
+            simulator.setInput(instruction.clock, "0");
+          }
+        } catch (error) {
+          return fail(error instanceof Error ? error.message : String(error));
+        }
+        rows.push({
+          kind: "input",
+          name: instruction.clock,
+          actual: `${instruction.count} cycle${instruction.count === 1 ? "" : "s"}`,
+          width: 1,
+          line: instruction.line,
+          step,
+        });
+        continue;
+      }
+
+      const check = checkExpect(simulator, instruction, step);
+      rows.push(check.row);
+      if (!check.pass) return fail(check.message);
+    }
+    return null;
+  };
+
+  const failure = run(testCase.program);
+  if (failure) return failure;
 
   return {
     label: testCase.label,
     line: testCase.line,
-    pass,
+    pass: true,
     rows,
   };
 }

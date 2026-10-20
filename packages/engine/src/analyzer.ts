@@ -14,6 +14,7 @@ import type {
   SourceSpan,
   StateDeclAst,
   TestAst,
+  TestStatementAst,
 } from "./ast";
 import {
   isReservedName,
@@ -38,6 +39,7 @@ import type {
   TestCaseIR,
   TestExpectationIR,
   TestInputIR,
+  TestInstructionIR,
   TestSuiteIR,
 } from "./types";
 import {
@@ -104,6 +106,22 @@ interface ResolvedBundle {
 }
 
 type ResolvedEntry = ResolvedValue | ResolvedBundle;
+
+/** Per-case state used while compiling a test program. */
+interface TestCaseContext {
+  inputByName: Map<string, CircuitInput>;
+  outputByName: Map<string, CircuitOutput>;
+  outputByPort: Map<string, CircuitOutput>;
+  stateByName: Map<string, CircuitState>;
+  inputs: TestInputIR[];
+  expectations: TestExpectationIR[];
+  assigned: Set<string>;
+  expected: Set<string>;
+  duplicateInputs: Array<{ name: string; line: number; column: number }>;
+  duplicateExpects: Array<{ name: string; line: number; column: number }>;
+  /** True when the case uses STEP, CYCLE, or LOAD. */
+  sequential: boolean;
+}
 
 interface NameEntry {
   kind: "input" | "state" | "assignment";
@@ -575,10 +593,6 @@ export class ProgramAnalyzer {
       return;
     }
 
-    const runnable = !circuit.sequential;
-    const reason = runnable
-      ? undefined
-      : "Clocked circuits are not yet supported by the built-in test runner. Use the interactive simulation controls.";
     const inputByName = new Map(circuit.inputs.map((input) => [input.name, input]));
     const outputByName = new Map(circuit.outputs.map((output) => [output.name, output]));
     const outputByPort = new Map<string, CircuitOutput>();
@@ -588,125 +602,61 @@ export class ProgramAnalyzer {
       else outputByPort.set(output.portName, output);
     }
     for (const duplicate of duplicatePorts) outputByPort.delete(duplicate);
+    const stateByName = new Map(circuit.states.map((state) => [state.name, state]));
 
     const cases: TestCaseIR[] = [];
     for (const [caseIndex, testCase] of test.cases.entries()) {
-      const inputs: TestInputIR[] = [];
-      const expectations: TestExpectationIR[] = [];
-      const assigned = new Set<string>();
-      const expected = new Set<string>();
+      const context: TestCaseContext = {
+        inputByName,
+        outputByName,
+        outputByPort,
+        stateByName,
+        inputs: [],
+        expectations: [],
+        assigned: new Set<string>(),
+        expected: new Set<string>(),
+        duplicateInputs: [],
+        duplicateExpects: [],
+        sequential: false,
+      };
 
-      for (const statement of testCase.statements) {
-        if (statement.kind === "TestInput") {
-          const port = inputByName.get(statement.name);
-          if (!port) {
-            const suggestion = suggestName(statement.name, inputByName.keys(), 3);
-            this.bag.error(
-              "E201",
-              `Unknown input "${statement.name}" in test case.`,
-              statement.span.line,
-              statement.span.column,
-              {
-                hint: suggestion
-                  ? `Did you mean "${suggestion}"?`
-                  : `Available inputs: ${[...inputByName.keys()].join(", ") || "none"}.`,
-              },
-            );
-            continue;
-          }
-          if (assigned.has(port.name)) {
-            this.bag.error(
-              "E209",
-              `Input "${port.name}" is assigned more than once in this test case.`,
-              statement.span.line,
-              statement.span.column,
-            );
-            continue;
-          }
-          assigned.add(port.name);
-          const value = this.readTestLiteral(statement.value, `test input ${port.name}`);
-          if (!fitsWidth(value.value, port.width)) {
-            this.bag.error(
-              "E305",
-              `Value ${statement.value.raw} does not fit in ${port.width}-bit input "${port.name}".`,
-              statement.span.line,
-              statement.span.column,
-            );
-            continue;
-          }
-          inputs.push({
-            name: port.name,
-            width: port.width,
-            value: formatBinary(value.value, port.width),
-            line: statement.span.line,
-            column: statement.span.column,
-          });
-        } else {
-          const fullName = statement.path.join(".");
-          const output =
-            outputByName.get(fullName) ??
-            (statement.path.length === 1 ? outputByPort.get(statement.path[0]!) : undefined);
-          if (!output) {
-            const candidates = [...new Set([...outputByName.keys(), ...outputByPort.keys()])];
-            const suggestion = suggestName(fullName, candidates, 3);
-            this.bag.error(
-              "E201",
-              `Unknown output "${fullName}" in test case.`,
-              statement.span.line,
-              statement.span.column,
-              {
-                hint: suggestion
-                  ? `Did you mean "${suggestion}"?`
-                  : `Available outputs: ${candidates.join(", ") || "none"}.`,
-              },
-            );
-            continue;
-          }
-          if (expected.has(output.name)) {
-            this.bag.error(
-              "E209",
-              `Output "${output.name}" is checked more than once in this test case.`,
-              statement.span.line,
-              statement.span.column,
-            );
-            continue;
-          }
-          expected.add(output.name);
-          const value = this.readTestLiteral(statement.value, `expected output ${output.name}`);
-          if (!fitsWidth(value.value, output.width)) {
-            this.bag.error(
-              "E305",
-              `Expected value ${statement.value.raw} does not fit in ${output.width}-bit output "${output.name}".`,
-              statement.span.line,
-              statement.span.column,
-            );
-            continue;
-          }
-          expectations.push({
-            name: output.portName,
-            actualName: output.name,
-            width: output.width,
-            value: formatBinary(value.value, output.width),
-            line: statement.span.line,
-            column: statement.span.column,
-          });
-        }
-      }
+      const program = this.compileTestStatements(testCase.statements, context, false);
 
-      if (runnable) {
+      if (!context.sequential && !circuit.sequential) {
         for (const input of circuit.inputs) {
-          if (!assigned.has(input.name)) {
+          if (!context.assigned.has(input.name)) {
             this.bag.error(
               "E205",
               `Test case does not set input "${input.name}".`,
               testCase.span.line,
               testCase.span.column,
-              { hint: "Set every circuit input in each test case so expected values are unambiguous." },
+              {
+                hint: "Set every circuit input in each test case so expected values are unambiguous.",
+              },
             );
           }
         }
+        for (const duplicate of context.duplicateInputs) {
+          this.bag.error(
+            "E209",
+            `Input "${duplicate.name}" is assigned more than once in this test case.`,
+            duplicate.line,
+            duplicate.column,
+            { hint: "A combinational test sets each input exactly once." },
+          );
+        }
+        for (const duplicate of context.duplicateExpects) {
+          this.bag.error(
+            "E209",
+            `Output "${duplicate.name}" is checked more than once in this test case.`,
+            duplicate.line,
+            duplicate.column,
+            { hint: "A combinational test checks each output exactly once." },
+          );
+        }
       }
-      if (expectations.length === 0) {
+
+      if (context.expectations.length === 0) {
         this.bag.error(
           "E221",
           "Test case has no EXPECT statements.",
@@ -719,8 +669,9 @@ export class ProgramAnalyzer {
       cases.push({
         label: testCase.label || `Case ${caseIndex + 1}`,
         line: testCase.span.line,
-        inputs,
-        expectations,
+        inputs: context.inputs,
+        expectations: context.expectations,
+        program,
       });
     }
 
@@ -738,9 +689,262 @@ export class ProgramAnalyzer {
       circuit: test.name,
       line: test.span.line,
       cases,
-      runnable,
-      reason,
+      runnable: true,
     });
+  }
+
+  /**
+   * Compiles the ordered statements of a test case into IR instructions.
+   * `STEP` blocks recurse, and `LOAD` is rejected inside them.
+   */
+  private compileTestStatements(
+    statements: TestStatementAst[],
+    context: TestCaseContext,
+    insideStep: boolean,
+  ): TestInstructionIR[] {
+    const program: TestInstructionIR[] = [];
+
+    for (const statement of statements) {
+      if (statement.kind === "TestInput") {
+        const port = context.inputByName.get(statement.name);
+        if (!port) {
+          const suggestion = suggestName(statement.name, context.inputByName.keys(), 3);
+          this.bag.error(
+            "E201",
+            `Unknown input "${statement.name}" in test case.`,
+            statement.span.line,
+            statement.span.column,
+            {
+              hint: suggestion
+                ? `Did you mean "${suggestion}"?`
+                : `Available inputs: ${[...context.inputByName.keys()].join(", ") || "none"}.`,
+            },
+          );
+          continue;
+        }
+        if (context.assigned.has(port.name)) {
+          context.duplicateInputs.push({
+            name: port.name,
+            line: statement.span.line,
+            column: statement.span.column,
+          });
+        } else {
+          context.assigned.add(port.name);
+        }
+        const value = this.readTestLiteral(statement.value, `test input ${port.name}`);
+        if (!fitsWidth(value.value, port.width)) {
+          this.bag.error(
+            "E305",
+            `Value ${statement.value.raw} does not fit in ${port.width}-bit input "${port.name}".`,
+            statement.span.line,
+            statement.span.column,
+          );
+          continue;
+        }
+        const binary = formatBinary(value.value, port.width);
+        context.inputs.push({
+          name: port.name,
+          width: port.width,
+          value: binary,
+          line: statement.span.line,
+          column: statement.span.column,
+        });
+        program.push({
+          kind: "input",
+          name: port.name,
+          width: port.width,
+          value: binary,
+          line: statement.span.line,
+          column: statement.span.column,
+        });
+        continue;
+      }
+
+      if (statement.kind === "TestExpect") {
+        const fullName = statement.path.join(".");
+        const output =
+          context.outputByName.get(fullName) ??
+          (statement.path.length === 1 ? context.outputByPort.get(statement.path[0]!) : undefined);
+        const state = context.stateByName.get(fullName);
+
+        if (!output && !state) {
+          const candidates = [
+            ...new Set([
+              ...context.outputByName.keys(),
+              ...context.outputByPort.keys(),
+              ...context.stateByName.keys(),
+            ]),
+          ];
+          const suggestion = suggestName(fullName, candidates, 3);
+          this.bag.error(
+            "E201",
+            `Unknown output "${fullName}" in test case.`,
+            statement.span.line,
+            statement.span.column,
+            {
+              hint: suggestion
+                ? `Did you mean "${suggestion}"?`
+                : `Available outputs and state: ${candidates.join(", ") || "none"}.`,
+            },
+          );
+          continue;
+        }
+
+        const name = output ? output.name : state!.name;
+        const width = output ? output.width : state!.width;
+        if (context.expected.has(name)) {
+          context.duplicateExpects.push({
+            name,
+            line: statement.span.line,
+            column: statement.span.column,
+          });
+        } else {
+          context.expected.add(name);
+        }
+        const value = this.readTestLiteral(statement.value, `expected value ${name}`);
+        if (!fitsWidth(value.value, width)) {
+          this.bag.error(
+            "E305",
+            `Expected value ${statement.value.raw} does not fit in ${width}-bit signal "${name}".`,
+            statement.span.line,
+            statement.span.column,
+          );
+          continue;
+        }
+        const binary = formatBinary(value.value, width);
+        context.expectations.push({
+          name: output ? output.portName : name,
+          actualName: name,
+          width,
+          value: binary,
+          line: statement.span.line,
+          column: statement.span.column,
+        });
+        program.push({
+          kind: "expect",
+          name: output ? output.portName : name,
+          actualName: name,
+          target: output ? "output" : "state",
+          width,
+          value: binary,
+          line: statement.span.line,
+          column: statement.span.column,
+        });
+        continue;
+      }
+
+      if (statement.kind === "TestLoad") {
+        const fullName = statement.path.join(".");
+        const state = context.stateByName.get(fullName);
+        if (!state) {
+          const candidates = [...context.stateByName.keys()];
+          const suggestion = suggestName(fullName, candidates, 3);
+          this.bag.error(
+            "E230",
+            `LOAD target "${fullName}" is not a state signal.`,
+            statement.span.line,
+            statement.span.column,
+            {
+              hint: suggestion
+                ? `Did you mean state "${suggestion}"?`
+                : `LOAD can only set stored state. Available state: ${candidates.join(", ") || "none"}.`,
+            },
+          );
+          continue;
+        }
+        if (insideStep) {
+          this.bag.error(
+            "E232",
+            "LOAD cannot be used inside a STEP block.",
+            statement.span.line,
+            statement.span.column,
+            {
+              hint: "LOAD sets a starting value, so it belongs at the top of a case, outside STEP.",
+            },
+          );
+          continue;
+        }
+        const value = this.readTestLiteral(statement.value, `loaded value ${state.name}`);
+        if (!fitsWidth(value.value, state.width)) {
+          this.bag.error(
+            "E305",
+            `Value ${statement.value.raw} does not fit in the ${state.width}-bit state "${state.name}".`,
+            statement.span.line,
+            statement.span.column,
+          );
+          continue;
+        }
+        context.sequential = true;
+        program.push({
+          kind: "load",
+          name: state.name,
+          width: state.width,
+          value: formatBinary(value.value, state.width),
+          line: statement.span.line,
+          column: statement.span.column,
+        });
+        continue;
+      }
+
+      if (statement.kind === "TestStep") {
+        context.sequential = true;
+        program.push({
+          kind: "step",
+          statements: this.compileTestStatements(statement.statements, context, true),
+          line: statement.span.line,
+          column: statement.span.column,
+        });
+        continue;
+      }
+
+      // TestCycle
+      const clock = context.inputByName.get(statement.clock);
+      if (!clock) {
+        const suggestion = suggestName(statement.clock, context.inputByName.keys(), 3);
+        this.bag.error(
+          "E231",
+          `CYCLE clock "${statement.clock}" is not an input of this circuit.`,
+          statement.span.line,
+          statement.span.column,
+          {
+            hint: suggestion
+              ? `Did you mean "${suggestion}"?`
+              : `Available inputs: ${[...context.inputByName.keys()].join(", ") || "none"}.`,
+          },
+        );
+        continue;
+      }
+      if (clock.width !== 1) {
+        this.bag.error(
+          "E303",
+          `CYCLE clock "${clock.name}" must be 1 bit, but is ${clock.width} bits.`,
+          statement.span.line,
+          statement.span.column,
+          { hint: "CYCLE pulses a single clock line, for example CYCLE clock 3." },
+        );
+        continue;
+      }
+      if (statement.count < 1) {
+        this.bag.error(
+          "E125",
+          `CYCLE count must be at least 1, but is ${statement.count}.`,
+          statement.span.line,
+          statement.span.column,
+          { hint: "Write CYCLE clock 1 to pulse the clock once." },
+        );
+        continue;
+      }
+      context.sequential = true;
+      program.push({
+        kind: "cycle",
+        clock: clock.name,
+        count: statement.count,
+        line: statement.span.line,
+        column: statement.span.column,
+      });
+    }
+
+    return program;
   }
 
   // ---- Shared services used by scope builders -----------------------------
@@ -1446,6 +1650,106 @@ class ScopeBuilder {
           [refs[0]!.node, amount.node],
           call.span,
           {},
+        );
+      }
+      case "ZEXT":
+      case "SEXT": {
+        const target = this.constantArgument(call, argExprs[1], `${spec.name} width`);
+        if (target === null) return this.fallbackRef(call.span.line, call.span.column);
+        if (target < 1) {
+          this.analyzer.error(
+            "E303",
+            `${spec.name} width must be at least 1, but is ${target}.`,
+            call.span.line,
+            call.span.column,
+            `Write ${spec.name}(value, 8) to widen a value to eight bits.`,
+          );
+          return this.fallbackRef(call.span.line, call.span.column);
+        }
+        if (target < refs[0]!.width) {
+          this.analyzer.error(
+            "E332",
+            `${spec.name} width ${target} is smaller than the ${refs[0]!.width}-bit value.`,
+            call.span.line,
+            call.span.column,
+            `${spec.name} only widens a value. Use SLICE(value, ${target - 1}, 0) to narrow it.`,
+          );
+          return this.fallbackRef(call.span.line, call.span.column);
+        }
+        return this.addOperation(
+          spec.name,
+          target,
+          preferredLabel ?? spec.name,
+          [refs[0]!.node],
+          call.span,
+          { sourceWidth: refs[0]!.width },
+        );
+      }
+      case "POPCOUNT": {
+        const sourceWidth = refs[0]!.width;
+        const width = Math.max(1, Math.ceil(Math.log2(sourceWidth + 1)));
+        return this.addOperation(
+          "POPCOUNT",
+          width,
+          preferredLabel ?? spec.name,
+          [refs[0]!.node],
+          call.span,
+          { sourceWidth },
+        );
+      }
+      case "REDUCE_AND":
+      case "REDUCE_OR":
+      case "REDUCE_XOR": {
+        return this.addOperation(
+          spec.name,
+          1,
+          preferredLabel ?? spec.name,
+          [refs[0]!.node],
+          call.span,
+          { sourceWidth: refs[0]!.width },
+        );
+      }
+      case "REPEAT": {
+        const count = this.constantArgument(call, argExprs[1], "REPEAT count");
+        if (count === null) return this.fallbackRef(call.span.line, call.span.column);
+        if (count < 1) {
+          this.analyzer.error(
+            "E303",
+            `REPEAT count must be at least 1, but is ${count}.`,
+            call.span.line,
+            call.span.column,
+            "Write REPEAT(value, 2) to repeat a value twice.",
+          );
+          return this.fallbackRef(call.span.line, call.span.column);
+        }
+        const sourceWidth = refs[0]!.width;
+        const width = sourceWidth * count;
+        if (width > this.analyzer.widthLimit) {
+          this.analyzer.error(
+            "E320",
+            `REPEAT would produce ${width} bits; the maximum supported width is ${this.analyzer.widthLimit}.`,
+            call.span.line,
+            call.span.column,
+          );
+          return this.fallbackRef(call.span.line, call.span.column);
+        }
+        return this.addOperation(
+          "REPEAT",
+          width,
+          preferredLabel ?? spec.name,
+          [refs[0]!.node],
+          call.span,
+          { count, sourceWidth },
+        );
+      }
+      case "REVERSE": {
+        return this.addOperation(
+          "REVERSE",
+          refs[0]!.width,
+          preferredLabel ?? spec.name,
+          [refs[0]!.node],
+          call.span,
+          { sourceWidth: refs[0]!.width },
         );
       }
       case "DECODER": {

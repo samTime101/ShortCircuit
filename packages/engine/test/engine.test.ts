@@ -279,6 +279,49 @@ END`);
     expect(result.diagnostics.some((entry) => entry.code === "E309")).toBe(true);
   });
 
+  it("supports the bus helper operations", () => {
+    const { circuit } = combinational(`CIRCUIT Helpers
+INPUT x : BUS(8)
+INPUT small : BUS(4)
+wide = ZEXT(small, 8)
+signed = SEXT(small, 8)
+count = POPCOUNT(x)
+all = REDUCE_AND(x)
+any = REDUCE_OR(x)
+parity = REDUCE_XOR(x)
+twice = REPEAT(small, 2)
+flipped = REVERSE(x)
+OUTPUT wide
+OUTPUT signed
+OUTPUT count
+OUTPUT all
+OUTPUT any
+OUTPUT parity
+OUTPUT twice
+OUTPUT flipped
+END`);
+    const simulator = new Simulator(circuit);
+    const outputs = simulator.setInputs({ x: "00001111", small: "1010" }).outputs;
+    expect(outputs.wide?.binary).toBe("00001010");
+    expect(outputs.signed?.binary).toBe("11111010");
+    expect(outputs.count?.binary).toBe("0100");
+    expect(outputs.all?.binary).toBe("0");
+    expect(outputs.any?.binary).toBe("1");
+    expect(outputs.parity?.binary).toBe("0");
+    expect(outputs.twice?.binary).toBe("10101010");
+    expect(outputs.flipped?.binary).toBe("11110000");
+  });
+
+  it("rejects a narrowing extension", () => {
+    const result = compile(`CIRCUIT Narrow
+INPUT x : BUS(8)
+small = ZEXT(x, 4)
+OUTPUT small
+END`);
+    expect(result.ok).toBe(false);
+    expect(result.diagnostics.some((entry) => entry.code === "E332")).toBe(true);
+  });
+
   it("expands multiplication width instead of truncating", () => {
     const { circuit } = combinational(`CIRCUIT Mul
 INPUT a : BUS(8)
@@ -382,7 +425,129 @@ END`);
     expect(simulator.snapshot().outputs.count?.binary).toBe("0000");
   });
 
-  it("marks clocked test suites as unsupported instead of pretending", () => {
+  it("runs clocked suites with CYCLE", () => {
+    const result = compile(`CIRCUIT Counter4
+INPUT clock
+INPUT reset
+STATE count : BUS(4) = 0000
+next = ADD(count, 1)
+ON RISING_EDGE(clock):
+  IF reset:
+    count = 0
+  ELSE:
+    count = next
+  END
+END
+OUTPUT count
+END
+TEST Counter4
+CASE "counts three ticks"
+  INPUT reset = 0
+  INPUT clock = 0
+  EXPECT count = 0000
+  CYCLE clock 3
+  EXPECT count = 0011
+END
+CASE "reset clears the count"
+  INPUT reset = 0
+  CYCLE clock 5
+  EXPECT count = 0101
+  INPUT reset = 1
+  CYCLE clock 1
+  EXPECT count = 0000
+END
+END`);
+    expect(result.ok).toBe(true);
+    const testResult = runTests(result);
+    expect(testResult.unsupported).toBe(0);
+    expect(testResult.failed, JSON.stringify(testResult, null, 2)).toBe(0);
+    expect(testResult.passed).toBe(2);
+    expect(testResult.suites[0]?.cases[0]?.pass).toBe(true);
+  });
+
+  it("groups input changes with STEP", () => {
+    const result = compile(`CIRCUIT Register8
+INPUT data : BUS(8)
+INPUT clock
+INPUT enable
+STATE stored : BUS(8) = 0
+ON RISING_EDGE(clock):
+  IF enable:
+    stored = data
+  END
+END
+OUTPUT stored
+END
+TEST Register8
+CASE "holds when enable is low"
+  INPUT enable = 0
+  INPUT data = 11110000
+  STEP
+    INPUT clock = 1
+  END
+  EXPECT stored = 00000000
+END
+CASE "captures when enable is high"
+  INPUT enable = 1
+  INPUT data = 10101010
+  STEP
+    INPUT clock = 1
+  END
+  EXPECT stored = 10101010
+END
+END`);
+    const testResult = runTests(result);
+    expect(testResult.failed, JSON.stringify(testResult, null, 2)).toBe(0);
+    expect(testResult.passed).toBe(2);
+  });
+
+  it("loads a state at the start of a case", () => {
+    const result = compile(`CIRCUIT Shift
+INPUT clock
+STATE q : BUS(4) = 0000
+next = ADD(q, 1)
+ON RISING_EDGE(clock):
+  q = next
+END
+OUTPUT q
+END
+TEST Shift
+CASE "starts from a loaded value"
+  LOAD q = 0011
+  CYCLE clock 1
+  EXPECT q = 0100
+END
+END`);
+    const testResult = runTests(result);
+    expect(testResult.failed, JSON.stringify(testResult, null, 2)).toBe(0);
+    expect(testResult.passed).toBe(1);
+  });
+
+  it("reports the failing step of a clocked case", () => {
+    const result = compile(`CIRCUIT Shift
+INPUT clock
+STATE q : BUS(4) = 0000
+next = ADD(q, 1)
+ON RISING_EDGE(clock):
+  q = next
+END
+OUTPUT q
+END
+TEST Shift
+CASE "wrong expectation"
+  CYCLE clock 1
+  EXPECT q = 1111
+END
+END`);
+    const testResult = runTests(result);
+    expect(testResult.failed).toBe(1);
+    const failure = testResult.suites[0]?.cases[0];
+    expect(failure?.pass).toBe(false);
+    expect(failure?.error).toContain("expected 1111, got 0001");
+    expect(failure?.step).toBe(1);
+  });
+
+  it("rejects a LOAD on a signal that is not state", () => {
     const result = compile(`CIRCUIT Reg
 INPUT clock
 STATE q = 0
@@ -392,13 +557,50 @@ END
 OUTPUT q
 END
 TEST Reg
-CASE
+CASE "bad load"
+  LOAD clock = 1
   EXPECT q = 0
 END
 END`);
-    const testResult = runTests(result);
-    expect(testResult.suites[0]?.runnable).toBe(false);
-    expect(testResult.unsupported).toBe(1);
+    expect(result.ok).toBe(false);
+    expect(result.diagnostics.some((entry) => entry.code === "E230")).toBe(true);
+  });
+
+  it("rejects a CYCLE on a bus", () => {
+    const result = compile(`CIRCUIT Wide
+INPUT bus : BUS(4)
+STATE q = 0
+ON RISING_EDGE(bus):
+  q = NOT(q)
+END
+OUTPUT q
+END
+TEST Wide
+CASE "bad cycle"
+  CYCLE bus 2
+  EXPECT q = 0
+END
+END`);
+    expect(result.ok).toBe(false);
+    expect(result.diagnostics.some((entry) => entry.code === "E303")).toBe(true);
+  });
+
+  it("forces a state value from the simulator", () => {
+    const { circuit } = combinational(`CIRCUIT Reg
+INPUT clock
+STATE q : BUS(4) = 0000
+ON RISING_EDGE(clock):
+  q = ADD(q, 1)
+END
+OUTPUT q
+END`);
+    const simulator = new Simulator(circuit);
+    expect(simulator.snapshot().states.q?.binary).toBe("0000");
+    const snapshot = simulator.setState("q", "1010");
+    expect(snapshot.states.q?.binary).toBe("1010");
+    expect(() => simulator.setState("q", "11111")).toThrowError(
+      expect.objectContaining({ code: "R411" }),
+    );
   });
 });
 
