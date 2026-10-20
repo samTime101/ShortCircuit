@@ -317,8 +317,10 @@ export function CircuitGraph({ circuit, snapshot }: CircuitGraphProps) {
 
   const fit = () => {
     if (!size.width || !size.height) return;
+    // Never zoom out past the point where the labels stop being readable:
+    // a wide design is panned, not shrunk into a wall of grey.
     const scale = Math.max(
-      0.2,
+      0.62,
       Math.min(1.05, (size.width - EDGE_PADDING * 2) / layout.width, (size.height - EDGE_PADDING * 2) / layout.height),
     );
     setView({

@@ -169,7 +169,7 @@ export function DocsPage({ onBack, beginner }: DocsPageProps) {
   };
 
   return (
-    <div className="docs-page" ref={pageRef}>
+    <main className="docs-page" ref={pageRef}>
       <header className="docs-topbar">
         <div className="docs-brand">
           <span className="docs-brand-mark">
@@ -1327,6 +1327,6 @@ END`}
           </footer>
         </main>
       </div>
-    </div>
+    </main>
   );
 }

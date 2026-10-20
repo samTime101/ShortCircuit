@@ -122,6 +122,17 @@ END`);
     });
   });
 
+  it("offers a skip link and a named workbench", async () => {
+    store(HALF_ADDER);
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("Evaluation graph")).toBeInTheDocument();
+    });
+    const skip = screen.getByRole("link", { name: /skip to the workbench/i });
+    expect(skip).toHaveAttribute("href", "#workbench");
+    expect(document.getElementById("workbench")).not.toBeNull();
+  });
+
   it("keeps the source in local storage", async () => {
     store(HALF_ADDER);
     render(<App />);

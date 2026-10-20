@@ -575,6 +575,9 @@ function Studio({
 
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#workbench">
+        Skip to the workbench
+      </a>
       <header className="app-header">
         <div className="brand">
           <span className="brand-mark">
@@ -624,12 +627,14 @@ function Studio({
         </div>
       </header>
 
-      <main className="app-main">
+      <main className="app-main" id="workbench">
         <section className="editor-pane">
           <div className="pane-chrome">
             <div className="pane-tab">
               <FileCode size={14} />
-              <span>{fileName}</span>
+              <span className="file-name" title={fileName}>
+                {fileName}
+              </span>
               <span className="file-dot" />
             </div>
             <div className="pane-chrome-right">
@@ -863,7 +868,7 @@ function Studio({
       </footer>
 
       {toast ? (
-        <div className="toast" role="status" key={toast.id}>
+        <div className="toast" role="status" aria-live="polite" key={toast.id}>
           <Check size={13} />
           {toast.message}
         </div>
