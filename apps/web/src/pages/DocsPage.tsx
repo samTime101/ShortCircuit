@@ -7,6 +7,7 @@ import {
   IR_SCHEMA,
 } from "@shortcircuit/engine";
 import { ArrowUpRight, Check, Code, Copy, Cpu, Layers, Table } from "../components/Icons";
+import { highlightLogicFlow } from "../editor/logicFlowHighlight";
 import "./docs.css";
 
 interface DocsPageProps {
@@ -26,6 +27,7 @@ const SECTIONS: SectionDef[] = [
   { id: "values", label: "Values and buses", group: "Language" },
   { id: "signals", label: "Signals and state", group: "Language" },
   { id: "operations", label: "Built-in operations", group: "Language" },
+  { id: "reference", label: "Function reference", group: "Language" },
   { id: "widths", label: "Width policy", group: "Language" },
   { id: "composition", label: "Composition", group: "Language" },
   { id: "clocking", label: "State and clocks", group: "Language" },
@@ -85,10 +87,17 @@ function CodeBlock({ code, caption }: { code: string; caption?: string }) {
     }
   };
 
+  const tokens = highlightLogicFlow(code);
   return (
     <figure className="docs-code">
       <pre>
-        <code>{code}</code>
+        <code>
+          {tokens.map((token, index) => (
+            <span key={index} className={`tok-${token.kind}`}>
+              {token.text}
+            </span>
+          ))}
+        </code>
       </pre>
       <figcaption>
         <span>{caption ?? "LogicFlow"}</span>
@@ -524,8 +533,121 @@ STATE armed = 1`}
           </Section>
 
           <Section
-            id="widths"
+            id="reference"
             index="06"
+            eyebrow="Language"
+            title="Function reference"
+            lead="Every built-in operation, with its arguments, the width it produces, and a worked example."
+          >
+            <div className="docs-fn-index">
+              {BUILTINS.map((spec) => (
+                <a key={spec.name} href={`#fn-${spec.name.toLowerCase()}`}>
+                  {spec.name}
+                </a>
+              ))}
+              {INTRINSIC_CIRCUITS.map((spec) => (
+                <a key={spec.name} href={`#fn-${spec.name.toLowerCase()}`}>
+                  {spec.name}
+                </a>
+              ))}
+            </div>
+
+            {BUILTINS.map((spec) => (
+              <article className="docs-fn" id={`fn-${spec.name.toLowerCase()}`} key={spec.name}>
+                <header>
+                  <h4>
+                    <code>{spec.signature}</code>
+                    <span className="docs-fn-category">{spec.category}</span>
+                  </h4>
+                  <p>{spec.description}</p>
+                </header>
+                <div className="docs-fn-body">
+                  <dl className="docs-fn-args">
+                    {spec.args.map((arg) => (
+                      <div key={arg.name}>
+                        <dt>
+                          <code>{arg.name}</code>
+                        </dt>
+                        <dd>
+                          {arg.description}
+                          {arg.optional ? " Optional." : ""}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                  <div className="docs-fn-meta">
+                    <span>
+                      <strong>Result width</strong>
+                      {spec.widthRule}
+                    </span>
+                    <span>
+                      <strong>Tip</strong>
+                      {spec.tip}
+                    </span>
+                    <span>
+                      <strong>Example</strong>
+                      <code>{spec.example.call}</code>
+                      <span className="docs-fn-expected">
+                        {spec.example.result} — {spec.example.note}
+                      </span>
+                    </span>
+                  </div>
+                </div>
+              </article>
+            ))}
+
+            <h4>Circuit-shaped components</h4>
+            {INTRINSIC_CIRCUITS.map((spec) => (
+              <article className="docs-fn" id={`fn-${spec.name.toLowerCase()}`} key={spec.name}>
+                <header>
+                  <h4>
+                    <code>{spec.signature}</code>
+                    <span className="docs-fn-category">component</span>
+                  </h4>
+                  <p>{spec.description}</p>
+                </header>
+                <div className="docs-fn-body">
+                  <dl className="docs-fn-args">
+                    {spec.args.map((arg) => (
+                      <div key={arg.name}>
+                        <dt>
+                          <code>{arg.name}</code>
+                        </dt>
+                        <dd>{arg.description}</dd>
+                      </div>
+                    ))}
+                    <div>
+                      <dt>
+                        <code>outputs</code>
+                      </dt>
+                      <dd>{spec.outputs.join(", ")}</dd>
+                    </div>
+                  </dl>
+                  <div className="docs-fn-meta">
+                    <span>
+                      <strong>Result width</strong>
+                      {spec.widthRule}
+                    </span>
+                    <span>
+                      <strong>Tip</strong>
+                      {spec.tip}
+                    </span>
+                    <span>
+                      <strong>Example</strong>
+                      <code>{spec.example.call}</code>
+                      <span className="docs-fn-expected">
+                        {spec.example.result} — {spec.example.note}
+                      </span>
+                    </span>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </Section>
+
+          <Section
+            id="widths"
+            index="07"
             eyebrow="Language"
             title="Width policy"
             lead="Widths are checked before anything runs. Literals fit their context; signals never shrink silently."
@@ -573,7 +695,7 @@ STATE armed = 1`}
 
           <Section
             id="composition"
-            index="07"
+            index="08"
             eyebrow="Language"
             title="Composition"
             lead="Circuits are reusable. Instances are named, their outputs are read with dotted paths, and the design is flattened into one graph."
@@ -634,7 +756,7 @@ END`}
 
           <Section
             id="clocking"
-            index="08"
+            index="09"
             eyebrow="Language"
             title="State and clocks"
             lead="Sequential logic is explicit. An edge triggers a block, the block computes next-state values, and every update commits together."
@@ -677,7 +799,7 @@ END`}
 
           <Section
             id="testing"
-            index="09"
+            index="10"
             eyebrow="Language"
             title="Tests and truth tables"
             lead="Verification lives in the source. The runner uses the same compiled graph the simulator does."
@@ -753,7 +875,7 @@ END`}
 
           <Section
             id="diagnostics"
-            index="10"
+            index="11"
             eyebrow="Reference"
             title="Diagnostics"
             lead="Every diagnostic carries a stable code, a location, and a fix. Names are matched with a bounded edit distance, so typos get a suggestion."
@@ -819,7 +941,7 @@ END`}
 
           <Section
             id="limits"
-            index="11"
+            index="12"
             eyebrow="Reference"
             title="Limits"
             lead="Bounded work keeps the compiler and the studio responsive. Every limit is a compile option."
@@ -881,7 +1003,7 @@ END`}
 
           <Section
             id="snippets"
-            index="12"
+            index="13"
             eyebrow="Reference"
             title="Snippet library"
             lead="Every snippet is also available in the editor: type its name, or start typing a keyword, and pick it from the completion list."
@@ -903,7 +1025,7 @@ END`}
 
           <Section
             id="editor"
-            index="13"
+            index="14"
             eyebrow="Reference"
             title="Editor tips"
             lead="The editor knows the language. It completes it, explains it, and points at the problem."
@@ -966,7 +1088,7 @@ END`}
 
           <Section
             id="ir"
-            index="14"
+            index="15"
             eyebrow="Reference"
             title="Portable IR"
             lead="Everything in the studio reads one serializable object. That object is the contract other tools can target."

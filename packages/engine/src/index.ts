@@ -41,6 +41,7 @@ export {
   parseSimulationInput,
 } from "./values";
 export { BUILTINS, BUILTIN_BY_NAME, INTRINSIC_CIRCUITS } from "./builtins";
+export type { BuiltinArgument, BuiltinExample, BuiltinSpec, IntrinsicCircuit } from "./builtins";
 export { LANGUAGE_SNIPPETS, SNIPPET_BY_ID, type LanguageSnippet, type SnippetCategory } from "./snippets";
 
 export const ENGINE_VERSION = "0.1.0";
