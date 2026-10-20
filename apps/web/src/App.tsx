@@ -102,6 +102,9 @@ function Studio({ onOpenDocs }: { onOpenDocs(): void }) {
   const [snapshot, setSnapshot] = useState<SimulationSnapshot | null>(null);
   const [inputValues, setInputValues] = useState<Record<string, string>>({});
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
+  const [selectedClock, setSelectedClock] = useState<string | null>(null);
+  const [running, setRunning] = useState(false);
+  const [clockSpeed, setClockSpeed] = useState(2);
   const [truthTable, setTruthTable] = useState<TruthTable | null>(null);
   const [testResult, setTestResult] = useState<TestRunResult | null>(null);
   const [examplesOpen, setExamplesOpen] = useState(false);
@@ -138,6 +141,7 @@ function Studio({ onOpenDocs }: { onOpenDocs(): void }) {
     setActiveCircuitName(circuit.name);
     setTruthTable(generateTruthTable(circuit));
     setRuntimeError(null);
+    setRunning(false);
     try {
       const nextSimulator = new Simulator(circuit);
       const nextSnapshot = nextSimulator.snapshot();
@@ -230,6 +234,60 @@ function Studio({ onOpenDocs }: { onOpenDocs(): void }) {
       result.circuits[0]
     );
   }, [result, activeCircuitName]);
+
+  const stepClock = useCallback(() => {
+    if (!simulator || !selectedClock) return;
+    try {
+      simulator.setInput(selectedClock, "0");
+      const next = simulator.setInput(selectedClock, "1");
+      const after = simulator.setInput(selectedClock, "0");
+      setSnapshot(after);
+      setInputValues(simulator.getInputValues());
+      setRuntimeError(null);
+      void next;
+    } catch (error) {
+      setSnapshot(null);
+      setRuntimeError(errorText(error));
+    }
+  }, [simulator, selectedClock]);
+
+  const forceState = useCallback(
+    (name: string, value: string) => {
+      if (!simulator) return;
+      try {
+        const next = simulator.setState(name, value);
+        setSnapshot(next);
+        setRuntimeError(null);
+      } catch (error) {
+        setRuntimeError(errorText(error));
+      }
+    },
+    [simulator],
+  );
+
+  const clockNames = useMemo(() => {
+    if (!activeCircuit) return [] as string[];
+    const names = new Set<string>();
+    for (const event of activeCircuit.events) {
+      const node = activeCircuit.nodes.find((entry) => entry.id === event.clock);
+      if (node?.inputName) names.add(node.inputName);
+    }
+    return [...names];
+  }, [activeCircuit]);
+
+  useEffect(() => {
+    setRunning(false);
+    setSelectedClock((current) => {
+      if (current && clockNames.includes(current)) return current;
+      return clockNames[0] ?? null;
+    });
+  }, [clockNames]);
+
+  useEffect(() => {
+    if (!running) return;
+    const timer = window.setInterval(() => stepClock(), Math.max(60, 1000 / clockSpeed));
+    return () => window.clearInterval(timer);
+  }, [running, clockSpeed, stepClock]);
 
   const matchingExample = useMemo(
     () => EXAMPLES.find((example) => example.source === source),
@@ -544,7 +602,16 @@ function Studio({ onOpenDocs }: { onOpenDocs(): void }) {
                     snapshot={snapshot}
                     inputValues={inputValues}
                     runtimeError={runtimeError}
+                    clocks={clockNames}
+                    selectedClock={selectedClock}
+                    onSelectClock={setSelectedClock}
+                    onStep={stepClock}
+                    running={running}
+                    onToggleRun={() => setRunning((current) => !current)}
+                    speed={clockSpeed}
+                    onSpeedChange={setClockSpeed}
                     onInputChange={onInputChange}
+                    onSetState={forceState}
                     onReset={resetSimulation}
                   />
 

@@ -42,6 +42,20 @@ export const Play = (p: IconProps) => (
     <path d="M7 4.5 19 12 7 19.5Z" fill="currentColor" stroke="none" />
   </Icon>
 );
+export const Pause = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="7" y="5" width="3.5" height="14" rx="1" />
+    <rect x="13.5" y="5" width="3.5" height="14" rx="1" />
+  </Icon>
+);
+
+export const StepForward = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M6 5.5 15 12 6 18.5z" />
+    <path d="M18 5.5v13" />
+  </Icon>
+);
+
 export const Grid = (p: IconProps) => (
   <Icon {...p}>
     <rect x="3.5" y="3.5" width="7" height="7" rx="1.5" />

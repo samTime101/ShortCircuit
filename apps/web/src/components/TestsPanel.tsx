@@ -60,8 +60,7 @@ END`}</pre>
         <div className="notice warning">
           <Info size={15} />
           <span>
-            Clocked circuits cannot run in the static test runner yet. Use the Circuit tab and toggle the clock
-            to exercise stored state.
+            Some suites could not run. Open the Circuit tab and drive the circuit by hand to see what happens.
           </span>
         </div>
       ) : null}
@@ -97,14 +96,17 @@ END`}</pre>
                         {testCase.pass ? <Check size={12} /> : <X size={12} />}
                       </span>
                       <span>{testCase.label}</span>
-                      <span className="case-line">line {testCase.line}</span>
+                      <span className="case-line">
+                        line {testCase.line}
+                        {testCase.step ? ` · failed at step ${testCase.step}` : ""}
+                      </span>
                     </div>
                     {testCase.error ? <div className="case-error">{testCase.error}</div> : null}
                     <div className="test-rows">
                       {testCase.rows.map((row, rowIndex) =>
                         row.kind === "input" ? (
                           <div className="test-row input-row" key={`${row.name}-${rowIndex}`}>
-                            <span className="row-kind">INPUT</span>
+                            <span className="row-kind">{row.step ? `STEP ${row.step}` : "INPUT"}</span>
                             <span className="row-name">{row.name}</span>
                             <span className="row-value mono">{row.actual}</span>
                             <span className="row-result" />
@@ -114,7 +116,7 @@ END`}</pre>
                             className={`test-row expect-row ${row.pass ? "pass" : "fail"}`}
                             key={`${row.name}-${rowIndex}`}
                           >
-                            <span className="row-kind">EXPECT</span>
+                            <span className="row-kind">{row.step ? `STEP ${row.step}` : "EXPECT"}</span>
                             <span className="row-name">{row.name}</span>
                             <span className="expect-values">
                               <span className="row-value mono">{row.expected}</span>

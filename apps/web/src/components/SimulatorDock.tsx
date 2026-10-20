@@ -5,14 +5,24 @@ import {
   type CircuitIR,
   type SimulationSnapshot,
 } from "@shortcircuit/engine";
-import { Clock, RotateCcw, Zap } from "./Icons";
+import { Clock, Pause as PauseIcon, Play as PlayIcon, RotateCcw, StepForward as StepIcon, Zap } from "./Icons";
 
 interface SimulatorDockProps {
   circuit: CircuitIR;
   snapshot: SimulationSnapshot | null;
   inputValues: Record<string, string>;
   runtimeError: string | null;
+  /** Input names used as clocks by this circuit. */
+  clocks: string[];
+  selectedClock: string | null;
+  onSelectClock(name: string): void;
+  onStep(): void;
+  running: boolean;
+  onToggleRun(): void;
+  speed: number;
+  onSpeedChange(speed: number): void;
   onInputChange(name: string, value: string): void;
+  onSetState(name: string, value: string): void;
   onReset(): void;
 }
 
@@ -65,12 +75,70 @@ function BusTextField({
   );
 }
 
+function StateField({
+  name,
+  width,
+  value,
+  onChange,
+}: {
+  name: string;
+  width: number;
+  value: string;
+  onChange(value: string): void;
+}) {
+  const [draft, setDraft] = useState(value);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDraft(value);
+    setError(null);
+  }, [value]);
+
+  const commit = () => {
+    try {
+      const parsed = parseSimulationInput(draft, width);
+      setError(null);
+      onChange(formatBinary(parsed, width));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  };
+
+  return (
+    <div className="bus-text-field state-field">
+      <input
+        value={draft}
+        aria-label={`${name} binary value`}
+        spellCheck={false}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            commit();
+            (event.target as HTMLInputElement).blur();
+          }
+        }}
+      />
+      {error ? <span className="field-error">{error}</span> : null}
+    </div>
+  );
+}
+
 export function SimulatorDock({
   circuit,
   snapshot,
   inputValues,
   runtimeError,
+  clocks,
+  selectedClock,
+  onSelectClock,
+  onStep,
+  running,
+  onToggleRun,
+  speed,
+  onSpeedChange,
   onInputChange,
+  onSetState,
   onReset,
 }: SimulatorDockProps) {
   const clockInputNames = useMemo(() => {
@@ -89,7 +157,7 @@ export function SimulatorDock({
   const cascadeEvents = circuit.sequential ? (
     <span className="sim-clock-hint">
       <Clock size={12} />
-      Toggle a clock input 0 → 1 to fire a rising edge
+      0 → 1 fires a rising edge
     </span>
   ) : null;
 
@@ -115,6 +183,53 @@ export function SimulatorDock({
           </button>
         </div>
       </div>
+
+      {clocks.length > 0 ? (
+        <div className="dock-controls-row">
+          <div className="dock-controls">
+            <select
+              className="dock-select"
+              aria-label="Clock to drive"
+              value={selectedClock ?? clocks[0] ?? ""}
+              onChange={(event) => onSelectClock(event.target.value)}
+            >
+              {clocks.map((clock) => (
+                <option key={clock} value={clock}>
+                  {clock}
+                </option>
+              ))}
+            </select>
+            <button
+              className="text-button compact"
+              onClick={onStep}
+              disabled={!selectedClock}
+              title="Pulse the clock once: 0 to 1 to 0"
+            >
+              <StepIcon size={13} /> Step
+            </button>
+            <button
+              className={`text-button compact ${running ? "is-active" : ""}`}
+              onClick={onToggleRun}
+              title={running ? "Pause the clock" : "Run the clock continuously"}
+            >
+              {running ? <PauseIcon size={13} /> : <PlayIcon size={13} />}
+              {running ? "Pause" : "Run"}
+            </button>
+            <select
+              className="dock-select"
+              aria-label="Clock speed"
+              value={speed}
+              onChange={(event) => onSpeedChange(Number(event.target.value))}
+            >
+              {[1, 2, 5, 10].map((hz) => (
+                <option key={hz} value={hz}>
+                  {hz} Hz
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+      ) : null}
 
       {runtimeError ? (
         <div className="runtime-error">
@@ -253,7 +368,12 @@ export function SimulatorDock({
                       <span className="io-width">{state.width}b</span>
                     </div>
                     <div className="monitor-value">
-                      <span className="binary-value">{snapshot?.states[state.name]?.binary ?? "—"}</span>
+                      <StateField
+                        name={state.name}
+                        width={state.width}
+                        value={snapshot?.states[state.name]?.binary ?? "0".repeat(state.width)}
+                        onChange={(next) => onSetState(state.name, next)}
+                      />
                     </div>
                   </div>
                 ))}
