@@ -312,10 +312,10 @@ the first transition that evaluates cleanly clears the initial error.
 
 These are thin layers over `Simulator`:
 
-- `runTests(result)` builds a fresh simulator per test case, applies all
-  inputs, and compares each expected output's full zero-padded binary string.
-  It validates that suites are runnable and reports clocked suites as
-  unsupported.
+- `runTests(result)` builds a fresh simulator per test case and walks the
+  case program in order: inputs, loads, steps, and clock cycles. Expectations
+  are compared at the point they are reached, using the full zero-padded binary
+  string, and a case stops at the first failure with the step number.
 - `generateTruthTable(circuit, options)` rejects sequential circuits and
   over-limit tables with a `reason`, otherwise enumerates all rows and records
   input/output binary strings.
@@ -376,7 +376,8 @@ All inspector views render the same compiled circuit:
 - **Circuit** — `CircuitGraph` lays out the node DAG as SVG, colors live
   values, supports pan/zoom, and exposes a node inspector with operation,
   width, scope, operands, and source location. Inputs are interactive controls
-  in `SimulatorDock`; state values are monitored separately.
+  in `SimulatorDock`, which also drives clocks (step, run, and speed) and
+  forces state values; state values are monitored in the same panel.
 - **Truth table** — exhaustive rows from `generateTruthTable`, with reasons
   shown instead of partial tables.
 - **Tests** — compiled suites and per-row results from `runTests`, including

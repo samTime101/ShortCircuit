@@ -464,7 +464,27 @@ in 0.1. Shift amounts may be up to 32 bits wide.
 4096-bit limit. `ENCODER` of a 0 value is defined as 0, and ties do not exist
 because it returns one index (the highest set bit).
 
-### 7.5 Circuit-shaped built-ins
+### 7.5 Bus helpers
+
+| Call | Result width | Behaviour |
+| --- | --- | --- |
+| `ZEXT(x, width)` | `width` | Zero-extends `x`. The width must not be smaller than `x` |
+| `SEXT(x, width)` | `width` | Extends `x` by repeating its top bit |
+| `POPCOUNT(x)` | `ceil(log2(width + 1))` | Counts the bits that are set |
+| `REDUCE_AND(x)` | 1 | 1 only when every bit of `x` is 1 |
+| `REDUCE_OR(x)` | 1 | 1 when any bit of `x` is 1 |
+| `REDUCE_XOR(x)` | 1 | Parity of `x` |
+| `REPEAT(x, count)` | `count x width` | Concatenates `x` with itself |
+| `REVERSE(x)` | width of `x` | Reverses the bit order |
+
+The width argument of `ZEXT` and `SEXT` and the count of `REPEAT` must be
+decimal literals. Narrowing with `ZEXT` or `SEXT` is E332: use
+`SLICE(value, 3, 0)` to narrow instead.
+
+`POPCOUNT` is the usual way to count neighbours in a grid, and the reduce
+operations fold a bus into a single bit without a tree of gates.
+
+### 7.6 Circuit-shaped built-ins
 
 `HALF_ADDER(a, b) -> {sum, carry}` and
 `FULL_ADDER(a, b, carry_in) -> {sum, carry_out}` are ordinary circuits that
@@ -697,11 +717,15 @@ END
 
 ### 10.2 Input requirements
 
-For a runnable (combinational) suite, every input of the target circuit must
-be assigned in every case (E205). Assignments are checked for duplicates
-(E209) and unknown names (E201, with a suggestion). This strictness is
-intentional: an unset input would silently be zero, and a test that appears to
-pass could be testing the wrong thing.
+For a combinational case, every input of the target circuit must be assigned
+(E205). Assignments are checked for duplicates (E209) and unknown names (E201,
+with a suggestion). This strictness is intentional: an unset input would
+silently be zero, and a test that appears to pass could be testing the wrong
+thing.
+
+A case that uses `STEP`, `CYCLE`, or `LOAD` is sequential. In a sequential
+case an input may be set more than once, and an input that is never set keeps
+its last value, starting from zero.
 
 ### 10.3 Test value literals
 
@@ -725,13 +749,51 @@ E305.
   including leading zeroes. `EXPECT sum = 00000011` and `EXPECT sum = 11` are
   different literals: the first is 8 bits, the second is binary two.
 - Expectations may use dotted instance paths (`EXPECT result.sum = 1`) or the
-  short port name when unambiguous.
-- Every output is evaluated after all inputs are applied, so combinational
-  tests are exhaustive per case by construction.
-- Clocked circuits: the suite is compiled and validated, but the runner marks
-  it unsupported. The UI shows why instead of reporting a false pass.
+  short port name when unambiguous. A `STATE` signal can be checked too:
+  `EXPECT count = 0011`.
+- An expectation is checked at the point where it appears, against the
+  circuit at that moment.
 - A runtime error inside a case (for example division by zero) fails that case
   with the error message recorded in its result rows.
+
+### 10.5 Clocked test sequences
+
+A case may drive a circuit through time. Each case starts from a fresh
+simulator, with every `STATE` at its declared initial value.
+
+| Statement | Meaning |
+| --- | --- |
+| `INPUT name = value` | Sets an input. The combinational graph is re-evaluated against the current state |
+| `STEP ... END` | Groups input changes into one simulation step. Every input set inside the step applies together, then edges fire and state commits atomically |
+| `CYCLE clock N` | Pulses a clock 0 → 1 → 0, N times. It fires N rising edges and N falling edges |
+| `LOAD state = value` | Forces a state to a value, for tests that need a specific starting point |
+| `EXPECT name = value` | Checks an output or a state against the circuit at that moment |
+
+Statements run top to bottom, in order. A failing expectation reports the
+case, the step number, the signal, the expected value, and the actual value,
+and the case stops at the first failure.
+
+```logicflow
+TEST Counter4
+  CASE "counts three ticks"
+    INPUT reset = 0
+    INPUT clock = 0
+    EXPECT count = 0000
+    CYCLE clock 3
+    EXPECT count = 0011
+  END
+END
+```
+
+Rules:
+
+- `CYCLE` needs a one-bit input; anything else is E303.
+- `LOAD` needs a `STATE` signal; anything else is E230. It may not appear
+  inside a `STEP` (E232).
+- `CYCLE` closes a high clock phase first, so every cycle contains a rising
+  edge even when the clock started high.
+- The step counter advances for every input change, step, and cycle, which is
+  what the failure message reports.
 
 ---
 
@@ -817,6 +879,9 @@ collecting after `maxDiagnostics` (default 100) and reports what it has.
 | `E118` | Invalid number literal |
 | `E119` | Expected end of line |
 | `E120`–`E123` | Expected symbol, keyword, identifier, or token |
+| `E124` | `STEP` is missing its `END` |
+| `E125` | Invalid cycle count |
+| `E126` | Unexpected statement inside a `STEP` block |
 
 **Names, wiring, and ports (E2xx)**
 
@@ -843,6 +908,9 @@ collecting after `maxDiagnostics` (default 100) and reports what it has.
 | `E219` | Slice bound is not a decimal literal |
 | `E220` | Non-state signal assigned in a clocked block |
 | `E221` | Test case has no expectations |
+| `E230` | `LOAD` target is not a state signal |
+| `E231` | `CYCLE` clock is not an input of the circuit |
+| `E232` | `LOAD` used inside a `STEP` block |
 
 **Widths, elaboration, and clocking (E3xx)**
 
@@ -860,6 +928,7 @@ collecting after `maxDiagnostics` (default 100) and reports what it has.
 | `E310` | Combinational feedback cycle |
 | `E312` | Same state driven by two blocks on one edge |
 | `E320` | Expansion or width limit exceeded |
+| `E332` | `ZEXT` or `SEXT` would narrow the value |
 | `E321` | Duplicate node ID (internal graph consistency) |
 | `E322` | Instance-expansion limit exceeded |
 | `E323` | Internal instance-binding error |

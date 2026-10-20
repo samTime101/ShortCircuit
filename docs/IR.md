@@ -264,6 +264,14 @@ All results are normalized to `w` bits. All arithmetic is unsigned.
 | `SHIFT_RIGHT` | 2: `value`, `amount` | — | `value >> amount`; amount ≥ w gives 0; w = value width |
 | `DECODER` | 1: `select` | `selectWidth` | One bit set at index `select`; w = 2^selectWidth |
 | `ENCODER` | 1 | `inputWidth` | Index of highest set bit; 0 gives 0; w = max(1, ceil(log2(inputWidth))) |
+| `ZEXT` | 1 | `sourceWidth` | The value, widened to w bits with zeroes; w must not be smaller than the source |
+| `SEXT` | 1 | `sourceWidth` | The value, widened to w bits by repeating the top bit |
+| `POPCOUNT` | 1 | `sourceWidth` | Number of set bits; w = max(1, ceil(log2(sourceWidth + 1))) |
+| `REDUCE_AND` | 1 | `sourceWidth` | 1 when every source bit is 1 |
+| `REDUCE_OR` | 1 | `sourceWidth` | 1 when any source bit is 1 |
+| `REDUCE_XOR` | 1 | `sourceWidth` | Parity of the source bits |
+| `REPEAT` | 1 | `count`, `sourceWidth` | The value repeated `count` times; w = count x source width |
+| `REVERSE` | 1 | `sourceWidth` | The value with its bit order reversed; w = source width |
 
 Notes:
 
@@ -358,8 +366,12 @@ interface TestSuiteIR {
 interface TestCaseIR {
   label: string;
   line: number;
+  /** Flat view of every input used in the case. */
   inputs: TestInputIR[];
+  /** Flat view of every expectation in the case. */
   expectations: TestExpectationIR[];
+  /** Ordered program, including STEP and CYCLE blocks. */
+  program: TestInstructionIR[];
 }
 
 interface TestInputIR {
@@ -373,14 +385,65 @@ interface TestInputIR {
 interface TestExpectationIR extends TestInputIR {
   actualName: string;
 }
+
+type TestInstructionIR =
+  | TestInputInstruction
+  | TestExpectInstruction
+  | TestLoadInstruction
+  | TestStepInstruction
+  | TestCycleInstruction;
+
+interface TestInputInstruction {
+  kind: "input";
+  name: string;
+  width: number;
+  value: string;
+  line: number;
+  column: number;
+}
+
+interface TestExpectInstruction {
+  kind: "expect";
+  name: string;
+  actualName: string;
+  target: "output" | "state";
+  width: number;
+  value: string;
+  line: number;
+  column: number;
+}
+
+interface TestLoadInstruction {
+  kind: "load";
+  name: string;
+  width: number;
+  value: string;
+  line: number;
+  column: number;
+}
+
+interface TestStepInstruction {
+  kind: "step";
+  statements: TestInstructionIR[];
+  line: number;
+  column: number;
+}
+
+interface TestCycleInstruction {
+  kind: "cycle";
+  clock: string;
+  count: number;
+  line: number;
+  column: number;
+}
 ```
 
 ### 5.1 Suite
 
 - `name` and `circuit` are both the target circuit name in v1.
-- A suite is runnable only for combinational circuits. Clocked suites are
-  present in the IR with `runnable: false` and a human-readable `reason`, so
-  tooling can display them without pretending they executed.
+- `runnable` is true for every suite that compiled. Clocked suites run like
+  combinational ones; the field remains so a host can report a suite it
+  cannot execute.
 - `cases` preserve source order.
 
 ### 5.2 Case inputs
@@ -392,9 +455,9 @@ Each `TestInputIR` has:
 - `value`: exactly `width` binary characters;
 - source location.
 
-Runnable suites require every circuit input to be present exactly once. A
-consumer may still choose to default missing inputs to zero, but it should not
-consider such a suite equivalent to the source contract.
+The flat `inputs` list is a convenience view. A combinational case sets
+every circuit input exactly once; a sequential case may set an input more than
+once, and an input that is never set keeps its last value, starting at zero.
 
 ### 5.3 Expectations
 
@@ -410,19 +473,35 @@ Consumers must compare the **entire** binary string, including leading zeros.
 A case passes when every expectation matches. If simulation throws, the case
 fails and records the error; no expectation is reported as passing.
 
-### 5.4 Executing suites
+### 5.4 The program
+
+`program` is the ordered instruction list. It is the authoritative form; the
+flat `inputs` and `expectations` lists are views of it.
+
+| Instruction | Meaning |
+| --- | --- |
+| `input` | Apply one input value. One transition. |
+| `expect` | Compare an output or state with the current value. `target` says which. |
+| `load` | Force a state to a value, without firing a clock edge. |
+| `step` | Apply every `input` inside it as one transition, then check its `expect` instructions. |
+| `cycle` | Pulse a clock 0 → 1 → 0 `count` times. Each pulse is one transition. |
+
+A step counter advances for every input, load, step, and cycle. It is what a
+failure message reports.
+
+### 5.5 Executing suites
 
 A portable runner can:
 
 1. find the target `CircuitIR` by `suite.circuit`;
-2. if `!suite.runnable`, report unsupported;
-3. for each case, create a fresh simulator (state initialized from IR);
-4. apply all inputs in one transition;
-5. compare expected outputs;
+2. for each case, create a fresh simulator (state initialized from IR);
+3. walk `case.program` in order, applying inputs, loads, steps, and cycles;
+4. compare expected values at the point each expectation is reached;
+5. stop the case at the first failure and report the step;
 6. aggregate pass/fail counts.
 
-The test runner itself is not part of the IR. `runnable`, inputs, and
-expectations are.
+The test runner itself is not part of the IR. `runnable`, the program, and
+the flat views are.
 
 ---
 
