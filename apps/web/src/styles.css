@@ -1634,6 +1634,34 @@ kbd {
   stroke: var(--violet);
 }
 
+/* The width badge that sits on a bus wire. */
+.edge-width rect {
+  fill: var(--panel-2);
+  stroke: var(--line-strong);
+  stroke-width: 1;
+}
+
+.edge-width text {
+  fill: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.02em;
+}
+
+.graph-edge.is-active .edge-width rect {
+  fill: var(--panel-3);
+  stroke: var(--violet);
+}
+
+.graph-edge.is-active .edge-width text {
+  fill: var(--violet);
+}
+
+.graph-edge.is-muted .edge-width rect {
+  fill: var(--panel);
+  stroke: var(--line);
+}
+
 .graph-edge.is-muted {
   opacity: 0.4;
 }
