@@ -39,6 +39,7 @@ Assignments describe wires, not steps. The compiler validates names, widths, wir
 - **Verification** — in-source `TEST` cases, clocked sequences with `STEP`, `CYCLE`, and `LOAD`, plus exhaustive truth-table generation for combinational circuits.
 - **Live studio** — CodeMirror editor with diagnostics, interactive input controls, dependency graph with values, stored-state monitors, test results, and downloadable IR.
 - **Editor that knows the language** — completions for built-ins, keywords, snippets and your own signals, plus hover cards with signatures, width rules and usage tips.
+- **Room to work** — the editor can be maximized over the inspector with `Mod-Shift-M` or `Esc`, and its text size steps up and down and is remembered between visits.
 - **Built-in documentation** — a full language reference page in the app (`/#/docs`) with the syntax, width policy, every operation with its arguments and a worked example, diagnostics, and a copyable snippet library. The examples are syntax highlighted, and the same reference is generated into `docs/LANGUAGE.md` so the two cannot drift.
 - **Plain-language errors** — every diagnostic explains itself in everyday words, and a name mistake can be fixed with one click.
 - **Visible sequential behaviour** — a waveform panel records every step, marks the edges that fired, and exports VCD or JSON.

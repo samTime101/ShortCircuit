@@ -10,11 +10,11 @@ import {
   linter,
   type Diagnostic as LintMessage,
 } from "@codemirror/lint";
-import { EditorState } from "@codemirror/state";
+import { Compartment, EditorState } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { basicSetup } from "codemirror";
-import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, type CSSProperties } from "react";
 import type { Diagnostic } from "@shortcircuit/engine";
 import { logicFlowCompletions } from "./completions";
 import { logicFlowHoverTooltip } from "./hover";
@@ -119,7 +119,6 @@ const editorTheme = EditorView.theme(
       backgroundColor: "#040507",
       color: "#dee2e9",
       height: "100%",
-      fontSize: "13.5px",
     },
     "&.cm-focused": { outline: "none" },
     ".cm-scroller": {
@@ -152,7 +151,7 @@ const editorTheme = EditorView.theme(
       minWidth: "26px",
       padding: "0 8px 0 2px",
       fontFamily: "'JetBrains Mono Variable', monospace",
-      fontSize: "11px",
+      fontSize: "0.85em",
     },
     ".cm-activeLine": { backgroundColor: "rgba(108, 158, 255, 0.03)" },
     ".cm-activeLineGutter": {
@@ -231,6 +230,19 @@ const editorTheme = EditorView.theme(
   { dark: true },
 );
 
+/* The font size lives in its own compartment so the studio can rescale the
+   editor without rebuilding the whole view. */
+const fontSizeCompartment = new Compartment();
+
+function fontSizeTheme(fontSize: number) {
+  return EditorView.theme(
+    {
+      "&": { fontSize: `${fontSize}px` },
+    },
+    { dark: true },
+  );
+}
+
 export interface SourceEditorHandle {
   gotoLine(line: number, column?: number): void;
   focus(): void;
@@ -239,6 +251,7 @@ export interface SourceEditorHandle {
 interface SourceEditorProps {
   value: string;
   diagnostics: Diagnostic[];
+  fontSize: number;
   onChange(value: string): void;
   onRun(): void;
 }
@@ -267,16 +280,18 @@ function toLintMessage(view: EditorView, diagnostic: Diagnostic): LintMessage {
 }
 
 export const SourceEditor = forwardRef<SourceEditorHandle, SourceEditorProps>(
-  function SourceEditor({ value, diagnostics, onChange, onRun }, ref) {
+  function SourceEditor({ value, diagnostics, fontSize, onChange, onRun }, ref) {
     const hostRef = useRef<HTMLDivElement>(null);
     const viewRef = useRef<EditorView | null>(null);
     const onChangeRef = useRef(onChange);
     const onRunRef = useRef(onRun);
     const diagnosticsRef = useRef(diagnostics);
+    const fontSizeRef = useRef(fontSize);
 
     onChangeRef.current = onChange;
     onRunRef.current = onRun;
     diagnosticsRef.current = diagnostics;
+    fontSizeRef.current = fontSize;
 
     useImperativeHandle(
       ref,
@@ -318,6 +333,7 @@ export const SourceEditor = forwardRef<SourceEditorHandle, SourceEditorProps>(
             syntaxHighlighting(highlightStyle),
             logicFlowHoverTooltip,
             editorTheme,
+            fontSizeCompartment.of(fontSizeTheme(fontSizeRef.current)),
             linter(
               (editorView) =>
                 diagnosticsRef.current.map((diagnostic) =>
@@ -365,6 +381,20 @@ export const SourceEditor = forwardRef<SourceEditorHandle, SourceEditorProps>(
       if (viewRef.current) forceLinting(viewRef.current);
     }, [diagnostics]);
 
-    return <div className="source-editor" ref={hostRef} />;
+    useEffect(() => {
+      const view = viewRef.current;
+      if (!view) return;
+      view.dispatch({
+        effects: fontSizeCompartment.reconfigure(fontSizeTheme(fontSize)),
+      });
+    }, [fontSize]);
+
+    return (
+      <div
+        className="source-editor"
+        ref={hostRef}
+        style={{ "--editor-font-size": `${fontSize}px` } as CSSProperties}
+      />
+    );
   },
 );

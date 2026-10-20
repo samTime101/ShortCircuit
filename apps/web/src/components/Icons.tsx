@@ -203,6 +203,25 @@ export const Maximize = (p: IconProps) => (
     <path d="M8 3H3v5M16 3h5v5M21 16v5h-5M3 16v5h5" />
   </Icon>
 );
+export const Minimize = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M3 8h5V3M21 8h-5V3M21 16h-5v5M3 16h5v5" />
+  </Icon>
+);
+export const FontIncrease = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M2.5 18 6.5 7h2l4 11" />
+    <path d="M4 14.5h7" />
+    <path d="M18.5 10v8M14.5 14h8" />
+  </Icon>
+);
+export const FontDecrease = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M2.5 18 6.5 7h2l4 11" />
+    <path d="M4 14.5h7" />
+    <path d="M14.5 14h8" />
+  </Icon>
+);
 export const FileCode = (p: IconProps) => (
   <Icon {...p}>
     <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z" />

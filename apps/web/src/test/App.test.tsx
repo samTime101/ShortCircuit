@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import App from "../App";
 
 const STORAGE_KEY = "shortcircuit.source.v1";
+const FONT_SIZE_KEY = "shortcircuit.editorFontSize.v1";
 
 const HALF_ADDER = `CIRCUIT HalfAdder
 INPUT a
@@ -140,5 +141,88 @@ END`);
       expect(screen.getByText("Evaluation graph")).toBeInTheDocument();
     });
     expect(window.localStorage.getItem(STORAGE_KEY)).toBe(HALF_ADDER);
+  });
+
+  it("maximizes the editor and gives the workbench back", async () => {
+    store(HALF_ADDER);
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("Evaluation graph")).toBeInTheDocument();
+    });
+
+    const inspection = document.querySelector(".inspection-pane");
+    const workbench = document.querySelector(".app-main");
+    expect(inspection).not.toBeNull();
+    expect(inspection).toBeVisible();
+
+    await userEvent.click(screen.getByRole("button", { name: "Maximize editor" }));
+
+    expect(screen.getByRole("button", { name: "Restore editor" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(workbench).toHaveClass("is-editor-max");
+    expect(inspection).not.toBeVisible();
+
+    await userEvent.click(screen.getByRole("button", { name: "Restore editor" }));
+
+    expect(screen.getByRole("button", { name: "Maximize editor" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    expect(workbench).not.toHaveClass("is-editor-max");
+    expect(inspection).toBeVisible();
+  });
+
+  it("leaves the maximized editor with the escape key", async () => {
+    store(HALF_ADDER);
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("Evaluation graph")).toBeInTheDocument();
+    });
+
+    const inspection = document.querySelector(".inspection-pane");
+    await userEvent.click(screen.getByRole("button", { name: "Maximize editor" }));
+    expect(document.querySelector(".app-main")).toHaveClass("is-editor-max");
+    expect(inspection).not.toBeVisible();
+
+    await userEvent.keyboard("{Escape}");
+
+    expect(document.querySelector(".app-main")).not.toHaveClass("is-editor-max");
+    expect(inspection).toBeVisible();
+  });
+
+  it("resizes the editor text and keeps the choice", async () => {
+    store(HALF_ADDER);
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("Evaluation graph")).toBeInTheDocument();
+    });
+
+    const readout = screen.getByRole("button", { name: /Editor font size \d+ pixels/ });
+    expect(readout).toHaveTextContent("15px");
+
+    await userEvent.click(screen.getByRole("button", { name: "Increase editor font size" }));
+    expect(readout).toHaveTextContent("16px");
+    expect(window.localStorage.getItem(FONT_SIZE_KEY)).toBe("16");
+
+    await userEvent.click(screen.getByRole("button", { name: "Decrease editor font size" }));
+    expect(readout).toHaveTextContent("15px");
+
+    await userEvent.click(screen.getByRole("button", { name: /Editor font size \d+ pixels/ }));
+    expect(readout).toHaveTextContent("15px");
+  });
+
+  it("restores the editor text size on the next visit", async () => {
+    store(HALF_ADDER);
+    window.localStorage.setItem(FONT_SIZE_KEY, "19");
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("Evaluation graph")).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole("button", { name: /Editor font size \d+ pixels/ })).toHaveTextContent(
+      "19px",
+    );
   });
 });

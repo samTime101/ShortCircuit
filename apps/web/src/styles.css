@@ -427,6 +427,17 @@ kbd {
   background: var(--panel);
 }
 
+/* A maximized editor takes the whole workbench; the inspection pane steps
+   aside but keeps its state. */
+.app-main.is-editor-max {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.inspection-pane[hidden] {
+  display: none;
+}
+
 /* ---------------- Editor chrome ---------------- */
 
 .pane-chrome {
@@ -503,6 +514,45 @@ kbd {
 .icon-button.tiny {
   width: 22px;
   height: 22px;
+}
+
+.icon-button:disabled {
+  color: var(--line-strong);
+  cursor: default;
+}
+
+.icon-button:disabled:hover {
+  background: transparent;
+  color: var(--line-strong);
+}
+
+/* Editor text size control. */
+.font-size-control {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 0 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+
+.font-size-value {
+  min-width: 34px;
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  cursor: pointer;
+  transition: color 0.14s ease;
+}
+
+.font-size-value:hover {
+  color: var(--text);
 }
 
 .source-editor {

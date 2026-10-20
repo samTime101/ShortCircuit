@@ -47,8 +47,12 @@ import {
   Download,
   FileCode,
   Flask,
+  FontDecrease,
+  FontIncrease,
   Graduation,
   Grid,
+  Maximize,
+  Minimize,
   Play,
   Table,
 } from "./components/Icons";
@@ -58,7 +62,18 @@ import { insertRecordedCase, suggestCaseName } from "./lib/recordTest";
 import { appendSample, sampleFromSnapshot, type TraceSample } from "./lib/trace";
 import { useRoute } from "./lib/router";
 import { createCompilerClient, type CompilerClient } from "./lib/compilerClient";
-import { readMode, writeMode, type StudioMode } from "./lib/settings";
+import {
+  DEFAULT_EDITOR_FONT_SIZE,
+  EDITOR_FONT_SIZE_STEP,
+  MAX_EDITOR_FONT_SIZE,
+  MIN_EDITOR_FONT_SIZE,
+  clampEditorFontSize,
+  readEditorFontSize,
+  readMode,
+  writeEditorFontSize,
+  writeMode,
+  type StudioMode,
+} from "./lib/settings";
 
 const STORAGE_KEY = "shortcircuit.source.v1";
 const DISPLAY_STORAGE_KEY = "shortcircuit.displays.v1";
@@ -147,6 +162,8 @@ function Studio({
   const [testResult, setTestResult] = useState<TestRunResult | null>(null);
   const [examplesOpen, setExamplesOpen] = useState(false);
   const [toast, setToast] = useState<{ id: number; message: string } | null>(null);
+  const [editorMaximized, setEditorMaximized] = useState(false);
+  const [editorFontSize, setEditorFontSize] = useState(readEditorFontSize);
 
   const editorRef = useRef<SourceEditorHandle>(null);
   const compilerRef = useRef<CompilerClient | null>(null);
@@ -184,6 +201,10 @@ function Studio({
   useEffect(() => {
     writeMode(mode);
   }, [mode]);
+
+  useEffect(() => {
+    writeEditorFontSize(editorFontSize);
+  }, [editorFontSize]);
 
   useEffect(() => {
     try {
@@ -468,16 +489,53 @@ function Studio({
     notify("Formatted LogicFlow source");
   }, [source, compileNow, notify]);
 
+  const toggleEditorMaximized = useCallback(() => {
+    setEditorMaximized((current) => !current);
+  }, []);
+
+  const growEditorFont = useCallback(() => {
+    setEditorFontSize((current) =>
+      clampEditorFontSize(current + EDITOR_FONT_SIZE_STEP),
+    );
+  }, []);
+
+  const shrinkEditorFont = useCallback(() => {
+    setEditorFontSize((current) =>
+      clampEditorFontSize(current - EDITOR_FONT_SIZE_STEP),
+    );
+  }, []);
+
+  const resetEditorFont = useCallback(() => {
+    setEditorFontSize(DEFAULT_EDITOR_FONT_SIZE);
+  }, []);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+      const mod = event.metaKey || event.ctrlKey;
+      if (mod && event.key.toLowerCase() === "s") {
         event.preventDefault();
         handleFormat();
+        return;
+      }
+      if (mod && event.shiftKey && event.key.toLowerCase() === "m") {
+        event.preventDefault();
+        toggleEditorMaximized();
+        return;
+      }
+      // Escape leaves the maximized editor, but never steals the key from a
+      // dialog that is already open.
+      if (
+        event.key === "Escape" &&
+        editorMaximized &&
+        !examplesOpen &&
+        !recordingOpen
+      ) {
+        setEditorMaximized(false);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [handleFormat]);
+  }, [handleFormat, toggleEditorMaximized, editorMaximized, examplesOpen, recordingOpen]);
 
   const loadExample = (example: Example) => {
     setSource(example.source);
@@ -627,7 +685,10 @@ function Studio({
         </div>
       </header>
 
-      <main className="app-main" id="workbench">
+      <main
+        className={`app-main ${editorMaximized ? "is-editor-max" : ""}`}
+        id="workbench"
+      >
         <section className="editor-pane">
           <div className="pane-chrome">
             <div className="pane-tab">
@@ -642,6 +703,34 @@ function Studio({
                 {result?.circuits.length ?? 0} circuit{(result?.circuits.length ?? 0) === 1 ? "" : "s"} ·{" "}
                 {totalNodes} nodes
               </span>
+              <div className="font-size-control" role="group" aria-label="Editor font size">
+                <button
+                  className="icon-button tiny"
+                  onClick={shrinkEditorFont}
+                  disabled={editorFontSize <= MIN_EDITOR_FONT_SIZE}
+                  title="Smaller editor text"
+                  aria-label="Decrease editor font size"
+                >
+                  <FontDecrease size={14} />
+                </button>
+                <button
+                  className="font-size-value"
+                  onClick={resetEditorFont}
+                  title="Reset to the default size"
+                  aria-label={`Editor font size ${editorFontSize} pixels, reset to default`}
+                >
+                  {editorFontSize}px
+                </button>
+                <button
+                  className="icon-button tiny"
+                  onClick={growEditorFont}
+                  disabled={editorFontSize >= MAX_EDITOR_FONT_SIZE}
+                  title="Larger editor text"
+                  aria-label="Increase editor font size"
+                >
+                  <FontIncrease size={14} />
+                </button>
+              </div>
               <button
                 className="icon-button"
                 onClick={handleFormat}
@@ -658,6 +747,19 @@ function Studio({
               >
                 <Download size={15} />
               </button>
+              <button
+                className="icon-button"
+                onClick={toggleEditorMaximized}
+                aria-pressed={editorMaximized}
+                title={
+                  editorMaximized
+                    ? "Restore the split view (Esc)"
+                    : "Maximize the editor (Mod+Shift+M)"
+                }
+                aria-label={editorMaximized ? "Restore editor" : "Maximize editor"}
+              >
+                {editorMaximized ? <Minimize size={15} /> : <Maximize size={15} />}
+              </button>
             </div>
           </div>
 
@@ -672,6 +774,7 @@ function Studio({
               ref={editorRef}
               value={source}
               diagnostics={result?.diagnostics ?? []}
+              fontSize={editorFontSize}
               onChange={setSource}
               onRun={runNow}
             />
@@ -688,7 +791,7 @@ function Studio({
           />
         </section>
 
-        <section className="inspection-pane">
+        <section className="inspection-pane" hidden={editorMaximized}>
           <div className="inspection-tabs">
             <div className="tab-row" role="tablist" aria-label="Inspection views">
               {tabs.map((entry) => (

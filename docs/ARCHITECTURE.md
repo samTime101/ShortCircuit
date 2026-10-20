@@ -355,7 +355,9 @@ deferred by one frame and then runs synchronously.
 
 `Run` and example loading compile immediately and bypass the debounce. The
 editor's `Mod-Enter` runs; global `Mod-S` formats then compiles. Formatting
-replaces the source and triggers a fresh compile.
+replaces the source and triggers a fresh compile. `Mod-Shift-M` maximizes the
+editor over the inspection pane and `Esc` leaves it; the editor text size
+steps between 12px and 22px and is stored in `localStorage`.
 
 ### 6.2 Simulator lifecycle
 
