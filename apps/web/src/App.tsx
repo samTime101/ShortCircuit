@@ -3,7 +3,6 @@ import {
   IR_SCHEMA,
   LANGUAGE_VERSION,
   Simulator,
-  compile,
   formatSource,
   generateTruthTable,
   runTests,
@@ -59,6 +58,7 @@ import { DEFAULT_EXAMPLE, EXAMPLES, type Example } from "./lib/examples";
 import { insertRecordedCase, suggestCaseName } from "./lib/recordTest";
 import { appendSample, sampleFromSnapshot, type TraceSample } from "./lib/trace";
 import { useRoute } from "./lib/router";
+import { createCompilerClient, type CompilerClient } from "./lib/compilerClient";
 
 const STORAGE_KEY = "shortcircuit.source.v1";
 const DISPLAY_STORAGE_KEY = "shortcircuit.displays.v1";
@@ -149,6 +149,9 @@ function Studio({ onOpenDocs, onOpenLearn }: { onOpenDocs(): void; onOpenLearn()
   const [toast, setToast] = useState<{ id: number; message: string } | null>(null);
 
   const editorRef = useRef<SourceEditorHandle>(null);
+  const compilerRef = useRef<CompilerClient | null>(null);
+  if (compilerRef.current === null) compilerRef.current = createCompilerClient();
+  const compiler = compilerRef.current;
   const compileSeq = useRef(0);
   const lastCompiledSource = useRef<string | null>(null);
   const debounceTimer = useRef<number | null>(null);
@@ -165,6 +168,10 @@ function Studio({ onOpenDocs, onOpenLearn }: { onOpenDocs(): void; onOpenLearn()
     const timer = window.setTimeout(() => setToast(null), 2400);
     return () => window.clearTimeout(timer);
   }, [toast]);
+
+  useEffect(() => {
+    return () => compiler.dispose();
+  }, [compiler]);
 
   useEffect(() => {
     try {
@@ -218,45 +225,49 @@ function Studio({ onOpenDocs, onOpenLearn }: { onOpenDocs(): void; onOpenLearn()
       const sequence = ++compileSeq.current;
       setCompiling(true);
 
-      // Defer the synchronous compiler by a frame so the editor can paint its
-      // typing state and the console can show its compiling indicator.
-      window.setTimeout(() => {
-        if (sequence !== compileSeq.current) return;
-        const next = compile(nextSource);
-        if (sequence !== compileSeq.current) return;
+      // The compiler runs in a worker, so a large design never blocks typing.
+      // A result that is older than the newest request is dropped.
+      void compiler
+        .compile(nextSource)
+        .then((next) => {
+          if (sequence !== compileSeq.current) return;
 
-        setResult(next);
-        setCompiling(false);
+          setResult(next);
+          setCompiling(false);
 
-        if (!next.ok) {
-          setSimulator(null);
-          setSnapshot(null);
-          setInputValues({});
-          setRuntimeError(null);
-          setTruthTable(null);
-          setTestResult(null);
-          return;
-        }
+          if (!next.ok) {
+            setSimulator(null);
+            setSnapshot(null);
+            setInputValues({});
+            setRuntimeError(null);
+            setTruthTable(null);
+            setTestResult(null);
+            return;
+          }
 
-        const requested = preferredCircuit ?? activeCircuitRef.current;
-        const circuit =
-          next.circuits.find((entry) => entry.name === requested) ??
-          next.circuits[0];
+          const requested = preferredCircuit ?? activeCircuitRef.current;
+          const circuit =
+            next.circuits.find((entry) => entry.name === requested) ??
+            next.circuits[0];
 
-        if (!circuit) {
-          setSimulator(null);
-          setSnapshot(null);
-          setInputValues({});
-          setTruthTable(null);
+          if (!circuit) {
+            setSimulator(null);
+            setSnapshot(null);
+            setInputValues({});
+            setTruthTable(null);
+            setTestResult(runTests(next));
+            return;
+          }
+
+          activateCircuit(circuit);
           setTestResult(runTests(next));
-          return;
-        }
-
-        activateCircuit(circuit);
-        setTestResult(runTests(next));
-      }, 0);
+        })
+        .catch(() => {
+          if (sequence !== compileSeq.current) return;
+          setCompiling(false);
+        });
     },
-    [activateCircuit],
+    [activateCircuit, compiler],
   );
 
   // Compile immediately on mount, then debounce edits.
