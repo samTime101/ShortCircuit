@@ -16,7 +16,7 @@ export class DiagnosticBag {
     message: string,
     line: number,
     column: number,
-    options: Pick<Diagnostic, "hint" | "length" | "related"> = {},
+    options: Pick<Diagnostic, "hint" | "length" | "related" | "suggestion"> = {},
   ): void {
     this.add({ code, severity: "error", message, line, column, ...options });
     this.hasErrors = true;
@@ -27,7 +27,7 @@ export class DiagnosticBag {
     message: string,
     line: number,
     column: number,
-    options: Pick<Diagnostic, "hint" | "length" | "related"> = {},
+    options: Pick<Diagnostic, "hint" | "length" | "related" | "suggestion"> = {},
   ): void {
     this.add({ code, severity: "warning", message, line, column, ...options });
   }

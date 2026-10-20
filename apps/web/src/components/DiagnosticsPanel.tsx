@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { Diagnostic } from "@shortcircuit/engine";
+import type { Diagnostic, DiagnosticFix } from "@shortcircuit/engine";
 import { AlertTriangle, Check, ChevronDown, Info, X } from "./Icons";
 
 interface DiagnosticsPanelProps {
@@ -9,6 +9,7 @@ interface DiagnosticsPanelProps {
   circuitCount: number;
   nodeCount: number;
   onSelect(diagnostic: Diagnostic): void;
+  onApplyFix(fix: DiagnosticFix): void;
 }
 
 export function DiagnosticsPanel({
@@ -18,6 +19,7 @@ export function DiagnosticsPanel({
   circuitCount,
   nodeCount,
   onSelect,
+  onApplyFix,
 }: DiagnosticsPanelProps) {
   const errorCount = diagnostics.filter((item) => item.severity === "error").length;
   const warningCount = diagnostics.filter((item) => item.severity === "warning").length;
@@ -100,9 +102,38 @@ export function DiagnosticsPanel({
                     <span className="diagnostic-main">
                       <span className="diagnostic-line">
                         <span className="diag-code">{diagnostic.code}</span>
-                        <span>{diagnostic.message}</span>
+                        <span>
+                          {diagnostic.plain ? diagnostic.plain.headline : diagnostic.message}
+                        </span>
                       </span>
-                      {diagnostic.hint ? <span className="diagnostic-hint">{diagnostic.hint}</span> : null}
+                      {diagnostic.plain ? (
+                        <span className="diagnostic-hint">{diagnostic.plain.detail}</span>
+                      ) : null}
+                      {diagnostic.plain ? null : diagnostic.hint ? (
+                        <span className="diagnostic-hint">{diagnostic.hint}</span>
+                      ) : null}
+                      {diagnostic.plain?.fix ? (
+                        <span className="diagnostic-fix">
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            className="fix-button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onApplyFix(diagnostic.plain!.fix!);
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                onApplyFix(diagnostic.plain!.fix!);
+                              }
+                            }}
+                          >
+                            {diagnostic.plain.fix.label}
+                          </span>
+                        </span>
+                      ) : null}
                       {sourceLine.trim() ? (
                         <span className="diagnostic-snippet">
                           <span>{diagnostic.line}</span>

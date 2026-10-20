@@ -1,5 +1,6 @@
 import {
   BUILTIN_BY_NAME,
+  BUILTINS,
   type CircuitIR,
   type CircuitNode,
   type CircuitOutput,
@@ -13,6 +14,7 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { explainNode, gateTruthTable } from "./nodeExplain";
 import { Check, Maximize, Minus, Plus, X } from "./Icons";
 
 const CELL_WIDTH = 174;
@@ -410,9 +412,30 @@ export function CircuitGraph({ circuit, snapshot }: CircuitGraphProps) {
 
   const nodeMap = useMemo(() => new Map(layout.nodes.map((node) => [node.id, node])), [layout.nodes]);
   const selected = selectedId ? nodeMap.get(selectedId) : undefined;
+
   const originalSelected = selected?.sourceId
     ? circuit.nodes.find((node) => node.id === selected.sourceId)
     : undefined;
+
+  const builtinSpec = selected?.op
+    ? BUILTINS.find((entry) => entry.name === selected.op)
+    : undefined;
+  const explanation = selected
+    ? explainNode({
+        kind: selected.kind,
+        op: selected.op,
+        description: builtinSpec?.description,
+        tip: builtinSpec?.tip,
+        widthRule: builtinSpec?.widthRule,
+      })
+    : undefined;
+  const truthTable = selected?.kind === "operation" ? gateTruthTable(selected.op) : undefined;
+  const liveInputs = selected
+    ? (originalSelected?.operands ?? [])
+        .map((id) => nodeMap.get(id))
+        .filter((node): node is GraphNode => Boolean(node))
+        .map((node) => ({ name: node.label, value: compactValue(node.value, node.width) }))
+    : [];
 
   const edgePath = (edge: GraphEdge) => {
     const from = nodeMap.get(edge.from);
@@ -596,6 +619,42 @@ export function CircuitGraph({ circuit, snapshot }: CircuitGraphProps) {
               {selected.width} bit{selected.width === 1 ? "" : "s"}
             </span>
           </div>
+          <p className="graph-inspector-explain">{explanation?.sentence}</p>
+          {explanation?.detail ? (
+            <p className="graph-inspector-explain is-detail">{explanation.detail}</p>
+          ) : null}
+          {selected.kind === "operation" && builtinSpec ? (
+            <p className="graph-inspector-explain is-detail">{builtinSpec.widthRule}</p>
+          ) : null}
+          {liveInputs.length > 0 ? (
+            <p className="graph-inspector-explain is-detail">
+              Right now:{" "}
+              {liveInputs.map((input) => `${input.name} = ${input.value}`).join(", ")} →{" "}
+              {compactValue(selected.value, selected.width)}
+            </p>
+          ) : null}
+          {truthTable ? (
+            <table className="graph-inspector-table">
+              <thead>
+                <tr>
+                  {truthTable[0]!.inputs.map((_, index) => (
+                    <th key={index}>in{index + 1}</th>
+                  ))}
+                  <th>out</th>
+                </tr>
+              </thead>
+              <tbody>
+                {truthTable.map((row) => (
+                  <tr key={row.inputs.join("")}>
+                    {row.inputs.map((bit, index) => (
+                      <td key={index}>{bit}</td>
+                    ))}
+                    <td className="is-output">{row.output}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : null}
           <dl>
             <div>
               <dt>Decimal</dt>
@@ -653,4 +712,6 @@ export function CircuitGraph({ circuit, snapshot }: CircuitGraphProps) {
       ) : null}
     </div>
   );
+
+
 }

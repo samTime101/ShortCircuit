@@ -9,6 +9,7 @@ import {
   runTests,
   type CircuitIR,
   type CompileResult,
+  type DiagnosticFix,
   type SimulationSnapshot,
   type TestRunResult,
   type TruthTable,
@@ -389,6 +390,24 @@ function Studio({ onOpenDocs }: { onOpenDocs(): void }) {
     notify("LogicFlow source downloaded");
   };
 
+  const applyFix = useCallback(
+    (fix: DiagnosticFix) => {
+      const lines = source.split("\n");
+      const index = fix.line - 1;
+      const line = lines[index];
+      if (line === undefined) return;
+      const start = Math.max(0, fix.column - 1);
+      const end = Math.min(line.length, start + fix.length);
+      const next = [...lines];
+      next[index] = `${line.slice(0, start)}${fix.text}${line.slice(end)}`;
+      const patched = next.join("\n");
+      setSource(patched);
+      compileNow(patched, activeCircuitRef.current);
+      notify(`Applied the fix for ${fix.label}`);
+    },
+    [source, compileNow, notify],
+  );
+
   const jumpToDiagnostic = (line: number, column: number) => {
     editorRef.current?.gotoLine(line, column);
   };
@@ -522,6 +541,7 @@ function Studio({ onOpenDocs }: { onOpenDocs(): void }) {
             circuitCount={result?.circuits.length ?? 0}
             nodeCount={totalNodes}
             onSelect={(diagnostic) => jumpToDiagnostic(diagnostic.line, diagnostic.column)}
+            onApplyFix={applyFix}
           />
         </section>
 

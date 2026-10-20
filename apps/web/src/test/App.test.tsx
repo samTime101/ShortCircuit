@@ -99,6 +99,29 @@ describe("studio app", () => {
     });
   });
 
+  it("explains a typo in plain language and fixes it in one click", async () => {
+    store(`CIRCUIT HalfAdder
+INPUT a
+INPUT b
+sum = XOR(a, b)
+carry = AND(a, b)
+OUTPUT sum
+OUTPUT cary
+END`);
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/no signal with that name/i).length).toBeGreaterThan(0);
+    });
+
+    const fix = screen.getByText(/replace with/i);
+    await userEvent.click(fix);
+
+    await waitFor(() => {
+      expect(window.localStorage.getItem(STORAGE_KEY)).toContain("OUTPUT carry");
+    });
+  });
+
   it("keeps the source in local storage", async () => {
     store(HALF_ADDER);
     render(<App />);

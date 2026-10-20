@@ -24,6 +24,7 @@ import {
   type IntrinsicCircuit,
 } from "./builtins";
 import { DiagnosticBag, suggestName } from "./diagnostics";
+import { plainFor } from "./plainLanguage";
 import { valueAsIndex } from "./values";
 import type {
   CircuitIR,
@@ -213,7 +214,10 @@ export class ProgramAnalyzer {
 
     this.compileTests();
 
-    const diagnostics = this.bag.sorted();
+    const diagnostics = this.bag.sorted().map((diagnostic) => {
+      const plain = plainFor(diagnostic);
+      return plain ? { ...diagnostic, plain } : diagnostic;
+    });
     const ok = !this.bag.blocked;
     const ir: ProgramIR | null = ok
       ? {
@@ -588,6 +592,8 @@ export class ProgramAnalyzer {
           hint: suggestion
             ? `Did you mean "${suggestion}"? Test names match circuit names exactly.`
             : "Declare the circuit before referencing it in a TEST block.",
+          suggestion,
+          length: test.name.length,
         },
       );
       return;
@@ -718,6 +724,8 @@ export class ProgramAnalyzer {
               hint: suggestion
                 ? `Did you mean "${suggestion}"?`
                 : `Available inputs: ${[...context.inputByName.keys()].join(", ") || "none"}.`,
+              suggestion,
+              length: statement.name.length,
             },
           );
           continue;
@@ -785,6 +793,8 @@ export class ProgramAnalyzer {
               hint: suggestion
                 ? `Did you mean "${suggestion}"?`
                 : `Available outputs and state: ${candidates.join(", ") || "none"}.`,
+              suggestion,
+              length: fullName.length,
             },
           );
           continue;
@@ -848,6 +858,8 @@ export class ProgramAnalyzer {
               hint: suggestion
                 ? `Did you mean state "${suggestion}"?`
                 : `LOAD can only set stored state. Available state: ${candidates.join(", ") || "none"}.`,
+              suggestion,
+              length: fullName.length,
             },
           );
           continue;
@@ -949,6 +961,11 @@ export class ProgramAnalyzer {
 
   // ---- Shared services used by scope builders -----------------------------
 
+  /** The original source text, used to point diagnostics at exact columns. */
+  get sourceText(): string {
+    return this.source;
+  }
+
   addNode(node: CircuitNode, context: BuildContext): boolean {
     if (this.nodeCount >= this.options.maxNodes) {
       if (!this.nodeLimitReported) {
@@ -1026,6 +1043,19 @@ export class ProgramAnalyzer {
 
   error(code: string, message: string, line: number, column: number, hint?: string): void {
     this.bag.error(code, message, line, column, { hint });
+  }
+
+  /** Records a diagnostic that can offer a one-click rename. */
+  errorWithSuggestion(
+    code: string,
+    message: string,
+    line: number,
+    column: number,
+    suggestion: string | undefined,
+    length: number,
+    hint: string,
+  ): void {
+    this.bag.error(code, message, line, column, { hint, suggestion, length });
   }
 
   errorWithRelated(
@@ -1297,11 +1327,13 @@ class ScopeBuilder {
     if (!entry) {
       const suggestion = suggestName(base, this.entries.keys(), 2);
       const available = [...this.entries.keys()];
-      this.analyzer.error(
+      this.analyzer.errorWithSuggestion(
         "E201",
         `Unknown signal "${base}".`,
         reference.span.line,
         reference.span.column,
+        suggestion,
+        base.length,
         suggestion
           ? `Did you mean "${suggestion}"? Available signals: ${available.join(", ") || "none"}.`
           : `Available signals: ${available.join(", ") || "none"}.`,
@@ -1348,11 +1380,13 @@ class ScopeBuilder {
     if (!output) {
       const candidates = [...new Set([...resolved.outputs.keys(), ...resolved.shortOutputs.keys()])];
       const suggestion = suggestName(rest.join("."), candidates, 3);
-      this.analyzer.error(
+      this.analyzer.errorWithSuggestion(
         "E204",
         `Circuit instance "${base}" has no output "${full}".`,
         reference.span.line,
         reference.span.column,
+        suggestion ? `${base}.${suggestion}` : undefined,
+        full.length,
         suggestion
           ? `Did you mean "${base}.${suggestion}"?`
           : `Available outputs: ${candidates.join(", ") || "none"}.`,
@@ -1460,11 +1494,13 @@ class ScopeBuilder {
         ]),
       ];
       const suggestion = suggestName(call.name, candidates, 3);
-      this.analyzer.error(
+      this.analyzer.errorWithSuggestion(
         "E210",
         `Unknown component or function "${call.name}".`,
         call.span.line,
         call.span.column,
+        suggestion,
+        call.name.length,
         suggestion
           ? `Did you mean ${suggestion}(...)?`
           : "Use a built-in gate/component or define a CIRCUIT with that name.",
@@ -1973,6 +2009,16 @@ class ScopeBuilder {
     return this.createConstant(0n, 1, line, column, "0");
   }
 
+  /**
+   * Finds the column of a name on a line, so diagnostics and one-click fixes
+   * point at the name itself rather than at the start of the statement.
+   */
+  private locateName(line: number, column: number, name: string): number {
+    const sourceLine = this.analyzer.sourceText.split("\n")[line - 1] ?? "";
+    const index = sourceLine.indexOf(name, Math.max(0, column - 1));
+    return index === -1 ? column : index + 1;
+  }
+
   private resolveOutputs(): BuiltOutput[] {
     const outputs: BuiltOutput[] = [];
     const seen = new Set<string>();
@@ -1980,7 +2026,14 @@ class ScopeBuilder {
       const reference: ReferenceAst = {
         kind: "Reference",
         path: declaration.path,
-        span: declaration.span,
+        span: {
+          ...declaration.span,
+          column: this.locateName(
+            declaration.span.line,
+            declaration.span.column,
+            declaration.path[0] ?? "",
+          ),
+        },
       };
       const ref = this.resolveReference(reference);
       const name = declaration.path.join(".");
@@ -2122,11 +2175,13 @@ class ScopeBuilder {
         const name = arg.name!;
         if (!target.inputWidths.has(name)) {
           const suggestion = suggestName(name, inputNames, 3);
-          this.analyzer.error(
+          this.analyzer.errorWithSuggestion(
             "E204",
             `Circuit ${target.name} has no input "${name}".`,
             arg.span.line,
             arg.span.column,
+            suggestion,
+            name.length,
             suggestion
               ? `Did you mean "${suggestion}"? Inputs: ${inputNames.join(", ")}.`
               : `Available inputs: ${inputNames.join(", ") || "none"}.`,
@@ -2420,11 +2475,13 @@ class ScopeBuilder {
         if (!state) {
           const available = [...this.stateRefs.keys()];
           const suggestion = suggestName(name, available, 3);
-          this.analyzer.error(
+          this.analyzer.errorWithSuggestion(
             "E220",
             `"${name}" is not a STATE signal in this circuit.`,
             statement.span.line,
             statement.span.column,
+            suggestion,
+            name.length,
             suggestion
               ? `Did you mean state "${suggestion}"?`
               : "Only STATE signals can be updated inside an ON block. Use a combinational assignment for ordinary signals.",

@@ -683,6 +683,35 @@ END`);
     expect(result.diagnostics.find((entry) => entry.code === "E210")?.hint).toContain("XOR");
   });
 
+  it("explains diagnostics in plain language and offers a fix", () => {
+    const result = compile(`CIRCUIT Typo
+INPUT a
+INPUT b
+sum = XOR(a, b)
+carry = AND(a, b)
+OUTPUT sum
+OUTPUT cary
+END`);
+    const diagnostic = result.diagnostics.find((entry) => entry.code === "E201");
+    expect(diagnostic?.plain).toBeDefined();
+    expect(diagnostic?.plain?.headline).toMatch(/no signal/i);
+    expect(diagnostic?.plain?.detail.length).toBeGreaterThan(10);
+    expect(diagnostic?.plain?.fix?.text).toBe("carry");
+    expect(diagnostic?.plain?.fix?.label).toContain("carry");
+  });
+
+  it("explains width mismatches without offering a blind fix", () => {
+    const result = compile(`CIRCUIT Widths
+INPUT a : BUS(8)
+INPUT b
+bad = AND(a, b)
+OUTPUT bad
+END`);
+    const diagnostic = result.diagnostics.find((entry) => entry.code === "E301");
+    expect(diagnostic?.plain?.headline).toMatch(/different sizes/i);
+    expect(diagnostic?.plain?.fix).toBeUndefined();
+  });
+
   it("keeps the source and never returns an IR after fatal errors", () => {
     const source = "CIRCUIT Broken\nINPUT a\n";
     const result = compile(source);

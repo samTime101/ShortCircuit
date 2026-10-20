@@ -18,6 +18,20 @@ export interface Diagnostic {
   column: number;
   length?: number;
   hint?: string;
+  /** A name the diagnostic believes the author meant. */
+  suggestion?: string;
+  /** Plain-language headline and explanation for people new to the language. */
+  plain?: {
+    headline: string;
+    detail: string;
+    fix?: {
+      label: string;
+      text: string;
+      line: number;
+      column: number;
+      length: number;
+    };
+  };
   related?: Array<{
     message: string;
     line: number;
