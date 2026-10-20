@@ -1,0 +1,21 @@
+{
+  "name": "short-circuit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Short Circuit — a text-first digital logic language and simulation studio.",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @shortcircuit/web",
+    "build": "npm run build -w @shortcircuit/web",
+    "preview": "npm run preview -w @shortcircuit/web",
+    "test": "vitest run",
+    "typecheck": "npm run typecheck -w @shortcircuit/engine && npm run typecheck -w @shortcircuit/web && tsc --noEmit -p tests/tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.5"
+  }
+}
