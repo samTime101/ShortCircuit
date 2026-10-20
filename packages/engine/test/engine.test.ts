@@ -835,6 +835,29 @@ END`, { maxLoopDepth: 2 });
   });
 });
 
+describe("literal clarity", () => {
+  it("warns when a bare number could be read two ways", () => {
+    const result = compile(`CIRCUIT Ambiguous
+INPUT a : BUS(4)
+value = ADD(a, 10)
+OUTPUT value
+END`);
+    const warning = result.diagnostics.find((entry) => entry.code === "W402");
+    expect(warning).toBeDefined();
+    expect(warning?.message).toContain("decimal");
+    expect(result.ok).toBe(true);
+  });
+
+  it("does not warn when both readings agree", () => {
+    const result = compile(`CIRCUIT Clear
+INPUT a : BUS(4)
+value = ADD(a, 0010)
+OUTPUT value
+END`);
+    expect(result.diagnostics.some((entry) => entry.code === "W402")).toBe(false);
+  });
+});
+
 describe("verilog export", () => {
   it("writes a module with continuous assignments", () => {
     const result = compile(`CIRCUIT HalfAdder

@@ -244,6 +244,10 @@ const TEMPLATES: Record<string, Template> = {
     headline: "This loop has no values to run",
     detail: "Write the lower bound first, for example FOR i IN 0..7.",
   },
+  W402: {
+    headline: "This number could be read two ways",
+    detail: "A number made only of 0 and 1 can be decimal or binary. Use the 0b prefix to be explicit.",
+  },
   R500: {
     headline: "Division by zero",
     detail: "Guard the divisor before dividing.",

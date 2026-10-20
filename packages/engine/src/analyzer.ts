@@ -1098,6 +1098,7 @@ export class ProgramAnalyzer {
   readTestLiteral(literal: LiteralAst, context = "literal"): BitValue {
     try {
       const value = parseTestLiteral(literal.raw);
+      this.warnAmbiguousLiteral(literal, "binary");
       if (value.width > this.options.maxWidth) {
         this.bag.error(
           "E320",
@@ -1121,6 +1122,7 @@ export class ProgramAnalyzer {
   readLiteral(literal: LiteralAst, context = "literal"): BitValue {
     try {
       const value = parseLanguageLiteral(literal.raw);
+      this.warnAmbiguousLiteral(literal, "decimal");
       if (value.width > this.options.maxWidth) {
         this.bag.error(
           "E320",
@@ -1157,6 +1159,32 @@ export class ProgramAnalyzer {
       { hint: "Use a number, a CONST, or a loop variable." },
     );
     return null;
+  }
+
+  /**
+   * Warns when a bare digit string could be read two ways, such as 10 or 11.
+   * A leading zero makes both readings agree, so those are left alone.
+   */
+  private warnAmbiguousLiteral(literal: LiteralAst, reading: "decimal" | "binary"): void {
+    const raw = literal.raw.replaceAll("_", "");
+    if (!/^[01]+$/.test(raw) || raw.length < 2 || raw.startsWith("0")) return;
+    const decimal = Number.parseInt(raw, 10);
+    const binary = Number.parseInt(raw, 2);
+    if (decimal === binary) return;
+    this.bag.warning(
+      "W402",
+      reading === "decimal"
+        ? `"${literal.raw}" is read as the decimal number ${decimal}. Write 0b${raw} for the binary value ${binary}.`
+        : `"${literal.raw}" is read as the binary value ${binary} in a test. Write 0b${raw} to be explicit.`,
+      literal.span.line,
+      literal.span.column,
+      {
+        hint:
+          reading === "decimal"
+            ? "Binary values always need the 0b prefix."
+            : "Test values made only of 0 and 1 are read as binary.",
+      },
+    );
   }
 
   private checkWidth(width: number, span: SourceSpan, context: string): void {

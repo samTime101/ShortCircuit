@@ -129,6 +129,23 @@ The engine has no DOM, React, or browser dependency. Another implementation can 
 - Clocked test sequences and multi-cycle traces
 - More backends: alternate language hosts, WASM, hardware description generators
 
+## Contributing
+
+The project is MIT licensed (see [LICENSE](LICENSE)). Every change should keep
+the three promises the engine makes: static validation before simulation, no
+silent width truncation, and no plausible output after a fatal error.
+
+```bash
+npm test        # engine, studio, and cross-package tests
+npm run typecheck
+npm run build
+```
+
+A GitHub Actions workflow runs the same three commands on every push and pull
+request.
+
+---
+
 ## Documentation
 
 - [Language reference](docs/LANGUAGE.md)
