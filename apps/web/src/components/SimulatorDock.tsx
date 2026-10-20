@@ -1,0 +1,267 @@
+import { useEffect, useMemo, useState } from "react";
+import {
+  formatBinary,
+  parseSimulationInput,
+  type CircuitIR,
+  type SimulationSnapshot,
+} from "@shortcircuit/engine";
+import { Clock, RotateCcw, Zap } from "./Icons";
+
+interface SimulatorDockProps {
+  circuit: CircuitIR;
+  snapshot: SimulationSnapshot | null;
+  inputValues: Record<string, string>;
+  runtimeError: string | null;
+  onInputChange(name: string, value: string): void;
+  onReset(): void;
+}
+
+function BusTextField({
+  name,
+  width,
+  value,
+  onChange,
+}: {
+  name: string;
+  width: number;
+  value: string;
+  onChange(value: string): void;
+}) {
+  const [draft, setDraft] = useState(value);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDraft(value);
+    setError(null);
+  }, [value]);
+
+  const commit = () => {
+    try {
+      const parsed = parseSimulationInput(draft, width);
+      setError(null);
+      onChange(formatBinary(parsed, width));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  };
+
+  return (
+    <div className="bus-text-field">
+      <input
+        value={draft}
+        aria-label={`${name} binary value`}
+        spellCheck={false}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            commit();
+            (event.target as HTMLInputElement).blur();
+          }
+        }}
+      />
+      {error ? <span className="field-error">{error}</span> : null}
+    </div>
+  );
+}
+
+export function SimulatorDock({
+  circuit,
+  snapshot,
+  inputValues,
+  runtimeError,
+  onInputChange,
+  onReset,
+}: SimulatorDockProps) {
+  const clockInputNames = useMemo(() => {
+    const labels = new Set<string>();
+    for (const event of circuit.events) {
+      const clockNode = circuit.nodes.find((node) => node.id === event.clock);
+      if (clockNode?.inputName) labels.add(clockNode.inputName);
+      else if (clockNode?.label) labels.add(clockNode.label);
+    }
+    for (const input of circuit.inputs) {
+      if (input.name.toLowerCase() === "clock" && input.width === 1) labels.add(input.name);
+    }
+    return labels;
+  }, [circuit]);
+
+  const cascadeEvents = circuit.sequential ? (
+    <span className="sim-clock-hint">
+      <Clock size={12} />
+      Toggle a clock input 0 → 1 to fire a rising edge
+    </span>
+  ) : null;
+
+  return (
+    <section className="sim-dock">
+      <div className="sim-dock-head">
+        <div className="sim-dock-title">
+          <span className="live-dot" />
+          <span>Live simulation</span>
+          {snapshot?.firedEvents.length ? (
+            <span className="event-chip">
+              <Zap size={11} />
+              {snapshot.firedEvents
+                .map((event) => `${event.edge.toUpperCase()}`)
+                .join(" · ")}
+            </span>
+          ) : null}
+        </div>
+        <div className="sim-dock-actions">
+          {cascadeEvents}
+          <button className="text-button compact" onClick={onReset} title="Reset all stored state">
+            <RotateCcw size={13} /> Reset
+          </button>
+        </div>
+      </div>
+
+      {runtimeError ? (
+        <div className="runtime-error">
+          <strong>Simulation stopped.</strong> {runtimeError}{" "}
+          <span>Source is untouched. Reset to start again.</span>
+        </div>
+      ) : null}
+
+      <div className="sim-columns">
+        <div className="sim-group inputs-group">
+          <div className="sim-group-title">
+            <span>Inputs</span>
+            <span className="group-count">{circuit.inputs.length}</span>
+          </div>
+          <div className="io-list">
+            {circuit.inputs.length === 0 ? (
+              <div className="io-empty">This circuit has no external inputs.</div>
+            ) : (
+              circuit.inputs.map((input) => {
+                const value = inputValues[input.name] ?? formatBinary(0n, input.width);
+                const isClock = clockInputNames.has(input.name);
+                if (input.width === 1) {
+                  const on = value.endsWith("1");
+                  return (
+                    <div className={`io-control bit-control ${isClock ? "is-clock" : ""}`} key={input.name}>
+                      <div className="io-label-row">
+                        <span className="io-label">
+                          {isClock ? <Clock size={12} /> : null}
+                          {input.name}
+                        </span>
+                        <span className="io-width">1b</span>
+                      </div>
+                      <button
+                        className={`bit-switch ${on ? "is-on" : ""}`}
+                        aria-label={`Toggle ${input.name}`}
+                        aria-pressed={on}
+                        onClick={() => onInputChange(input.name, on ? "0" : "1")}
+                      >
+                        <span className="bit-switch-track">
+                          <span className="bit-switch-thumb" />
+                        </span>
+                        <span className="bit-switch-value">{on ? "1" : "0"}</span>
+                      </button>
+                    </div>
+                  );
+                }
+
+                if (input.width > 16) {
+                  return (
+                    <div className="io-control bus-control" key={input.name}>
+                      <div className="io-label-row">
+                        <span className="io-label">{input.name}</span>
+                        <span className="io-width">{input.width}b</span>
+                      </div>
+                      <BusTextField
+                        name={input.name}
+                        width={input.width}
+                        value={value}
+                        onChange={(next) => onInputChange(input.name, next)}
+                      />
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="io-control bus-control" key={input.name}>
+                    <div className="io-label-row">
+                      <span className="io-label">{input.name}</span>
+                      <span className="io-width">{input.width}b</span>
+                    </div>
+                    <div className="bit-cells" aria-label={`${input.name} bits`}>
+                      {value.split("").map((bit, index) => {
+                        const bitIndex = input.width - 1 - index;
+                        return (
+                          <button
+                            className={`bit-cell ${bit === "1" ? "is-on" : ""}`}
+                            key={`${input.name}-${bitIndex}`}
+                            title={`${input.name}[${bitIndex}] = ${bit}. Click to flip.`}
+                            aria-label={`Flip ${input.name} bit ${bitIndex}`}
+                            onClick={() => {
+                              const next = value.split("");
+                              next[index] = bit === "1" ? "0" : "1";
+                              onInputChange(input.name, next.join(""));
+                            }}
+                          >
+                            {bit}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        <div className="sim-divider" />
+
+        <div className="sim-group outputs-group">
+          <div className="sim-group-title">
+            <span>Outputs</span>
+            <span className="group-count">{circuit.outputs.length}</span>
+          </div>
+          <div className="monitor-list">
+            {circuit.outputs.length === 0 ? (
+              <div className="io-empty">No outputs are exposed.</div>
+            ) : (
+              circuit.outputs.map((output) => {
+                const signal = snapshot?.outputs[output.name];
+                return (
+                  <div className="monitor-row" key={output.name}>
+                    <div className="monitor-label">
+                      <span className={`monitor-led ${signal?.binary.includes("1") ? "hot" : ""}`} />
+                      <span>{output.name}</span>
+                      <span className="io-width">{output.width}b</span>
+                    </div>
+                    <div className="monitor-value">
+                      <span className="binary-value">{signal?.binary ?? "—"}</span>
+                      <span className="decimal-value">
+                        {output.width > 1 && signal ? `#${signal.decimal}` : ""}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+            {circuit.states.length > 0 ? (
+              <div className="state-block">
+                <div className="state-title">Stored state</div>
+                {circuit.states.map((state) => (
+                  <div className="monitor-row state-row" key={state.node}>
+                    <div className="monitor-label">
+                      <span className="state-glyph">S</span>
+                      <span>{state.name}</span>
+                      <span className="io-width">{state.width}b</span>
+                    </div>
+                    <div className="monitor-value">
+                      <span className="binary-value">{snapshot?.states[state.name]?.binary ?? "—"}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
