@@ -23,6 +23,14 @@ export default defineConfig({
       },
       {
         test: {
+          name: "cli",
+          root: "./packages/cli",
+          environment: "node",
+          include: ["test/**/*.test.ts"],
+        },
+      },
+      {
+        test: {
           name: "cross",
           root: ".",
           environment: "node",

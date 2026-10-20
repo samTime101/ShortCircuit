@@ -9,11 +9,13 @@
   ],
   "scripts": {
     "dev": "npm run dev -w @shortcircuit/web",
-    "build": "npm run build -w @shortcircuit/web",
+    "build": "npm run build -w @shortcircuit/web && npm run build -w @shortcircuit/cli",
     "preview": "npm run preview -w @shortcircuit/web",
     "test": "vitest run",
-    "typecheck": "npm run typecheck -w @shortcircuit/engine && npm run typecheck -w @shortcircuit/web && tsc --noEmit -p tests/tsconfig.json",
-    "docs:generate": "node --experimental-strip-types scripts/generate-docs.mts"
+    "typecheck": "npm run typecheck -w @shortcircuit/engine && npm run typecheck -w @shortcircuit/web && npm run typecheck -w @shortcircuit/cli && tsc --noEmit -p tests/tsconfig.json",
+    "docs:generate": "node --experimental-strip-types scripts/generate-docs.mts",
+    "cli:build": "npm run build -w @shortcircuit/cli",
+    "cli": "node packages/cli/dist/cli.js"
   },
   "devDependencies": {
     "typescript": "^5.9.3",

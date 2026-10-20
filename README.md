@@ -129,6 +129,27 @@ The engine has no DOM, React, or browser dependency. Another implementation can 
 - Clocked test sequences and multi-cycle traces
 - More backends: alternate language hosts, WASM, hardware description generators
 
+## Command line
+
+The engine has no browser dependency, so the same tools run from a terminal.
+
+```bash
+npm run cli:build            # bundle the command line tool
+
+node packages/cli/dist/cli.js compile circuit.lf
+node packages/cli/dist/cli.js test circuit.lf
+node packages/cli/dist/cli.js truth-table circuit.lf --circuit HalfAdder
+node packages/cli/dist/cli.js format circuit.lf --write
+node packages/cli/dist/cli.js export-ir circuit.lf --out out.json
+node packages/cli/dist/cli.js export-verilog circuit.lf --out out.v
+```
+
+Every command exits with 0 on success and 1 on a diagnostic error or a failed
+test, so it works in a pipeline. `--json` prints machine-readable output where
+it is available.
+
+---
+
 ## Contributing
 
 The project is MIT licensed (see [LICENSE](LICENSE)). Every change should keep

@@ -29,3 +29,6 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Check the command line tool
+        run: node packages/cli/dist/cli.js help

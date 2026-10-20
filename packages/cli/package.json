@@ -1,0 +1,27 @@
+{
+  "name": "@shortcircuit/cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Command line tools for the Short Circuit LogicFlow language.",
+  "type": "module",
+  "bin": {
+    "shortcircuit": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "esbuild src/main.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/cli.js --banner:js='#!/usr/bin/env node' && chmod +x dist/cli.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@shortcircuit/engine": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.5"
+  }
+}

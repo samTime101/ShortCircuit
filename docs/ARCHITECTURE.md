@@ -480,7 +480,25 @@ the same design that runs in the studio can be handed to a synthesis tool.
 - A division by zero has no hardware meaning, so the export guards it and says
   so in a warning.
 
-### 6.11 Persistence and safety
+### 6.11 Command line
+
+`packages/cli` is a small Node front end for the same engine the studio uses.
+It parses arguments, runs one command, and sets the exit code, so it behaves
+like any other build tool:
+
+| Command | What it does |
+| --- | --- |
+| `compile` | Compiles a file and prints the diagnostics |
+| `test` | Runs the TEST blocks and reports pass or fail |
+| `truth-table` | Prints the truth table of a combinational circuit |
+| `format` | Formats a file, in place with `--write` |
+| `export-ir` | Writes the portable IR as JSON |
+| `export-verilog` | Writes Verilog modules and a testbench |
+
+The exit code is 0 on success and 1 on a diagnostic error or a failed test, so
+the tool can be used in a pipeline.
+
+### 6.12 Persistence and safety
 
 - Source persists under `localStorage` key `shortcircuit.source.v1`; failures
   (private browsing, quota) are ignored.
