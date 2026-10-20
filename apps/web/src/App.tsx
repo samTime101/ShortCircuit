@@ -51,6 +51,7 @@ import {
 } from "./components/Icons";
 import type { SourceEditorHandle } from "./editor/SourceEditor";
 import { DEFAULT_EXAMPLE, EXAMPLES, type Example } from "./lib/examples";
+import { insertRecordedCase, suggestCaseName } from "./lib/recordTest";
 import { useRoute } from "./lib/router";
 
 const STORAGE_KEY = "shortcircuit.source.v1";
@@ -106,6 +107,9 @@ function Studio({ onOpenDocs }: { onOpenDocs(): void }) {
   const [selectedClock, setSelectedClock] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [clockSpeed, setClockSpeed] = useState(2);
+  const [recording, setRecording] = useState<{ circuit: string; lines: string[] } | null>(null);
+  const [recordingName, setRecordingName] = useState("");
+  const [recordingOpen, setRecordingOpen] = useState(false);
   const [truthTable, setTruthTable] = useState<TruthTable | null>(null);
   const [testResult, setTestResult] = useState<TestRunResult | null>(null);
   const [examplesOpen, setExamplesOpen] = useState(false);
@@ -238,6 +242,11 @@ function Studio({ onOpenDocs }: { onOpenDocs(): void }) {
 
   const stepClock = useCallback(() => {
     if (!simulator || !selectedClock) return;
+    setRecording((current) =>
+      current
+        ? { ...current, lines: [...current.lines, `STEP`, `  INPUT ${selectedClock} = 1`, "END"] }
+        : current,
+    );
     try {
       simulator.setInput(selectedClock, "0");
       const next = simulator.setInput(selectedClock, "1");
@@ -251,6 +260,41 @@ function Studio({ onOpenDocs }: { onOpenDocs(): void }) {
       setRuntimeError(errorText(error));
     }
   }, [simulator, selectedClock]);
+
+  const startRecording = useCallback(() => {
+    if (!activeCircuitRef.current) return;
+    setRecording({ circuit: activeCircuitRef.current, lines: [] });
+    setRecordingName(suggestCaseName([]));
+  }, []);
+
+  const stopRecording = useCallback(() => {
+    setRecordingName(suggestCaseName(recording?.lines ?? []));
+    setRecordingOpen(true);
+  }, [recording]);
+
+  const expectThis = useCallback(
+    (name: string, value: string) => {
+      setRecording((current) =>
+        current ? { ...current, lines: [...current.lines, `EXPECT ${name} = ${value}`] } : current,
+      );
+    },
+    [],
+  );
+
+  const saveRecording = useCallback(() => {
+    if (!recording) return;
+    const label = recordingName.trim() || suggestCaseName(recording.lines);
+    const next = insertRecordedCase(source, {
+      circuit: recording.circuit,
+      label,
+      lines: recording.lines,
+    });
+    setRecording(null);
+    setRecordingOpen(false);
+    setSource(next);
+    compileNow(next, activeCircuitRef.current);
+    notify(`Added the test case "${label}"`);
+  }, [recording, recordingName, source, compileNow, notify]);
 
   const forceState = useCallback(
     (name: string, value: string) => {
@@ -318,6 +362,9 @@ function Studio({ onOpenDocs }: { onOpenDocs(): void }) {
 
   const onInputChange = (name: string, value: string) => {
     if (!simulator) return;
+    setRecording((current) =>
+      current ? { ...current, lines: [...current.lines, `INPUT ${name} = ${value}`] } : current,
+    );
     try {
       const next = simulator.setInput(name, value);
       setSnapshot(next);
@@ -633,6 +680,10 @@ function Studio({ onOpenDocs }: { onOpenDocs(): void }) {
                     onInputChange={onInputChange}
                     onSetState={forceState}
                     onReset={resetSimulation}
+                    recording={recording !== null}
+                    onStartRecording={startRecording}
+                    onStopRecording={stopRecording}
+                    onExpectThis={expectThis}
                   />
 
                   <div className="graph-panel">
@@ -708,6 +759,47 @@ function Studio({ onOpenDocs }: { onOpenDocs(): void }) {
           <Check size={13} />
           {toast.message}
         </div>
+      ) : null}
+
+      {recordingOpen ? (
+        <Modal
+          eyebrow="Recorded test"
+          title="Name this case"
+          subtitle="The recording becomes a TEST case in your source, so you can edit it afterwards."
+          onClose={() => setRecordingOpen(false)}
+        >
+          <div className="recording-form">
+            <label className="recording-label" htmlFor="recording-name">
+              Case name
+            </label>
+            <input
+              id="recording-name"
+              className="recording-input"
+              value={recordingName}
+              autoFocus
+              onChange={(event) => setRecordingName(event.target.value)}
+            />
+            <pre className="recording-preview">
+              {recording
+                ? [
+                    `TEST ${recording.circuit}`,
+                    `  CASE "${recordingName || suggestCaseName(recording.lines)}"`,
+                    ...recording.lines.map((line) => `    ${line}`),
+                    "  END",
+                    "END",
+                  ].join("\n")
+                : ""}
+            </pre>
+            <div className="recording-actions">
+              <button className="secondary-button" onClick={() => setRecordingOpen(false)}>
+                Cancel
+              </button>
+              <button className="primary-button" onClick={saveRecording}>
+                Add test case
+              </button>
+            </div>
+          </div>
+        </Modal>
       ) : null}
 
       {examplesOpen ? (

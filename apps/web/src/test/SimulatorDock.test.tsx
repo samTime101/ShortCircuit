@@ -40,6 +40,10 @@ function setup(overrides: Partial<Parameters<typeof SimulatorDock>[0]> = {}) {
     onInputChange: vi.fn(),
     onSetState: vi.fn(),
     onReset: vi.fn(),
+    recording: false,
+    onStartRecording: vi.fn(),
+    onStopRecording: vi.fn(),
+    onExpectThis: vi.fn(),
     ...overrides,
   };
   render(<SimulatorDock {...props} />);
@@ -109,9 +113,27 @@ describe("simulator dock", () => {
         onInputChange={() => {}}
         onSetState={() => {}}
         onReset={() => {}}
+        recording={false}
+        onStartRecording={() => {}}
+        onStopRecording={() => {}}
+        onExpectThis={() => {}}
       />,
     );
     expect(screen.queryByRole("button", { name: /step/i })).toBeNull();
+  });
+
+  it("records actions and offers an expect button while recording", async () => {
+    const props = setup({ recording: true });
+    expect(screen.getByText(/recording/)).toBeInTheDocument();
+    const expectButton = screen.getAllByText("Expect this")[0]!;
+    expectButton.click();
+    expect(props.onExpectThis).toHaveBeenCalledWith("count", "0000");
+  });
+
+  it("starts and stops a recording", async () => {
+    const props = setup();
+    await userEvent.click(screen.getByRole("button", { name: /record test/i }));
+    expect(props.onStartRecording).toHaveBeenCalledTimes(1);
   });
 
   it("shows a runtime error without hiding the controls", () => {

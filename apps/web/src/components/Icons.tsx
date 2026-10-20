@@ -120,6 +120,12 @@ export const Info = (p: IconProps) => (
     <path d="M12 11v6M12 7.5h.01" />
   </Icon>
 );
+export const Circle = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="12" cy="12" r="7.5" />
+  </Icon>
+);
+
 export const CircleCheck = (p: IconProps) => (
   <Icon {...p}>
     <circle cx="12" cy="12" r="9" />

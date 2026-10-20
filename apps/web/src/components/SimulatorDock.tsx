@@ -5,7 +5,16 @@ import {
   type CircuitIR,
   type SimulationSnapshot,
 } from "@shortcircuit/engine";
-import { Clock, Pause as PauseIcon, Play as PlayIcon, RotateCcw, StepForward as StepIcon, Zap } from "./Icons";
+import {
+  Circle as CircleIcon,
+  Clock,
+  Pause as PauseIcon,
+  Play as PlayIcon,
+  RotateCcw,
+  StepForward as StepIcon,
+  X,
+  Zap,
+} from "./Icons";
 
 interface SimulatorDockProps {
   circuit: CircuitIR;
@@ -24,6 +33,12 @@ interface SimulatorDockProps {
   onInputChange(name: string, value: string): void;
   onSetState(name: string, value: string): void;
   onReset(): void;
+  /** True while a test case is being recorded. */
+  recording: boolean;
+  onStartRecording(): void;
+  onStopRecording(): void;
+  /** Records an expectation for the signal with the given name. */
+  onExpectThis(name: string, value: string): void;
 }
 
 function BusTextField({
@@ -140,6 +155,10 @@ export function SimulatorDock({
   onInputChange,
   onSetState,
   onReset,
+  recording,
+  onStartRecording,
+  onStopRecording,
+  onExpectThis,
 }: SimulatorDockProps) {
   const clockInputNames = useMemo(() => {
     const labels = new Set<string>();
@@ -177,6 +196,24 @@ export function SimulatorDock({
           ) : null}
         </div>
         <div className="sim-dock-actions">
+          {recording ? (
+            <>
+              <span className="record-indicator">
+                <span className="record-dot" /> recording
+              </span>
+              <button className="text-button compact is-recording" onClick={onStopRecording}>
+                <X size={12} /> Stop
+              </button>
+            </>
+          ) : (
+            <button
+              className="text-button compact"
+              onClick={onStartRecording}
+              title="Record your actions as a test case"
+            >
+              <CircleIcon size={12} /> Record test
+            </button>
+          )}
           {cascadeEvents}
           <button className="text-button compact" onClick={onReset} title="Reset all stored state">
             <RotateCcw size={13} /> Reset
@@ -352,6 +389,15 @@ export function SimulatorDock({
                       <span className="decimal-value">
                         {output.width > 1 && signal ? `#${signal.decimal}` : ""}
                       </span>
+                      {recording && signal ? (
+                        <button
+                          className="expect-button"
+                          onClick={() => onExpectThis(output.name, signal.binary)}
+                          title={`Expect ${output.name} to be ${signal.binary}`}
+                        >
+                          Expect this
+                        </button>
+                      ) : null}
                     </div>
                   </div>
                 );
@@ -374,6 +420,17 @@ export function SimulatorDock({
                         value={snapshot?.states[state.name]?.binary ?? "0".repeat(state.width)}
                         onChange={(next) => onSetState(state.name, next)}
                       />
+                      {recording && snapshot?.states[state.name] ? (
+                        <button
+                          className="expect-button"
+                          onClick={() =>
+                            onExpectThis(state.name, snapshot.states[state.name]!.binary)
+                          }
+                          title={`Expect ${state.name} to be ${snapshot.states[state.name]!.binary}`}
+                        >
+                          Expect this
+                        </button>
+                      ) : null}
                     </div>
                   </div>
                 ))}
