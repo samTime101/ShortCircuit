@@ -513,7 +513,27 @@ The studio turns the lessons into a page: the checks run against the current
 source, progress is kept locally, and the glossary is searchable in the same
 place.
 
-### 6.13 Persistence and safety
+### 6.13 Beginner mode
+
+The studio has two modes, kept in local storage:
+
+- **Advanced** shows everything, including the portable IR view.
+- **Beginner** hides the advanced views, uses everyday wording (the stored
+  state is called memory), and leaves the language reference to the parts a
+  beginner needs.
+
+The mode is a presentation choice; the engine and the IR never change.
+
+### 6.14 Compilation in a worker
+
+The studio compiles in a worker so a large design never blocks typing:
+
+- Each request carries an id, and a result older than the newest request is
+  dropped, so a slow compile can never overwrite a newer one.
+- The client falls back to the main thread when a browser has no worker, and
+  finishes any waiting request on the main thread when it is disposed.
+
+### 6.15 Persistence and safety
 
 - Source persists under `localStorage` key `shortcircuit.source.v1`; failures
   (private browsing, quota) are ignored.

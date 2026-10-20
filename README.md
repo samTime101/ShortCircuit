@@ -44,6 +44,8 @@ Assignments describe wires, not steps. The compiler validates names, widths, wir
 - **Visible sequential behaviour** — a waveform panel records every step, marks the edges that fired, and exports VCD or JSON.
 - **Beginner-friendly** — record what you do in the simulator and the studio writes the test case for you; clicking a gate explains it and shows its truth table.
 - **Learn by doing** — nine guided lessons, from a wire to a counter, with hidden checks, hints, and a solution, plus a glossary of every word the language uses.
+- **Beginner mode** — hides the advanced views and uses everyday wording, so the studio grows with you.
+- **Never blocks** — compilation runs in a worker, so typing stays smooth on a large design.
 - **Readable outputs** — every output can be shown as a number, LEDs, a seven-segment digit, a bar, or a grid of cells.
 - **Verilog export** — the portable IR writes Verilog modules, and a testbench from the test cases.
 - **Dark workbench** — neutral graphite surfaces with an electric-blue accent, readable in a dim room.

@@ -59,6 +59,7 @@ import { insertRecordedCase, suggestCaseName } from "./lib/recordTest";
 import { appendSample, sampleFromSnapshot, type TraceSample } from "./lib/trace";
 import { useRoute } from "./lib/router";
 import { createCompilerClient, type CompilerClient } from "./lib/compilerClient";
+import { readMode, writeMode, type StudioMode } from "./lib/settings";
 
 const STORAGE_KEY = "shortcircuit.source.v1";
 const DISPLAY_STORAGE_KEY = "shortcircuit.displays.v1";
@@ -104,8 +105,9 @@ function errorText(error: unknown): string {
 
 export default function App() {
   const [route, navigate] = useRoute();
+  const [mode, setMode] = useState<StudioMode>(readMode);
   if (route === "docs") {
-    return <DocsPage onBack={() => navigate("studio")} />;
+    return <DocsPage onBack={() => navigate("studio")} beginner={mode === "beginner"} />;
   }
   if (route === "learn") {
     return (
@@ -122,10 +124,27 @@ export default function App() {
       />
     );
   }
-  return <Studio onOpenDocs={() => navigate("docs")} onOpenLearn={() => navigate("learn")} />;
+  return (
+    <Studio
+      onOpenDocs={() => navigate("docs")}
+      onOpenLearn={() => navigate("learn")}
+      mode={mode}
+      onModeChange={setMode}
+    />
+  );
 }
 
-function Studio({ onOpenDocs, onOpenLearn }: { onOpenDocs(): void; onOpenLearn(): void }) {
+function Studio({
+  onOpenDocs,
+  onOpenLearn,
+  mode,
+  onModeChange,
+}: {
+  onOpenDocs(): void;
+  onOpenLearn(): void;
+  mode: StudioMode;
+  onModeChange(mode: StudioMode): void;
+}) {
   const [source, setSource] = useState(readStoredSource);
   const [result, setResult] = useState<CompileResult | null>(null);
   const [compiling, setCompiling] = useState(true);
@@ -180,6 +199,10 @@ function Studio({ onOpenDocs, onOpenLearn }: { onOpenDocs(): void; onOpenLearn()
       // Persistence is a convenience; private browsing can reject writes.
     }
   }, [source]);
+
+  useEffect(() => {
+    writeMode(mode);
+  }, [mode]);
 
   useEffect(() => {
     try {
@@ -558,7 +581,7 @@ function Studio({ onOpenDocs, onOpenLearn }: { onOpenDocs(): void; onOpenLearn()
           : undefined,
       alert: Boolean(testResult && testResult.failed > 0),
     },
-    { id: "ir", label: "IR", icon: <Braces size={13} /> },
+    ...(mode === "beginner" ? [] : [{ id: "ir" as Tab, label: "IR", icon: <Braces size={13} /> }]),
   ];
 
   const engineState = compiling
@@ -594,6 +617,19 @@ function Studio({ onOpenDocs, onOpenLearn }: { onOpenDocs(): void; onOpenLearn()
           <button className="ghost-button" onClick={() => setExamplesOpen(true)}>
             <Grid size={14} />
             <span className="button-label">Examples</span>
+          </button>
+          <button
+            className={`ghost-button ${mode === "beginner" ? "is-active" : ""}`}
+            onClick={() => {
+              const next: StudioMode = mode === "beginner" ? "advanced" : "beginner";
+              onModeChange(next);
+              writeMode(next);
+              notify(next === "beginner" ? "Beginner mode on" : "Advanced mode on");
+            }}
+            title="Beginner mode hides the advanced views"
+          >
+            <Graduation size={14} />
+            <span className="button-label">{mode === "beginner" ? "Beginner" : "Advanced"}</span>
           </button>
           <button className="ghost-button" onClick={onOpenLearn} title="Open the lessons">
             <Graduation size={14} />
@@ -763,6 +799,7 @@ function Studio({ onOpenDocs, onOpenLearn }: { onOpenDocs(): void; onOpenLearn()
                     onStopRecording={stopRecording}
                     onExpectThis={expectThis}
                     displays={displays}
+                    beginner={mode === "beginner"}
                     onDisplayChange={(name, mode) =>
                       setDisplays((current) => ({ ...current, [name]: mode }))
                     }

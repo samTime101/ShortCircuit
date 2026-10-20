@@ -42,6 +42,8 @@ interface SimulatorDockProps {
   onExpectThis(name: string, value: string): void;
   /** How each output is drawn. */
   displays: Record<string, DisplayMode>;
+  /** Beginner mode uses everyday wording. */
+  beginner?: boolean;
   onDisplayChange(name: string, mode: DisplayMode): void;
 }
 
@@ -165,6 +167,7 @@ export function SimulatorDock({
   onExpectThis,
   displays,
   onDisplayChange,
+  beginner,
 }: SimulatorDockProps) {
   const clockInputNames = useMemo(() => {
     const labels = new Set<string>();
@@ -429,7 +432,7 @@ export function SimulatorDock({
             )}
             {circuit.states.length > 0 ? (
               <div className="state-block">
-                <div className="state-title">Stored state</div>
+                <div className="state-title">{beginner ? "Memory" : "Stored state"}</div>
                 {circuit.states.map((state) => (
                   <div className="monitor-row state-row" key={state.node}>
                     <div className="monitor-label">

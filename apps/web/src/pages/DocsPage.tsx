@@ -12,6 +12,8 @@ import "./docs.css";
 
 interface DocsPageProps {
   onBack(): void;
+  /** Beginner mode hides the advanced sections. */
+  beginner?: boolean;
 }
 
 interface SectionDef {
@@ -146,7 +148,7 @@ function Note({ kind = "info", children }: { kind?: "info" | "warn"; children: R
   return <div className={`docs-note is-${kind}`}>{children}</div>;
 }
 
-export function DocsPage({ onBack }: DocsPageProps) {
+export function DocsPage({ onBack, beginner }: DocsPageProps) {
   const pageRef = useRef<HTMLDivElement>(null);
   const active = useActiveSection(pageRef);
   const groups = useMemo(() => {
@@ -1258,6 +1260,7 @@ END`}
             </div>
           </Section>
 
+          {beginner ? null : (
           <Section
             id="ir"
             index="15"
@@ -1291,6 +1294,7 @@ END`}
               <li>The IR tab in the studio exports the exact object shown here.</li>
             </ul>
           </Section>
+          )}
 
           <footer className="docs-footer">
             <span>Short Circuit · LogicFlow Studio</span>
