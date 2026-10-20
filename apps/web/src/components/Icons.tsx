@@ -120,6 +120,22 @@ export const Info = (p: IconProps) => (
     <path d="M12 11v6M12 7.5h.01" />
   </Icon>
 );
+export const Graduation = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M2.5 9 12 4.5 21.5 9 12 13.5 2.5 9z" />
+    <path d="M6.5 11v4.2c0 1.3 2.5 2.3 5.5 2.3s5.5-1 5.5-2.3V11" />
+    <path d="M21.5 9v5" />
+  </Icon>
+);
+
+export const Lightbulb = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M9 18h6" />
+    <path d="M10 21h4" />
+    <path d="M12 3a6 6 0 0 0-3.5 10.9c.5.4.8 1 .9 1.6h5.2c.1-.6.4-1.2.9-1.6A6 6 0 0 0 12 3z" />
+  </Icon>
+);
+
 export const Activity = (p: IconProps) => (
   <Icon {...p}>
     <path d="M3 12h4l2.5-6 4 12 2.5-6h5" />

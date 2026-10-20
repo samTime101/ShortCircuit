@@ -214,6 +214,25 @@ export function DocsPage({ onBack }: DocsPageProps) {
               dependency graph, not steps in a program. This page is the complete reference for the
               language, the built-in library, and the studio around it.
             </p>
+            <div className="docs-newcomer">
+              <strong>New to digital logic?</strong>
+              <p>
+                Start with the lessons: they build a half adder, a counter, and a latch one gate at a
+                time, and they check your work as you go. The glossary explains every word the
+                language uses.
+              </p>
+              <button
+                type="button"
+                className="docs-back"
+                onClick={() => {
+                  window.location.hash = "#/learn";
+                }}
+              >
+                Open the lessons
+                <ArrowUpRight size={14} />
+              </button>
+            </div>
+
             <div className="docs-hero-grid">
               <div>
                 <span className="eyebrow">Design rules</span>

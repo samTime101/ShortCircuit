@@ -34,6 +34,7 @@ import { TruthTablePanel } from "./components/TruthTablePanel";
 import { WaveformPanel } from "./components/WaveformPanel";
 import type { DisplayMode } from "./components/OutputDisplay";
 import { DocsPage } from "./pages/DocsPage";
+import { LearnPage } from "./pages/LearnPage";
 import {
   Activity,
   AlertTriangle,
@@ -48,6 +49,7 @@ import {
   Download,
   FileCode,
   Flask,
+  Graduation,
   Grid,
   Play,
   Table,
@@ -105,10 +107,25 @@ export default function App() {
   if (route === "docs") {
     return <DocsPage onBack={() => navigate("studio")} />;
   }
-  return <Studio onOpenDocs={() => navigate("docs")} />;
+  if (route === "learn") {
+    return (
+      <LearnPage
+        source={readStoredSource()}
+        onOpenInStudio={(next) => {
+          try {
+            window.localStorage.setItem(STORAGE_KEY, next);
+          } catch {
+            // The studio reads the source again when it opens.
+          }
+          navigate("studio");
+        }}
+      />
+    );
+  }
+  return <Studio onOpenDocs={() => navigate("docs")} onOpenLearn={() => navigate("learn")} />;
 }
 
-function Studio({ onOpenDocs }: { onOpenDocs(): void }) {
+function Studio({ onOpenDocs, onOpenLearn }: { onOpenDocs(): void; onOpenLearn(): void }) {
   const [source, setSource] = useState(readStoredSource);
   const [result, setResult] = useState<CompileResult | null>(null);
   const [compiling, setCompiling] = useState(true);
@@ -566,6 +583,10 @@ function Studio({ onOpenDocs }: { onOpenDocs(): void }) {
           <button className="ghost-button" onClick={() => setExamplesOpen(true)}>
             <Grid size={14} />
             <span className="button-label">Examples</span>
+          </button>
+          <button className="ghost-button" onClick={onOpenLearn} title="Open the lessons">
+            <Graduation size={14} />
+            <span className="button-label">Learn</span>
           </button>
           <button className="ghost-button" onClick={onOpenDocs} title="Open the LogicFlow documentation">
             <Book size={14} />

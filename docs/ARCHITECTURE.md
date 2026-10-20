@@ -498,7 +498,22 @@ like any other build tool:
 The exit code is 0 on success and 1 on a diagnostic error or a failed test, so
 the tool can be used in a pipeline.
 
-### 6.12 Persistence and safety
+### 6.12 Lessons and glossary
+
+The engine owns the teaching material as well as the language, so any host can
+offer the same path:
+
+- `LESSONS` is a list of guided lessons. Each one has an explanation, a
+  starter circuit with a gap, a goal in plain language, hidden checks, hints,
+  and a solution.
+- `GLOSSARY` explains the words the language uses, with a one-line definition
+  and a longer note.
+
+The studio turns the lessons into a page: the checks run against the current
+source, progress is kept locally, and the glossary is searchable in the same
+place.
+
+### 6.13 Persistence and safety
 
 - Source persists under `localStorage` key `shortcircuit.source.v1`; failures
   (private browsing, quota) are ignored.
