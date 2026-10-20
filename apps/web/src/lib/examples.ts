@@ -464,6 +464,408 @@ CIRCUIT RegisterPair
 END
 `;
 
+const SEVEN_SEGMENT = `# A four-bit value drives a seven-segment display.
+# The segments are named the way a display is: a is the top bar.
+
+CIRCUIT SevenSegment
+  INPUT value : BUS(4)
+
+  OUTPUT a
+  OUTPUT b
+  OUTPUT c
+  OUTPUT d
+  OUTPUT e
+  OUTPUT f
+  OUTPUT g
+
+  a = OR(EQUAL(value, 0), EQUAL(value, 2), EQUAL(value, 3), EQUAL(value, 5), EQUAL(value, 6), EQUAL(value, 7), EQUAL(value, 8), EQUAL(value, 9))
+  b = OR(EQUAL(value, 0), EQUAL(value, 1), EQUAL(value, 2), EQUAL(value, 3), EQUAL(value, 4), EQUAL(value, 7), EQUAL(value, 8), EQUAL(value, 9))
+  c = OR(EQUAL(value, 0), EQUAL(value, 1), EQUAL(value, 3), EQUAL(value, 4), EQUAL(value, 5), EQUAL(value, 6), EQUAL(value, 7), EQUAL(value, 8), EQUAL(value, 9))
+  d = OR(EQUAL(value, 0), EQUAL(value, 2), EQUAL(value, 3), EQUAL(value, 5), EQUAL(value, 6), EQUAL(value, 8), EQUAL(value, 9))
+  e = OR(EQUAL(value, 0), EQUAL(value, 2), EQUAL(value, 6), EQUAL(value, 8))
+  f = OR(EQUAL(value, 0), EQUAL(value, 4), EQUAL(value, 5), EQUAL(value, 6), EQUAL(value, 8), EQUAL(value, 9))
+  g = OR(EQUAL(value, 2), EQUAL(value, 3), EQUAL(value, 4), EQUAL(value, 5), EQUAL(value, 6), EQUAL(value, 8), EQUAL(value, 9))
+END
+
+TEST SevenSegment
+CASE "zero lights six segments"
+  INPUT value = 0b0000
+  EXPECT a = 1
+  EXPECT b = 1
+  EXPECT c = 1
+  EXPECT d = 1
+  EXPECT e = 1
+  EXPECT f = 1
+  EXPECT g = 0
+END
+
+CASE "eight lights every segment"
+  INPUT value = 0b1000
+  EXPECT a = 1
+  EXPECT b = 1
+  EXPECT c = 1
+  EXPECT d = 1
+  EXPECT e = 1
+  EXPECT f = 1
+  EXPECT g = 1
+END
+END
+`;
+
+const TRAFFIC = `# A traffic light is a tiny state machine.
+# The phase counts 0 red, 1 amber, 2 green, and wraps back to red.
+
+CIRCUIT TrafficLight
+  INPUT clock
+  INPUT reset
+
+  OUTPUT red
+  OUTPUT amber
+  OUTPUT green
+
+  STATE phase : BUS(2) = 00
+
+  stepped = ADD(phase, 1)
+  wrapped = MUX(stepped, 0b00, EQUAL(stepped, 3))
+
+  ON RISING_EDGE(clock):
+    IF reset:
+      phase = 0b00
+    ELSE:
+      phase = wrapped
+    END
+  END
+
+  red = EQUAL(phase, 0)
+  amber = EQUAL(phase, 1)
+  green = EQUAL(phase, 2)
+END
+
+TEST TrafficLight
+CASE "starts on red"
+  INPUT clock = 0
+  INPUT reset = 0
+  EXPECT red = 1
+  EXPECT amber = 0
+  EXPECT green = 0
+END
+
+CASE "moves to amber"
+  INPUT clock = 0
+  INPUT clock = 1
+  EXPECT red = 0
+  EXPECT amber = 1
+  EXPECT green = 0
+END
+
+CASE "moves to green"
+  INPUT clock = 0
+  INPUT clock = 1
+  INPUT clock = 0
+  INPUT clock = 1
+  EXPECT red = 0
+  EXPECT amber = 0
+  EXPECT green = 1
+END
+END
+`;
+
+const LOCK = `# A four-bit keypad code opens the lock.
+# The secret is 1011, and a wrong code is denied.
+
+CIRCUIT Lock
+  INPUT code : BUS(4)
+  INPUT try
+  OUTPUT unlocked
+  OUTPUT denied
+
+  unlocked = AND(try, EQUAL(code, 0b1011))
+  denied = AND(try, NOT(unlocked))
+END
+
+TEST Lock
+CASE "the right code opens it"
+  INPUT code = 0b1011
+  INPUT try = 1
+  EXPECT unlocked = 1
+  EXPECT denied = 0
+END
+
+CASE "a wrong code is denied"
+  INPUT code = 0b0101
+  INPUT try = 1
+  EXPECT unlocked = 0
+  EXPECT denied = 1
+END
+
+CASE "nothing happens without trying"
+  INPUT code = 0b1011
+  INPUT try = 0
+  EXPECT unlocked = 0
+  EXPECT denied = 0
+END
+END
+`;
+
+const SEQUENCE = `# A shift register that spots the pattern 1011.
+# The state remembers how much of the pattern has matched so far.
+
+CIRCUIT SequenceDetector
+  INPUT bit
+  INPUT clock
+  OUTPUT found
+
+  STATE matched : BUS(3) = 0b000
+
+  ON RISING_EDGE(clock):
+    IF EQUAL(matched, 0b000):
+      IF EQUAL(bit, 1):
+        matched = 0b001
+      ELSE:
+        matched = 0b000
+      END
+    ELSE:
+      IF EQUAL(matched, 0b001):
+        IF EQUAL(bit, 0):
+          matched = 0b010
+        ELSE:
+          matched = 0b001
+        END
+      ELSE:
+        IF EQUAL(matched, 0b010):
+          IF EQUAL(bit, 1):
+            matched = 0b011
+          ELSE:
+            matched = 0b000
+          END
+        ELSE:
+          IF EQUAL(matched, 0b011):
+            IF EQUAL(bit, 1):
+              matched = 0b100
+            ELSE:
+              matched = 0b000
+            END
+          ELSE:
+            IF EQUAL(bit, 1):
+              matched = 0b001
+            ELSE:
+              matched = 0b000
+            END
+          END
+        END
+      END
+    END
+  END
+
+  found = EQUAL(matched, 0b100)
+END
+
+TEST SequenceDetector
+CASE "the pattern is spotted"
+  INPUT bit = 1
+  CYCLE clock 1
+  INPUT bit = 0
+  CYCLE clock 1
+  INPUT bit = 1
+  CYCLE clock 1
+  INPUT bit = 1
+  CYCLE clock 1
+  EXPECT found = 1
+END
+
+CASE "a different pattern is not"
+  INPUT bit = 1
+  CYCLE clock 1
+  INPUT bit = 0
+  CYCLE clock 1
+  INPUT bit = 0
+  CYCLE clock 1
+  EXPECT found = 0
+END
+END
+`;
+
+const TALLY = `# A tally counter that shows its count on a seven-segment display.
+# The count runs from zero to nine and then starts over.
+
+CIRCUIT SevenSegment
+  INPUT value : BUS(4)
+
+  OUTPUT a
+  OUTPUT b
+  OUTPUT c
+  OUTPUT d
+  OUTPUT e
+  OUTPUT f
+  OUTPUT g
+
+  a = OR(EQUAL(value, 0), EQUAL(value, 2), EQUAL(value, 3), EQUAL(value, 5), EQUAL(value, 6), EQUAL(value, 7), EQUAL(value, 8), EQUAL(value, 9))
+  b = OR(EQUAL(value, 0), EQUAL(value, 1), EQUAL(value, 2), EQUAL(value, 3), EQUAL(value, 4), EQUAL(value, 7), EQUAL(value, 8), EQUAL(value, 9))
+  c = OR(EQUAL(value, 0), EQUAL(value, 1), EQUAL(value, 3), EQUAL(value, 4), EQUAL(value, 5), EQUAL(value, 6), EQUAL(value, 7), EQUAL(value, 8), EQUAL(value, 9))
+  d = OR(EQUAL(value, 0), EQUAL(value, 2), EQUAL(value, 3), EQUAL(value, 5), EQUAL(value, 6), EQUAL(value, 8), EQUAL(value, 9))
+  e = OR(EQUAL(value, 0), EQUAL(value, 2), EQUAL(value, 6), EQUAL(value, 8))
+  f = OR(EQUAL(value, 0), EQUAL(value, 4), EQUAL(value, 5), EQUAL(value, 6), EQUAL(value, 8), EQUAL(value, 9))
+  g = OR(EQUAL(value, 2), EQUAL(value, 3), EQUAL(value, 4), EQUAL(value, 5), EQUAL(value, 6), EQUAL(value, 8), EQUAL(value, 9))
+END
+
+CIRCUIT Tally
+  INPUT clock
+  INPUT reset
+
+  OUTPUT count
+  OUTPUT a
+  OUTPUT b
+  OUTPUT c
+  OUTPUT d
+  OUTPUT e
+  OUTPUT f
+  OUTPUT g
+
+  STATE ticks : BUS(4) = 0
+
+  stepped = ADD(ticks, 1)
+  wrapped = MUX(stepped, 0b0000, EQUAL(stepped, 0b1010))
+
+  ON RISING_EDGE(clock):
+    IF reset:
+      ticks = 0b0000
+    ELSE:
+      ticks = wrapped
+    END
+  END
+
+  count = ticks
+
+  digit = SevenSegment(value = ticks)
+  a = digit.a
+  b = digit.b
+  c = digit.c
+  d = digit.d
+  e = digit.e
+  f = digit.f
+  g = digit.g
+END
+
+TEST Tally
+CASE "counts to one"
+  INPUT clock = 0
+  INPUT reset = 0
+  CYCLE clock 1
+  EXPECT count = 0b0001
+END
+
+CASE "counts to two"
+  INPUT clock = 0
+  CYCLE clock 1
+  CYCLE clock 1
+  EXPECT count = 0b0010
+END
+
+CASE "reset clears the count"
+  INPUT clock = 0
+  CYCLE clock 1
+  INPUT reset = 1
+  CYCLE clock 1
+  EXPECT count = 0b0000
+END
+END
+`;
+
+const MULTIPLY = `# A two-by-two multiplier, stamped out with a loop.
+# Every partial product is one bit, widened before the sums.
+
+CIRCUIT Multiply2x2
+  INPUT a : BUS(2)
+  INPUT b : BUS(2)
+  OUTPUT product
+
+  FOR i IN 0..1
+    FOR j IN 0..1
+      partial[i][j] = ZEXT(AND(a[i], b[j]), 4)
+    END
+  END
+
+  low = ADD(partial[0][0], SHIFT_LEFT(partial[0][1], 1))
+  high = ADD(SHIFT_LEFT(partial[1][0], 1), SHIFT_LEFT(partial[1][1], 2))
+  product = ADD(low, high)
+END
+
+TEST Multiply2x2
+CASE "two times two"
+  INPUT a = 0b10
+  INPUT b = 0b10
+  EXPECT product = 0b0100
+END
+
+CASE "three times three"
+  INPUT a = 0b11
+  INPUT b = 0b11
+  EXPECT product = 0b1001
+END
+
+CASE "one times three"
+  INPUT a = 0b01
+  INPUT b = 0b11
+  EXPECT product = 0b0011
+END
+END
+`;
+
+const LIFE = `# Conway's Life on a strip of four cells.
+# The strip wraps around, so the left of the first cell is the last one.
+
+CONST N = 4
+
+CIRCUIT LifeCell
+  INPUT alive
+  INPUT neighbours : BUS(2)
+  OUTPUT next
+
+  total = POPCOUNT(neighbours)
+  next = OR(EQUAL(total, 3), AND(alive, EQUAL(total, 2)))
+END
+
+CIRCUIT LifeStrip
+  INPUT clock
+  OUTPUT row
+
+  STATE cells : BUS(N) = 0
+
+  FOR i IN 0..N-1
+    cell[i] = LifeCell(cells[i], CONCAT(cells[(i + N - 1) % N], cells[(i + 1) % N]))
+  END
+
+  # The first cell is the most significant bit, so the pieces are joined in reverse.
+  nextrow = CONCAT(cell[3].next, cell[2].next, cell[1].next, cell[0].next)
+
+  ON RISING_EDGE(clock):
+    cells = nextrow
+  END
+
+  row = cells
+END
+
+TEST LifeStrip
+CASE "a lonely cell dies"
+  LOAD cells = 0b0010
+  CYCLE clock 1
+  EXPECT cells = 0b0000
+END
+
+CASE "a full ring survives"
+  LOAD cells = 0b1111
+  CYCLE clock 1
+  EXPECT cells = 0b1111
+END
+
+CASE "a pair dies"
+  LOAD cells = 0b0110
+  CYCLE clock 1
+  EXPECT cells = 0b0000
+END
+END
+`;
+
 export const EXAMPLES: Example[] = [
   {
     id: "half-adder",
@@ -536,6 +938,69 @@ export const EXAMPLES: Example[] = [
     description: "One register definition, two instances, each with the width it was given.",
     focusCircuit: "RegisterPair",
     source: PARAMETERIZED,
+  },
+  {
+    id: "seven-segment",
+    title: "Seven-segment display",
+    tag: "Display",
+    level: "Digital systems",
+    description: "A four-bit number drives the seven bars of a display, the way a real counter does.",
+    focusCircuit: "SevenSegment",
+    source: SEVEN_SEGMENT,
+  },
+  {
+    id: "traffic-light",
+    title: "Traffic light",
+    tag: "State machine",
+    level: "Digital systems",
+    description: "Red, amber, green: a small state machine that counts its way around the cycle.",
+    focusCircuit: "TrafficLight",
+    source: TRAFFIC,
+  },
+  {
+    id: "lock",
+    title: "Combination lock",
+    tag: "Everyday logic",
+    level: "Start here",
+    description: "A four-bit keypad code opens the lock, and a wrong code is denied.",
+    focusCircuit: "Lock",
+    source: LOCK,
+  },
+  {
+    id: "sequence-detector",
+    title: "Sequence detector",
+    tag: "State machine",
+    level: "Digital systems",
+    description: "A shift register that spots the pattern 1011 in a stream of bits.",
+    focusCircuit: "SequenceDetector",
+    source: SEQUENCE,
+  },
+  {
+    id: "tally",
+    title: "Tally counter",
+    tag: "Display",
+    level: "Digital systems",
+    description: "A counter that runs from zero to nine and shows its count on a display.",
+    focusCircuit: "Tally",
+    source: TALLY,
+  },
+  {
+    id: "multiply",
+    title: "Array multiplier",
+    tag: "Compile time",
+    level: "Digital systems",
+    description: "A two-by-two multiplier whose partial products are stamped out by a loop.",
+    focusCircuit: "Multiply2x2",
+    source: MULTIPLY,
+  },
+  {
+    id: "life",
+    title: "Game of Life",
+    tag: "Game of Life",
+    level: "Digital systems",
+    description: "Conway's Life on a wrapping strip of four cells, with neighbours counted for you.",
+    focusCircuit: "LifeStrip",
+    source: LIFE,
   },
   {
     id: "register-8",

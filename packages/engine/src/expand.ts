@@ -263,7 +263,7 @@ class Expander {
   private checkLoopTargets(loop: ForAst): void {
     for (const item of loop.body) {
       if (item.kind !== "Assignment") continue;
-      const indexed = item.target.some((segment) => segment.index !== null);
+      const indexed = item.target.some((segment) => segment.indexes.length > 0);
       if (indexed) continue;
       this.bag.error(
         "E406",
@@ -387,14 +387,21 @@ class Expander {
     return { ...call, name, params: [] };
   }
 
-  /** Rewrites indexed path segments into plain names, such as cell[0] to cell_0. */
+  /**
+   * Rewrites indexed path segments into plain names, so cell[0] becomes cell_0
+   * and cell[0][1] becomes cell_0_1.
+   */
   private rewritePath(path: Path, env: Map<string, number>): Path {
     return path.map((segment) => {
-      if (!segment.index) return { name: segment.name, index: null };
-      const value = this.evaluate(segment.index, env);
-      if (value === null) return { name: segment.name, index: null };
+      if (segment.indexes.length === 0) return { name: segment.name, indexes: [] };
+      const parts: number[] = [];
+      for (const index of segment.indexes) {
+        const value = this.evaluate(index, env);
+        if (value === null) return { name: segment.name, indexes: [] };
+        parts.push(value);
+      }
       this.arrayNames.add(segment.name);
-      return { name: `${segment.name}_${value}`, index: null };
+      return { name: `${segment.name}_${parts.join("_")}`, indexes: [] };
     });
   }
 
@@ -420,7 +427,7 @@ class Expander {
             if (value === null) return expression;
             return {
               kind: "Reference",
-              path: [{ name: `${base}_${value}`, index: null }],
+              path: [{ name: `${base}_${value}`, indexes: [] }],
               span: expression.span,
             };
           }

@@ -997,11 +997,11 @@ export class Parser {
 
   private parsePath(mode: "path" | "target" = "path"): Path {
     const first = this.expectIdentifier("a name");
-    const path: Path = [{ name: first.value, index: this.parsePathIndex(mode) }];
+    const path: Path = [{ name: first.value, indexes: this.parsePathIndex(mode) }];
     while (this.checkSymbol(".")) {
       this.advance();
       const segment = this.expectIdentifier("a name after the dot");
-      path.push({ name: segment.value, index: this.parsePathIndex(mode) });
+      path.push({ name: segment.value, indexes: this.parsePathIndex(mode) });
     }
     return path;
   }
@@ -1012,16 +1012,20 @@ export class Parser {
    * In an expression, brackets are a bit index on a signal unless a dot
    * follows the closing bracket, which makes it an indexed instance path.
    */
-  private parsePathIndex(mode: "path" | "target"): ConstExprAst | null {
-    if (!this.checkSymbol("[")) return null;
-    if (mode === "path" && !this.bracketFollowedByDot()) return null;
-    this.advance();
-    const index = this.parseConstExpr();
-    this.expectSymbol("]");
-    return index;
+  private parsePathIndex(mode: "path" | "target"): ConstExprAst[] {
+    if (!this.checkSymbol("[")) return [];
+    if (mode === "path" && !this.bracketContinuesPath()) return [];
+    const indexes: ConstExprAst[] = [];
+    while (this.checkSymbol("[")) {
+      this.advance();
+      indexes.push(this.parseConstExpr());
+      this.expectSymbol("]");
+    }
+    return indexes;
   }
 
-  private bracketFollowedByDot(): boolean {
+  /** True when the bracket is part of a path, as in cell[0].out or cell[0][1]. */
+  private bracketContinuesPath(): boolean {
     let depth = 0;
     for (let offset = 0; offset < 64; offset += 1) {
       const token = this.peek(offset);
@@ -1031,7 +1035,9 @@ export class Parser {
         depth -= 1;
         if (depth === 0) {
           const next = this.peek(offset + 1);
-          return next.kind === "symbol" && next.value === ".";
+          return (
+            next.kind === "symbol" && (next.value === "." || next.value === "[")
+          );
         }
       }
     }

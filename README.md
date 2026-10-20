@@ -119,9 +119,17 @@ The engine has no DOM, React, or browser dependency. Another implementation can 
 | 4:1 multiplexer | Selection and bus-bit indexing |
 | Majority vote | Variadic gates and readable intermediates |
 | ALU8 | Arithmetic, logic, comparison and MUX composition |
+| Cell grid | Compile-time constants and loops |
+| Parameterized register | One definition, many widths |
+| Seven-segment display | A number driving the bars of a display |
+| Traffic light | A small state machine |
+| Combination lock | Everyday logic with a secret code |
+| Sequence detector | A shift register spotting 1011 |
+| Tally counter | Counting zero to nine on a display |
+| Array multiplier | Partial products stamped out by a loop |
+| Game of Life | Conway's Life with neighbours counted for you |
 | Register 8 | Rising-edge state with enable |
 | Counter 4 | Next-state logic and edge commits |
-| Cell grid | Compile-time constants and loops |
 
 ## Roadmap
 

@@ -37,7 +37,8 @@ export interface ConstDeclAst {
 /** One segment of a path, optionally indexed as in cell[0].port. */
 export interface PathSegment {
   name: string;
-  index: ConstExprAst | null;
+  /** Compile-time indexes, as in cell[0][1]. */
+  indexes: ConstExprAst[];
 }
 
 export type Path = PathSegment[];
