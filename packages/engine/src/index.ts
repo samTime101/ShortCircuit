@@ -45,6 +45,8 @@ export { BUILTINS, BUILTIN_BY_NAME, INTRINSIC_CIRCUITS } from "./builtins";
 export type { BuiltinArgument, BuiltinExample, BuiltinSpec, IntrinsicCircuit } from "./builtins";
 export { plainFor } from "./plainLanguage";
 export { expandProgram } from "./expand";
+export { exportVerilog } from "./verilog";
+export type { VerilogOptions, VerilogResult } from "./verilog";
 export type { DiagnosticFix, PlainDiagnostic } from "./plainLanguage";
 export { LANGUAGE_SNIPPETS, SNIPPET_BY_ID, type LanguageSnippet, type SnippetCategory } from "./snippets";
 

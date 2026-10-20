@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { IR_SCHEMA, type ProgramIR } from "@shortcircuit/engine";
+import { IR_SCHEMA, exportVerilog, type ProgramIR } from "@shortcircuit/engine";
 import { Braces, Check, Copy, Download } from "./Icons";
 
 interface IRPanelProps {
@@ -22,6 +22,23 @@ export function IRPanel({ ir, onNotify }: IRPanelProps) {
     } catch {
       onNotify("Clipboard access was blocked by the browser");
     }
+  };
+
+  const downloadVerilog = () => {
+    if (!ir) return;
+    const { verilog, warnings } = exportVerilog(ir, { includeTestbenches: true });
+    const blob = new Blob([verilog], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${ir.circuits[0]?.name.toLowerCase() ?? "circuit"}.v`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    onNotify(
+      warnings.length > 0
+        ? `Verilog exported with ${warnings.length} warning${warnings.length === 1 ? "" : "s"}`
+        : "Verilog exported",
+    );
   };
 
   const download = () => {
@@ -64,6 +81,9 @@ export function IRPanel({ ir, onNotify }: IRPanelProps) {
           </button>
           <button className="secondary-button" onClick={download}>
             <Download size={14} /> Download
+          </button>
+          <button className="secondary-button" onClick={downloadVerilog} title="Export Verilog modules and a testbench">
+            <Download size={14} /> Verilog
           </button>
         </div>
       </div>

@@ -5,6 +5,7 @@ import {
   LANGUAGE_SNIPPETS,
   Simulator,
   compile,
+  exportVerilog,
   formatSource,
   generateTruthTable,
   runTests,
@@ -831,6 +832,75 @@ END`);
 END`, { maxLoopDepth: 2 });
     expect(result.ok).toBe(false);
     expect(result.diagnostics.some((item) => item.code === "E404")).toBe(true);
+  });
+});
+
+describe("verilog export", () => {
+  it("writes a module with continuous assignments", () => {
+    const result = compile(`CIRCUIT HalfAdder
+INPUT a
+INPUT b
+sum = XOR(a, b)
+carry = AND(a, b)
+OUTPUT sum
+OUTPUT carry
+END`);
+    const { verilog } = exportVerilog(result.ir!);
+    expect(verilog).toContain("module HalfAdder (");
+    expect(verilog).toContain("input  a");
+    expect(verilog).toContain("output sum");
+    expect(verilog).toContain("assign sum = a ^ b;");
+    expect(verilog).toContain("assign carry = a & b;");
+    expect(verilog).toContain("endmodule");
+  });
+
+  it("writes clocked state as an edge block with non-blocking assignments", () => {
+    const result = compile(`CIRCUIT Register8
+INPUT data : BUS(8)
+INPUT clock
+STATE stored : BUS(8) = 0
+ON RISING_EDGE(clock):
+  stored = data
+END
+OUTPUT stored
+END`);
+    const { verilog } = exportVerilog(result.ir!);
+    expect(verilog).toContain("reg  [7:0] stored_reg;");
+    expect(verilog).toContain("always @(posedge clock) begin");
+    expect(verilog).toContain("stored_reg <= data;");
+    expect(verilog).toContain("initial begin");
+  });
+
+  it("guards a division and warns about it", () => {
+    const result = compile(`CIRCUIT Divider
+INPUT a : BUS(8)
+INPUT b : BUS(8)
+q = DIVIDE(a, b)
+OUTPUT q
+END`);
+    const { verilog, warnings } = exportVerilog(result.ir!);
+    expect(verilog).toContain("!= 0");
+    expect(warnings.length).toBeGreaterThan(0);
+  });
+
+  it("can generate a testbench", () => {
+    const result = compile(`CIRCUIT HalfAdder
+INPUT a
+INPUT b
+sum = XOR(a, b)
+OUTPUT sum
+END
+TEST HalfAdder
+CASE "both"
+  INPUT a = 1
+  INPUT b = 1
+  EXPECT sum = 0
+END
+END`);
+    const { verilog } = exportVerilog(result.ir!, { includeTestbenches: true });
+    expect(verilog).toContain("module HalfAdder_tb;");
+    expect(verilog).toContain("HalfAdder dut (");
+    expect(verilog).toContain("if (sum !== 1'b0)");
   });
 });
 

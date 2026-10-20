@@ -466,7 +466,21 @@ written for someone new to the language, and a name mistake carries a
 one-click fix: the source range, the replacement text, and the button label.
 The studio applies the fix and recompiles.
 
-### 6.10 Persistence and safety
+### 6.10 Verilog export
+
+The engine can write Verilog from the IR (`packages/engine/src/verilog.ts`), so
+the same design that runs in the studio can be handed to a synthesis tool.
+
+- Every circuit becomes a module, with ports taken from the inputs and outputs
+  and bus widths preserved.
+- Combinational nodes become continuous assignments.
+- Clocked state becomes an edge-triggered `always` block with non-blocking
+  assignments, which keeps the atomic commit of the simulator.
+- A testbench can be generated from the TEST cases, including clocked ones.
+- A division by zero has no hardware meaning, so the export guards it and says
+  so in a warning.
+
+### 6.11 Persistence and safety
 
 - Source persists under `localStorage` key `shortcircuit.source.v1`; failures
   (private browsing, quota) are ignored.

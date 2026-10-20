@@ -610,6 +610,27 @@ schema and bump the version.
 
 ---
 
+## 7b. Verilog export
+
+The IR can be written as Verilog. The mapping is fixed, so two runs of the same
+design produce the same modules.
+
+| IR | Verilog |
+| --- | --- |
+| `input` node | An `input` port |
+| `output` node | An `output` port, assigned from the node that drives it |
+| `constant` node | A `localparam` with the same value |
+| `state` node | A `reg`, with an `initial` block for its starting value |
+| `operation` node | A `wire` and an `assign` |
+| `clock` event | An `always @(posedge clk)` or `always @(negedge clk)` block |
+| state update | A non-blocking assignment, `<=` |
+
+Bus widths are kept, and arithmetic wraps at the declared width because Verilog
+arithmetic does too. A `DIVIDE` node is emitted with a zero guard and a
+warning, because division by zero has no hardware meaning.
+
+---
+
 ## 8. Full JSON example
 
 Source:
