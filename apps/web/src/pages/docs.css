@@ -699,3 +699,45 @@
   color: var(--text-dim);
   font-size: 13px;
 }
+
+.docs-glossary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.docs-glossary article {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+
+.docs-glossary header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 5px;
+}
+
+.docs-glossary h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.docs-glossary-short {
+  margin: 0 0 5px;
+  color: var(--text);
+  font-size: 12.5px;
+}
+
+.docs-glossary-long {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 12px;
+}

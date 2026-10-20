@@ -33,7 +33,6 @@ import { TruthTablePanel } from "./components/TruthTablePanel";
 import { WaveformPanel } from "./components/WaveformPanel";
 import type { DisplayMode } from "./components/OutputDisplay";
 import { DocsPage } from "./pages/DocsPage";
-import { LearnPage } from "./pages/LearnPage";
 import {
   Activity,
   AlertTriangle,
@@ -109,25 +108,9 @@ export default function App() {
   if (route === "docs") {
     return <DocsPage onBack={() => navigate("studio")} beginner={mode === "beginner"} />;
   }
-  if (route === "learn") {
-    return (
-      <LearnPage
-        source={readStoredSource()}
-        onOpenInStudio={(next) => {
-          try {
-            window.localStorage.setItem(STORAGE_KEY, next);
-          } catch {
-            // The studio reads the source again when it opens.
-          }
-          navigate("studio");
-        }}
-      />
-    );
-  }
   return (
     <Studio
       onOpenDocs={() => navigate("docs")}
-      onOpenLearn={() => navigate("learn")}
       mode={mode}
       onModeChange={setMode}
     />
@@ -136,12 +119,10 @@ export default function App() {
 
 function Studio({
   onOpenDocs,
-  onOpenLearn,
   mode,
   onModeChange,
 }: {
   onOpenDocs(): void;
-  onOpenLearn(): void;
   mode: StudioMode;
   onModeChange(mode: StudioMode): void;
 }) {
@@ -630,10 +611,6 @@ function Studio({
           >
             <Graduation size={14} />
             <span className="button-label">{mode === "beginner" ? "Beginner" : "Advanced"}</span>
-          </button>
-          <button className="ghost-button" onClick={onOpenLearn} title="Open the lessons">
-            <Graduation size={14} />
-            <span className="button-label">Learn</span>
           </button>
           <button className="ghost-button" onClick={onOpenDocs} title="Open the LogicFlow documentation">
             <Book size={14} />

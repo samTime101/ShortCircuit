@@ -47,8 +47,6 @@ export { plainFor } from "./plainLanguage";
 export { expandProgram } from "./expand";
 export { GLOSSARY, GLOSSARY_BY_TERM } from "./glossary";
 export type { GlossaryEntry } from "./glossary";
-export { LESSONS, LESSON_BY_ID } from "./lessons";
-export type { Lesson, LessonCheck } from "./lessons";
 export { exportVerilog } from "./verilog";
 export type { VerilogOptions, VerilogResult } from "./verilog";
 export type { DiagnosticFix, PlainDiagnostic } from "./plainLanguage";

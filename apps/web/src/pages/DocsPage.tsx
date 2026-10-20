@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   BUILTINS,
+  GLOSSARY,
   INTRINSIC_CIRCUITS,
   LANGUAGE_SNIPPETS,
   LANGUAGE_VERSION,
@@ -25,6 +26,7 @@ interface SectionDef {
 const SECTIONS: SectionDef[] = [
   { id: "overview", label: "Overview", group: "Getting started" },
   { id: "quick-start", label: "Quick start", group: "Getting started" },
+  { id: "glossary", label: "Glossary", group: "Getting started" },
   { id: "syntax", label: "Syntax", group: "Language" },
   { id: "values", label: "Values and buses", group: "Language" },
   { id: "signals", label: "Signals and state", group: "Language" },
@@ -220,18 +222,17 @@ export function DocsPage({ onBack, beginner }: DocsPageProps) {
             <div className="docs-newcomer">
               <strong>New to digital logic?</strong>
               <p>
-                Start with the lessons: they build a half adder, a counter, and a latch one gate at a
-                time, and they check your work as you go. The glossary explains every word the
-                language uses.
+                The glossary explains every word the language uses, from a bus to a clock edge, in
+                plain language. It is a good place to start.
               </p>
               <button
                 type="button"
                 className="docs-back"
                 onClick={() => {
-                  window.location.hash = "#/learn";
+                  document.getElementById("glossary")?.scrollIntoView({ behavior: "smooth" });
                 }}
               >
-                Open the lessons
+                Open the glossary
                 <ArrowUpRight size={14} />
               </button>
             </div>
@@ -306,6 +307,27 @@ END`}
                   read its width rule, then flip the input bits in the simulation dock.
                 </p>
               </div>
+            </div>
+          </Section>
+
+          <Section
+            id="glossary"
+            index="02"
+            eyebrow="Getting started"
+            title="Glossary"
+            lead="The words this language uses, in plain language."
+          >
+            <div className="docs-glossary">
+              {GLOSSARY.map((entry) => (
+                <article key={entry.term}>
+                  <header>
+                    <h3>{entry.term}</h3>
+                    <span className="docs-chip small">{entry.group}</span>
+                  </header>
+                  <p className="docs-glossary-short">{entry.short}</p>
+                  <p className="docs-glossary-long">{entry.long}</p>
+                </article>
+              ))}
             </div>
           </Section>
 
