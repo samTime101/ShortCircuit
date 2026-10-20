@@ -225,4 +225,16 @@ END`);
       "19px",
     );
   });
+
+  it("migrates a source saved with the old comment marker", async () => {
+    store(`# an old style comment
+${HALF_ADDER}`);
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Evaluation graph")).toBeInTheDocument();
+    });
+    expect(screen.queryAllByText(/not a comment/i).length).toBe(0);
+    expect(window.localStorage.getItem(STORAGE_KEY)).toContain("// an old style comment");
+  });
 });

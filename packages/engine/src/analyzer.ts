@@ -28,6 +28,7 @@ import {
 import { DiagnosticBag, suggestName } from "./diagnostics";
 import { plainFor } from "./plainLanguage";
 import { valueAsIndex } from "./values";
+import { LANGUAGE_VERSION } from "./version";
 import type {
   CircuitIR,
   CircuitInput,
@@ -230,7 +231,7 @@ export class ProgramAnalyzer {
     const ir: ProgramIR | null = ok
       ? {
           schema: "shortcircuit.ir/v1",
-          language: "logicflow/0.1",
+          language: LANGUAGE_VERSION,
           circuits: this.circuits,
           tests: this.tests,
         }

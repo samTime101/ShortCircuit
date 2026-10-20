@@ -8,7 +8,7 @@ value as a zero-padded binary string.
 ```ts
 interface ProgramIR {
   schema: "shortcircuit.ir/v1";
-  language: "logicflow/0.1";
+  language: "logicflow/0.2";
   circuits: CircuitIR[];
   tests: TestSuiteIR[];
 }
@@ -662,7 +662,7 @@ Compiled IR:
 ```json
 {
   "schema": "shortcircuit.ir/v1",
-  "language": "logicflow/0.1",
+  "language": "logicflow/0.2",
   "circuits": [
     {
       "name": "Adder8",

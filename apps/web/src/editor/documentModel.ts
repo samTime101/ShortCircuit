@@ -30,8 +30,30 @@ const OUTPUT = /^\s*OUTPUT\s+([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)/
 const CIRCUIT = /^\s*CIRCUIT\s+([A-Za-z_][A-Za-z0-9_]*)/i;
 
 function stripComment(line: string): string {
-  const hash = line.indexOf("#");
-  return hash === -1 ? line : line.slice(0, hash);
+  let index = 0;
+  let quote: string | null = null;
+  while (index < line.length) {
+    const char = line[index]!;
+    if (quote) {
+      if (char === "\\") index += 1;
+      else if (char === quote) quote = null;
+      index += 1;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      index += 1;
+      continue;
+    }
+    if (char === "/" && line[index + 1] === "/") return line.slice(0, index);
+    if (char === "/" && line[index + 1] === "*") {
+      const end = line.indexOf("*/", index + 2);
+      if (end === -1) return line.slice(0, index);
+      return `${line.slice(0, index)} ${line.slice(end + 2)}`;
+    }
+    index += 1;
+  }
+  return line;
 }
 
 /** Scans the source for signal names, instance ports, and circuit names. */

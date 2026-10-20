@@ -7,6 +7,8 @@
  * syntax.
  */
 
+import { LANGUAGE_VERSION } from "./version";
+
 export type DiagnosticSeverity = "error" | "warning" | "info";
 
 export interface Diagnostic {
@@ -231,7 +233,7 @@ export interface TestSuiteIR {
 
 export interface ProgramIR {
   schema: "shortcircuit.ir/v1";
-  language: "logicflow/0.1";
+  language: typeof LANGUAGE_VERSION;
   circuits: CircuitIR[];
   tests: TestSuiteIR[];
 }

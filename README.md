@@ -2,7 +2,7 @@
 
 **Short Circuit** is a text-first digital logic language and simulation studio. Describe a circuit as a graph of named signals, then compile, simulate, test, enumerate and inspect the exact same design.
 
-The language is called **LogicFlow** (`logicflow/0.1`). It is deliberately small and declarative:
+The language is called **LogicFlow** (`logicflow/0.2`). It is deliberately small and declarative:
 
 ```logicflow
 CIRCUIT HalfAdder
@@ -27,6 +27,8 @@ END
 ```
 
 Assignments describe wires, not steps. The compiler validates names, widths, wiring, composition and clocking before it produces a portable IR. Every view in the app — live simulation, dependency graph, truth table, tests, and JSON — consumes that IR rather than reparsing source.
+
+Comments use `//` for a line and `/* ... */` for a block that may span lines. LogicFlow 0.2 dropped the old `#` marker; the studio rewrites a source saved by an older version when it loads it.
 
 ## What works in v0.1
 

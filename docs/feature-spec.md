@@ -1,6 +1,6 @@
 # Short Circuit: Feature Specification
 
-Proposed features for LogicFlow (`logicflow/0.1`) and the Short Circuit studio. Each entry gives a summary, the expected behaviour, an example, and notes on errors or edge cases. All syntax shown is **proposed**, not yet implemented.
+Proposed features for LogicFlow (`logicflow/0.2`) and the Short Circuit studio. Each entry gives a summary, the expected behaviour, an example, and notes on errors or edge cases. All syntax shown is **proposed**, not yet implemented.
 
 Priority key: **P1** = do first, **P2** = next, **P3** = later.
 
@@ -571,7 +571,7 @@ CIRCUIT Both
   INPUT a
   INPUT b
 
-  # Make 'light' turn on only when a AND b are both on.
+  // Make 'light' turn on only when a AND b are both on.
   light = ???
 
   OUTPUT light
@@ -632,7 +632,7 @@ The user types `AND(a, b)`. The app runs the four combinations and shows a green
 **Example**
 
 ```
-OUTPUT grid   # DISPLAY GRID(4, 4)
+OUTPUT grid   // DISPLAY GRID(4, 4)
 ```
 
 The 16-bit `grid` output appears as a 4x4 board, and stepping the clock moves the glider across it.

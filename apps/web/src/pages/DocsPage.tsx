@@ -365,7 +365,9 @@ width        := number | "BUS" "(" number ")"`}
                     letters, digits, or underscores.
                   </li>
                   <li>
-                    <strong>Comments</strong> start with <code>#</code> and run to the end of the line.
+                    <strong>Comments</strong> start with <code>//</code> and run to the end of the
+                    line, or open with <code>/*</code> and close with <code>*/</code> and may span
+                    as many lines as you like.
                   </li>
                   <li>
                     <strong>Keywords and built-ins</strong> are case-insensitive: <code>input</code> and{" "}
@@ -379,6 +381,40 @@ width        := number | "BUS" "(" number ")"`}
                     <strong>Reserved words</strong> cannot be used as names: CIRCUIT, END, INPUT,
                     OUTPUT, STATE, ON, RISING_EDGE, FALLING_EDGE, IF, ELSE, TEST, CASE, EXPECT, BUS,
                     plus every built-in name.
+                  </li>
+                </ul>
+              </div>
+            </div>
+            <div className="docs-columns">
+              <div>
+                <h4>Comments</h4>
+                <CodeBlock
+                  code={`// a comment on its own line
+INPUT a          // or after a statement
+
+/* a block comment
+   may span
+   several lines */
+OUTPUT a`}
+                />
+              </div>
+              <div>
+                <h4>Things to know</h4>
+                <ul className="docs-list">
+                  <li>
+                    A <code>//</code> comment runs to the end of the line. A <code>/*</code> comment
+                    runs until the matching <code>*/</code>.
+                  </li>
+                  <li>
+                    A <code>//</code> inside a quoted string is just a character, and so is a{" "}
+                    <code>/*</code> that never opens a comment.
+                  </li>
+                  <li>
+                    Block comments do not nest: the first <code>*/</code> closes them.
+                  </li>
+                  <li>
+                    <code>/</code> on its own is still division, so write <code>a / b</code> with
+                    spaces if you mean to divide.
                   </li>
                 </ul>
               </div>
@@ -444,8 +480,8 @@ width        := number | "BUS" "(" number ")"`}
                 <CodeBlock
                   code={`INPUT data : BUS(8)
 
-upper   = data[7:4]     # inclusive slice, 4 bits
-low_bit = data[0]       # single bit
+upper   = data[7:4]     // inclusive slice, 4 bits
+low_bit = data[0]       // single bit
 word    = CONCAT(upper, low_bit)`}
                 />
                 <p>
@@ -485,11 +521,11 @@ word    = CONCAT(upper, low_bit)`}
               <div>
                 <h4>Inputs and outputs</h4>
                 <CodeBlock
-                  code={`INPUT enable        # one bit
-INPUT data : BUS(8)  # eight bits
+                  code={`INPUT enable        // one bit
+INPUT data : BUS(8)  // eight bits
 
-OUTPUT sum          # a signal
-OUTPUT result.zero  # an instance port`}
+OUTPUT sum          // a signal
+OUTPUT result.zero  // an instance port`}
                 />
               </div>
               <div>

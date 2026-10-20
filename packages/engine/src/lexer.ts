@@ -116,8 +116,49 @@ export function lex(source: string, diagnostics: Diagnostic[]): Token[] {
       continue;
     }
 
-    if (char === "#") {
+    if (char === "/" && source[index + 1] === "/") {
       while (index < source.length && source[index] !== "\n") advance();
+      continue;
+    }
+
+    if (char === "/" && source[index + 1] === "*") {
+      const startLine = line;
+      const startColumn = column;
+      const startOffset = index;
+      advance(2);
+      let closed = false;
+      while (index < source.length) {
+        if (source[index] === "*" && source[index + 1] === "/") {
+          advance(2);
+          closed = true;
+          break;
+        }
+        advance();
+      }
+      if (!closed) {
+        diagnostics.push({
+          code: "E003",
+          severity: "error",
+          message: "Unterminated block comment.",
+          line: startLine,
+          column: startColumn,
+          length: index - startOffset,
+          hint: "Close the comment with */.",
+        });
+      }
+      continue;
+    }
+
+    if (char === "#") {
+      diagnostics.push({
+        code: "E002",
+        severity: "error",
+        message: '"#" is not a comment in LogicFlow 0.2.',
+        line,
+        column,
+        hint: "Use // for a line comment, or /* and */ for a block comment.",
+      });
+      advance();
       continue;
     }
 
@@ -231,7 +272,7 @@ export function lex(source: string, diagnostics: Diagnostic[]): Token[] {
       message: `Unexpected character "${char}".`,
       line: startLine,
       column: startColumn,
-      hint: "LogicFlow uses letters, numbers, parentheses, brackets, commas, colons, dots, and equals signs.",
+      hint: "Comments start with // or /* ... */. LogicFlow uses letters, numbers, parentheses, brackets, commas, colons, dots, and equals signs.",
     });
     advance();
   }

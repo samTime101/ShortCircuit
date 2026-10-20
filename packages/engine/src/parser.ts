@@ -72,7 +72,7 @@ function tokenSpan(token: Token): SourceSpan {
   };
 }
 
-/** Recursive-descent parser for the LogicFlow 0.1 source language. */
+/** Recursive-descent parser for the LogicFlow 0.2 source language. */
 export class Parser {
   private readonly tokens: Token[];
   private readonly bag: DiagnosticBag;

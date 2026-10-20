@@ -8,8 +8,8 @@ export interface Example {
   source: string;
 }
 
-const HALF_ADDER = `# Short Circuit — LogicFlow 0.1
-# Assignments describe wires in a graph, not steps in a program.
+const HALF_ADDER = `// Short Circuit — LogicFlow 0.2
+// Assignments describe wires in a graph, not steps in a program.
 
 CIRCUIT HalfAdder
 
@@ -50,8 +50,8 @@ END
 END
 `;
 
-const FULL_ADDER = `# A circuit can contain other circuits.
-# HalfAdder is elaborated twice inside FullAdder.
+const FULL_ADDER = `// A circuit can contain other circuits.
+// HalfAdder is elaborated twice inside FullAdder.
 
 CIRCUIT HalfAdder
 
@@ -114,8 +114,8 @@ END
 END
 `;
 
-const ADDER_8 = `# Buses carry several bits. ADD uses the widest input width;
-# overflow beyond bit 7 wraps by the documented width policy.
+const ADDER_8 = `// Buses carry several bits. ADD uses the widest input width;
+// overflow beyond bit 7 wraps by the documented width policy.
 
 CIRCUIT Adder8
 
@@ -152,8 +152,8 @@ END
 END
 `;
 
-const MUX_4 = `# Hardware chooses with multiplexers, not IF statements.
-# sel = 00 → a, 01 → b, 10 → c, 11 → d
+const MUX_4 = `// Hardware chooses with multiplexers, not IF statements.
+// sel = 00 → a, 01 → b, 10 → c, 11 → d
 
 CIRCUIT Mux4
 
@@ -213,8 +213,8 @@ END
 END
 `;
 
-const MAJORITY = `# Every logic gate is variadic where that makes mathematical sense.
-# Majority is true when at least two of the three inputs are true.
+const MAJORITY = `// Every logic gate is variadic where that makes mathematical sense.
+// Majority is true when at least two of the three inputs are true.
 
 CIRCUIT MajorityVote
 
@@ -259,8 +259,8 @@ END
 END
 `;
 
-const ALU_8 = `# An ALU built from arithmetic, gates, comparisons and MUXes.
-# op = 00 AND · 01 OR · 10 ADD · 11 SUBTRACT
+const ALU_8 = `// An ALU built from arithmetic, gates, comparisons and MUXes.
+// op = 00 AND · 01 OR · 10 ADD · 11 SUBTRACT
 
 CIRCUIT ALU8
 
@@ -319,8 +319,8 @@ END
 END
 `;
 
-const REGISTER_8 = `# State changes only on a clock edge. Everything inside the
-# IF is sampled against the old state, then committed together.
+const REGISTER_8 = `// State changes only on a clock edge. Everything inside the
+// IF is sampled against the old state, then committed together.
 
 CIRCUIT Register8
 
@@ -364,8 +364,8 @@ END
 END
 `;
 
-const COUNTER_4 = `# A stateful counter: combinational logic computes next,
-# then the rising edge of clock commits it.
+const COUNTER_4 = `// A stateful counter: combinational logic computes next,
+// then the rising edge of clock commits it.
 
 CIRCUIT Counter4
 
@@ -411,8 +411,8 @@ END
 END
 `;
 
-const CELL_GRID = `# Compile-time constants and loops stamp out repeated structure.
-# Changing W gives a wider grid with no other edits.
+const CELL_GRID = `// Compile-time constants and loops stamp out repeated structure.
+// Changing W gives a wider grid with no other edits.
 
 CONST W = 4
 
@@ -436,8 +436,8 @@ CIRCUIT CellGrid
 END
 `;
 
-const PARAMETERIZED = `# One definition, many sizes.
-# The parameter is a compile-time number, so each copy has its own width.
+const PARAMETERIZED = `// One definition, many sizes.
+// The parameter is a compile-time number, so each copy has its own width.
 
 CIRCUIT Register(N = 8)
   INPUT data : BUS(N)
@@ -464,8 +464,8 @@ CIRCUIT RegisterPair
 END
 `;
 
-const SEVEN_SEGMENT = `# A four-bit value drives a seven-segment display.
-# The segments are named the way a display is: a is the top bar.
+const SEVEN_SEGMENT = `// A four-bit value drives a seven-segment display.
+// The segments are named the way a display is: a is the top bar.
 
 CIRCUIT SevenSegment
   INPUT value : BUS(4)
@@ -512,8 +512,8 @@ END
 END
 `;
 
-const TRAFFIC = `# A traffic light is a tiny state machine.
-# The phase counts 0 red, 1 amber, 2 green, and wraps back to red.
+const TRAFFIC = `// A traffic light is a tiny state machine.
+// The phase counts 0 red, 1 amber, 2 green, and wraps back to red.
 
 CIRCUIT TrafficLight
   INPUT clock
@@ -570,8 +570,8 @@ END
 END
 `;
 
-const LOCK = `# A four-bit keypad code opens the lock.
-# The secret is 1011, and a wrong code is denied.
+const LOCK = `// A four-bit keypad code opens the lock.
+// The secret is 1011, and a wrong code is denied.
 
 CIRCUIT Lock
   INPUT code : BUS(4)
@@ -607,8 +607,8 @@ END
 END
 `;
 
-const SEQUENCE = `# A shift register that spots the pattern 1011.
-# The state remembers how much of the pattern has matched so far.
+const SEQUENCE = `// A shift register that spots the pattern 1011.
+// The state remembers how much of the pattern has matched so far.
 
 CIRCUIT SequenceDetector
   INPUT bit
@@ -685,8 +685,8 @@ END
 END
 `;
 
-const TALLY = `# A tally counter that shows its count on a seven-segment display.
-# The count runs from zero to nine and then starts over.
+const TALLY = `// A tally counter that shows its count on a seven-segment display.
+// The count runs from zero to nine and then starts over.
 
 CIRCUIT SevenSegment
   INPUT value : BUS(4)
@@ -771,8 +771,8 @@ END
 END
 `;
 
-const MULTIPLY = `# A two-by-two multiplier, stamped out with a loop.
-# Every partial product is one bit, widened before the sums.
+const MULTIPLY = `// A two-by-two multiplier, stamped out with a loop.
+// Every partial product is one bit, widened before the sums.
 
 CIRCUIT Multiply2x2
   INPUT a : BUS(2)
@@ -811,8 +811,8 @@ END
 END
 `;
 
-const LIFE = `# Conway's Life on a strip of four cells.
-# The strip wraps around, so the left of the first cell is the last one.
+const LIFE = `// Conway's Life on a strip of four cells.
+// The strip wraps around, so the left of the first cell is the last one.
 
 CONST N = 4
 
@@ -835,7 +835,7 @@ CIRCUIT LifeStrip
     cell[i] = LifeCell(cells[i], CONCAT(cells[(i + N - 1) % N], cells[(i + 1) % N]))
   END
 
-  # The first cell is the most significant bit, so the pieces are joined in reverse.
+  // The first cell is the most significant bit, so the pieces are joined in reverse.
   nextrow = CONCAT(cell[3].next, cell[2].next, cell[1].next, cell[0].next)
 
   ON RISING_EDGE(clock):

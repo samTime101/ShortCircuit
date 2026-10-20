@@ -68,8 +68,10 @@ runtime dependency on the web app or on any UI library.
   length;
 - comments are skipped, but newlines are preserved because the grammar is
   line-oriented;
-- lexical errors (`E001`, `E002`) are recoverable and recorded on a diagnostic
-  sink.
+- a `//` comment runs to the end of the line, and a `/* ... */` comment may
+  span lines; the lexer reports an unclosed block comment as `E003`;
+- lexical errors (`E001`, `E002`, `E003`) are recoverable and recorded on a
+  diagnostic sink.
 
 Numbers are kept as raw text. Interpreting a literal depends on context
 (language literal, test literal, simulation input, slice bound), so the lexer

@@ -59,6 +59,7 @@ import {
 import type { SourceEditorHandle } from "./editor/SourceEditor";
 import { DEFAULT_EXAMPLE, EXAMPLES, type Example } from "./lib/examples";
 import { insertRecordedCase, suggestCaseName } from "./lib/recordTest";
+import { migrateLegacyComments } from "./lib/legacyComments";
 import { appendSample, sampleFromSnapshot, type TraceSample } from "./lib/trace";
 import { useRoute } from "./lib/router";
 import { createCompilerClient, type CompilerClient } from "./lib/compilerClient";
@@ -107,7 +108,10 @@ function readStoredDisplays(): Record<string, DisplayMode> {
 
 function readStoredSource(): string {
   try {
-    return window.localStorage.getItem(STORAGE_KEY) ?? DEFAULT_EXAMPLE.source;
+    const stored = window.localStorage.getItem(STORAGE_KEY);
+    if (stored === null) return DEFAULT_EXAMPLE.source;
+    // Sources saved before LogicFlow 0.2 used `#` for comments.
+    return migrateLegacyComments(stored);
   } catch {
     return DEFAULT_EXAMPLE.source;
   }
@@ -648,7 +652,7 @@ function Studio({
         </div>
 
         <div className="header-center">
-          <span className="version-chip">LogicFlow 0.1</span>
+          <span className="version-chip">LogicFlow 0.2</span>
           <span className={`engine-status ${engineState.className}`}>
             <span className="status-dot" />
             {engineState.label}

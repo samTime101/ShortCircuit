@@ -21,7 +21,7 @@ function combinational(source: string, circuitName?: string) {
   return { result, circuit: circuit! };
 }
 
-const HALF_ADDER = `# A one-bit half adder
+const HALF_ADDER = `// A one-bit half adder
 CIRCUIT HalfAdder
 
 INPUT a
@@ -1045,5 +1045,130 @@ end`;
     expect(formatted).toContain("  INPUT a");
     expect(formatted).toContain("  sum = XOR(a, b)");
     expect(formatted.trimEnd().endsWith("END")).toBe(true);
+  });
+});
+
+describe("comments", () => {
+  const CIRCUIT_BODY = `CIRCUIT Comments
+INPUT a
+OUTPUT a
+END`;
+
+  it("ignores line comments on their own and after a statement", () => {
+    const result = compile(`// a leading note
+${CIRCUIT_BODY}   // a trailing note`);
+    expect(result.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
+    expect(result.ok).toBe(true);
+    expect(result.circuits[0]?.inputs.map((input) => input.name)).toEqual(["a"]);
+  });
+
+  it("ignores a block comment that spans several lines", () => {
+    const result = compile(`CIRCUIT Comments
+/* this comment
+   covers three
+   lines */
+INPUT a
+OUTPUT a
+END`);
+    expect(result.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("ignores a block comment on a single line", () => {
+    const result = compile(`CIRCUIT Comments
+INPUT a /* inline */ 
+OUTPUT a
+END`);
+    expect(result.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("keeps code that follows a closed block comment", () => {
+    const result = compile(`CIRCUIT Comments
+/* note */ INPUT a
+OUTPUT a
+END`);
+    expect(result.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
+    expect(result.circuits[0]?.inputs.map((input) => input.name)).toEqual(["a"]);
+  });
+
+  it("no longer treats # as a comment", () => {
+    const result = compile(`CIRCUIT Comments
+# old style comment
+INPUT a
+OUTPUT a
+END`);
+    expect(result.ok).toBe(false);
+    const error = result.diagnostics.find((item) => item.code === "E002");
+    expect(error?.message).toContain("#");
+    expect(error?.hint).toContain("//");
+  });
+
+  it("reports an unterminated block comment", () => {
+    const result = compile(`CIRCUIT Comments
+/* never closed
+INPUT a
+OUTPUT a
+END`);
+    expect(result.ok).toBe(false);
+    const error = result.diagnostics.find((item) => item.code === "E003");
+    expect(error?.message).toBe("Unterminated block comment.");
+    expect(error?.hint).toContain("*/");
+  });
+
+  it("keeps comment markers inside strings as plain characters", () => {
+    const result = compile(`CIRCUIT Comments
+INPUT a
+OUTPUT a
+END
+TEST Comments
+CASE "a // b"
+  INPUT a = 1
+  EXPECT a = 1
+END
+END`);
+    expect(result.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
+  });
+
+  it("still divides with a single slash", () => {
+    const result = compile(`CONST half = 8 / 2
+CIRCUIT Quotient
+INPUT a
+OUTPUT a
+END`);
+    expect(result.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
+  });
+
+  it("keeps comments out of the formatted source", () => {
+    const source = `circuit Comments
+// a note
+input a
+output a
+end`;
+    const formatted = formatSource(source);
+    expect(formatted).toContain("// a note");
+    expect(formatted).toContain("  INPUT a");
+  });
+
+  it("keeps a block comment intact while formatting", () => {
+    const source = `circuit Comments
+/* a block
+   comment */
+input a
+output a
+end`;
+    const formatted = formatSource(source);
+    expect(formatted).toContain("/* a block");
+    expect(formatted).toContain("comment */");
+    expect(formatted).toContain("  INPUT a");
+  });
+
+  it("does not re-case words inside a comment", () => {
+    const source = `circuit Comments
+// end is not a keyword here
+input a
+end`;
+    const formatted = formatSource(source);
+    expect(formatted).toContain("// end is not a keyword here");
   });
 });

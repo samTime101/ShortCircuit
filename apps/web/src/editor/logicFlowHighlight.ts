@@ -105,9 +105,17 @@ export function highlightLogicFlow(code: string): HighlightToken[] {
   while (index < code.length) {
     const char = code[index]!;
 
-    if (char === "#") {
+    if (char === "/" && code[index + 1] === "/") {
       const end = code.indexOf("\n", index);
       const stop = end === -1 ? code.length : end;
+      push(code.slice(index, stop), "comment");
+      index = stop;
+      continue;
+    }
+
+    if (char === "/" && code[index + 1] === "*") {
+      const end = code.indexOf("*/", index + 2);
+      const stop = end === -1 ? code.length : end + 2;
       push(code.slice(index, stop), "comment");
       index = stop;
       continue;

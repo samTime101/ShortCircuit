@@ -1,4 +1,4 @@
-# LogicFlow 0.1 — Language Reference
+# LogicFlow 0.2 — Language Reference
 
 LogicFlow is the small, declarative language used by Short Circuit. A program
 describes **wires in a graph**, not steps in a program. Every named signal is a
@@ -22,7 +22,7 @@ Version identifiers:
 
 | Constant | Value |
 | --- | --- |
-| Language | `logicflow/0.1` |
+| Language | `logicflow/0.2` |
 | IR schema | `shortcircuit.ir/v1` |
 | Engine | `0.1.0` |
 
@@ -55,16 +55,27 @@ described in [IR.md](IR.md); the compiler pipeline is described in
 - Statements are **line-oriented**. One declaration or assignment per line.
 - Leading and trailing whitespace is insignificant; tabs and spaces are
   interchangeable.
-- Comments start with `#` and run to the end of the line. They may appear on
-  their own line or after a statement, including after an argument list. A
-  `#` inside a quoted string is just a character, not a comment.
+- A **line comment** starts with `//` and runs to the end of the line. It may
+  appear on its own line or after a statement, including after an argument
+  list.
+- A **block comment** opens with `/*` and closes with `*/`. It may span as many
+  lines as you like, and it may also sit on one line. Block comments do not
+  nest: the first `*/` closes them.
+- A `//` or `/*` inside a quoted string is just a character, not a comment.
+- `/` on its own is still the division operator. Write `a / b` with spaces if
+  you mean to divide; `a // b` is a comment.
 - Blank lines are ignored everywhere.
 - `\r\n` and `\r` line endings are accepted; the formatter normalizes them.
 
 ```logicflow
-# Full-line comment
-INPUT a          # trailing comment
-sum = XOR(a, b)  # comments never change semantics
+// Full-line comment
+INPUT a          // trailing comment
+sum = XOR(a, b)  // comments never change semantics
+
+/* A block comment
+   may span
+   several lines. */
+OUTPUT sum
 ```
 
 ### 2.2 Identifiers
@@ -198,9 +209,9 @@ returns an IR (Section 12).
 ### 4.1 Inputs
 
 ```logicflow
-INPUT a              # 1 bit
-INPUT data : BUS(8)  # 8 bits (canonical spelling)
-INPUT flags : 4      # 4 bits (shorthand)
+INPUT a              // 1 bit
+INPUT data : BUS(8)  // 8 bits (canonical spelling)
+INPUT flags : 4      // 4 bits (shorthand)
 ```
 
 Widths must be positive whole numbers no greater than 4096. An input with no
@@ -214,7 +225,7 @@ instantiation that contains it.
 STATE count : BUS(4) = 0000
 STATE stored : BUS(8) = 0
 STATE flag = 1
-STATE armed : BUS(8)   # initial value 0
+STATE armed : BUS(8)   // initial value 0
 ```
 
 - A state declaration needs a width, an initial value, or both. `STATE x`
@@ -295,8 +306,8 @@ A reference is a name path:
 ```logicflow
 raw
 clock
-first.sum          # output of instance "first"
-outer.inner.value  # nested instance output
+first.sum          // output of instance "first"
+outer.inner.value  // nested instance output
 ```
 
 Using a circuit instance where a value is expected (for example
@@ -342,8 +353,8 @@ comparisons) use the **common width**:
 INPUT a : BUS(8)
 INPUT b
 
-good = AND(a, 0)      # literal 0 fits 8 bits → 8-bit result
-bad  = AND(a, b)      # E301: a is 8 bits, b is 1 bit
+good = AND(a, 0)      // literal 0 fits 8 bits → 8-bit result
+bad  = AND(a, b)      // E301: a is 8 bits, b is 1 bit
 ```
 
 ### 6.2 Result widths
@@ -430,10 +441,10 @@ normal evaluation.
 ### 7.3 Comparison
 
 ```logicflow
-equal   = EQUAL(a, b)      # 1 when a == b
-less    = LESS(a, b)       # 1 when a < b
-greater = GREATER(a, b)    # 1 when a > b
-order   = COMPARE(a, b)    # 00 equal, 01 less, 10 greater
+equal   = EQUAL(a, b)      // 1 when a == b
+less    = LESS(a, b)       // 1 when a < b
+greater = GREATER(a, b)    // 1 when a > b
+order   = COMPARE(a, b)    // 00 equal, 01 less, 10 greater
 ```
 
 Comparisons compare the unsigned integer values after literals are fitted to
@@ -1158,10 +1169,10 @@ Test values containing only `0` and `1` characters are **binary**, even
 without a leading zero:
 
 ```logicflow
-INPUT flags = 10       # "10" is binary two in a test
-INPUT flags = 0b1010   # binary ten → value 10
-INPUT flags = 0x0A     # hexadecimal ten → value 10
-INPUT count = 12       # decimal twelve (the digit 2 forces decimal)
+INPUT flags = 10       // "10" is binary two in a test
+INPUT flags = 0b1010   // binary ten → value 10
+INPUT flags = 0x0A     // hexadecimal ten → value 10
+INPUT count = 12       // decimal twelve (the digit 2 forces decimal)
 ```
 
 Decimal values can always be written with a `0x` or `0b` prefix, or

@@ -54,7 +54,7 @@ export { LANGUAGE_SNIPPETS, SNIPPET_BY_ID, type LanguageSnippet, type SnippetCat
 
 export const ENGINE_VERSION = "0.1.0";
 export const IR_SCHEMA = "shortcircuit.ir/v1";
-export const LANGUAGE_VERSION = "logicflow/0.1";
+export { LANGUAGE_VERSION } from "./version";
 
 /**
  * Compile LogicFlow source into a portable IR plus validated test suites.

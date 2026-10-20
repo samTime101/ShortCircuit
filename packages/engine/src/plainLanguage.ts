@@ -42,7 +42,11 @@ const TEMPLATES: Record<string, Template> = {
   },
   E002: {
     headline: "That character does not belong here",
-    detail: "LogicFlow uses letters, numbers, brackets, commas, colons, dots, and equals signs.",
+    detail: "LogicFlow uses letters, numbers, brackets, commas, colons, dots, and equals signs. Comments start with // or /* ... */.",
+  },
+  E003: {
+    headline: "This comment was never closed",
+    detail: "A /* comment needs a matching */ to finish it.",
   },
   E100: {
     headline: "This line does not start a block",
