@@ -4,5 +4,5 @@
    colour; the studio uses a soft accent instead. */
 .cm-tooltip-autocomplete ul li[aria-selected] {
   background: rgba(108, 158, 255, 0.2) !important;
-  color: #e4e7ec !important;
+  color: #dee2e9 !important;
 }

@@ -319,14 +319,14 @@
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  background: #0a0c10;
+  background: #040507;
 }
 
 .docs-code pre {
   margin: 0;
   padding: 13px 15px;
   overflow-x: auto;
-  color: #d5dbe6;
+  color: #c7ced9;
   font-family: var(--font-mono);
   font-size: var(--fs-sm);
   line-height: 1.65;
@@ -519,24 +519,24 @@
 }
 
 .tok-comment {
-  color: #5a6373;
+  color: #4d5460;
   font-style: italic;
 }
 
 .tok-variable {
-  color: #e4e7ec;
+  color: #dee2e9;
 }
 
 .tok-operator {
-  color: #97a0b0;
+  color: #949ca9;
 }
 
 .tok-punctuation {
-  color: #78818f;
+  color: #6b7381;
 }
 
 .tok-plain {
-  color: #c3cad6;
+  color: #b6bdc9;
 }
 
 /* ---------------- Function reference ---------------- */

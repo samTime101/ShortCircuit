@@ -6,16 +6,16 @@
 
 :root {
   /* Surfaces: one cool gray family, from deepest to lightest. */
-  --bg: #0b0c0f;
-  --bg-deep: #08090b;
-  --panel: #0f1115;
-  --panel-2: #14171c;
-  --panel-3: #191d23;
-  --line: #21252c;
-  --line-strong: #2d333c;
-  --text: #e4e7ec;
-  --text-dim: #9ba3b0;
-  --text-faint: #6b7481;
+  --bg: #040507;
+  --bg-deep: #020203;
+  --panel: #060709;
+  --panel-2: #0a0c0f;
+  --panel-3: #0e1114;
+  --line: #13161a;
+  --line-strong: #1c2027;
+  --text: #dee2e9;
+  --text-dim: #949ca9;
+  --text-faint: #656d79;
 
   /* One accent. Violet is semantic: it marks sequential or active things. */
   --accent: #74a0d6;
@@ -48,8 +48,8 @@
   --radius-sm: 4px;
 
   /* Shadows carry the hue of the background instead of pure black. */
-  --shadow-pop: 0 14px 36px rgba(3, 7, 15, 0.55);
-  --shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --shadow-pop: 0 14px 36px rgba(0, 2, 6, 0.62);
+  --shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.035);
 
   /* Depth scale. */
   --z-base: 0;
@@ -142,14 +142,14 @@ a {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #262b33;
+  background: #14181d;
   border-radius: 6px;
   border: 3px solid transparent;
   background-clip: content-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #333a45;
+  background: #1f242b;
   background-clip: content-box;
 }
 
@@ -312,7 +312,7 @@ kbd {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #3b424c;
+  background: #1c2027;
   transition: background 0.2s ease;
 }
 
@@ -510,7 +510,7 @@ kbd {
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  background: #0a0c10;
+  background: #040507;
 }
 
 .source-editor .cm-editor {
@@ -518,7 +518,7 @@ kbd {
 }
 
 .source-editor .cm-scroller {
-  scrollbar-color: #262b33 transparent;
+  scrollbar-color: #14181d transparent;
 }
 
 .editor-loading {
@@ -838,6 +838,24 @@ kbd {
 .circuit-picker-label {
   color: var(--text-faint);
   font-size: var(--fs-xs);
+}
+
+/* The native select paints its own grey field; strip it so the picker
+   reads as one dark control. */
+.circuit-picker select {
+  appearance: none;
+  max-width: 190px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  text-overflow: ellipsis;
+}
+
+.circuit-picker option {
+  background: var(--panel-2);
+  color: var(--text);
 }
 
 .inspection-content {
@@ -1427,8 +1445,8 @@ kbd {
   min-height: 0;
   overflow: hidden;
   background:
-    linear-gradient(rgba(255, 255, 255, 0.012) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.012) 1px, transparent 1px);
+    linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
   background-size: 28px 28px;
 }
 
@@ -1458,7 +1476,7 @@ kbd {
   padding: 4px 8px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  background: rgba(11, 12, 15, 0.86);
+  background: rgba(4, 5, 7, 0.86);
   color: var(--text-faint);
   font-family: var(--font-mono);
   font-size: var(--fs-2xs);
@@ -1520,7 +1538,7 @@ kbd {
   height: 26px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  background: rgba(15, 17, 21, 0.92);
+  background: rgba(6, 7, 9, 0.92);
   color: var(--text-faint);
   cursor: pointer;
   transition: color 0.14s ease, border-color 0.14s ease;
@@ -1539,7 +1557,7 @@ kbd {
   padding: 4px 8px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  background: rgba(11, 12, 15, 0.9);
+  background: rgba(4, 5, 7, 0.9);
   color: var(--yellow);
   font-size: var(--fs-xs);
 }
@@ -1757,7 +1775,7 @@ kbd {
   padding: 10px 11px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius);
-  background: rgba(15, 17, 21, 0.97);
+  background: rgba(10, 12, 15, 0.97);
   box-shadow: var(--shadow-pop);
 }
 
@@ -2320,7 +2338,7 @@ kbd {
   display: grid;
   place-items: center;
   padding: 32px;
-  background: rgba(5, 6, 8, 0.72);
+  background: rgba(1, 1, 2, 0.78);
   animation: fade-in 0.16s ease both;
 }
 
@@ -2794,8 +2812,8 @@ kbd {
   padding: 11px 13px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  background: #0a0c10;
-  color: #d5dbe6;
+  background: #040507;
+  color: #ced5e0;
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
   line-height: 1.6;
@@ -2894,7 +2912,7 @@ kbd {
   padding: 9px 11px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
-  background: rgba(15, 17, 21, 0.97);
+  background: rgba(10, 12, 15, 0.97);
   box-shadow: var(--shadow-pop);
   pointer-events: none;
 }

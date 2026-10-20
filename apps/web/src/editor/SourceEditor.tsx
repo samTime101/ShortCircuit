@@ -107,17 +107,17 @@ const highlightStyle = HighlightStyle.define([
   { tag: tags.typeName, color: "#e9a06a" },
   { tag: tags.number, color: "#e9a06a" },
   { tag: tags.string, color: "#e2b95c" },
-  { tag: tags.lineComment, color: "#5a6373", fontStyle: "italic" },
-  { tag: tags.variableName, color: "#e4e7ec" },
-  { tag: tags.operator, color: "#97a0b0" },
-  { tag: tags.punctuation, color: "#78818f" },
+  { tag: tags.lineComment, color: "#4d5460", fontStyle: "italic" },
+  { tag: tags.variableName, color: "#dee2e9" },
+  { tag: tags.operator, color: "#949ca9" },
+  { tag: tags.punctuation, color: "#6b7381" },
 ]);
 
 const editorTheme = EditorView.theme(
   {
     "&": {
-      backgroundColor: "#0a0c10",
-      color: "#e4e7ec",
+      backgroundColor: "#040507",
+      color: "#dee2e9",
       height: "100%",
       fontSize: "13.5px",
     },
@@ -143,8 +143,8 @@ const editorTheme = EditorView.theme(
       backgroundColor: "rgba(108, 158, 255, 0.18)",
     },
     ".cm-gutters": {
-      backgroundColor: "#0a0c10",
-      color: "#4d5665",
+      backgroundColor: "#040507",
+      color: "#3d444f",
       border: "none",
       paddingLeft: "6px",
     },
@@ -160,7 +160,7 @@ const editorTheme = EditorView.theme(
       color: "#6c9eff",
     },
     ".cm-foldGutter .cm-gutterElement": {
-      color: "#4d5665",
+      color: "#3d444f",
       padding: "0 4px",
     },
     ".cm-matchingBracket, .cm-nonmatchingBracket": {
@@ -176,10 +176,10 @@ const editorTheme = EditorView.theme(
         "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='3'%3E%3Cpath d='m0 3 1.5-1.5L3 3l1.5-1.5L6 3' fill='none' stroke='%23e2b95c' stroke-width='1'/%3E%3C/svg%3E\")",
     },
     ".cm-tooltip": {
-      backgroundColor: "#14171c",
-      border: "1px solid #2d333c",
+      backgroundColor: "#0a0c0f",
+      border: "1px solid #1c2027",
       borderRadius: "6px",
-      color: "#e4e7ec",
+      color: "#dee2e9",
       fontFamily: "'Inter Variable', ui-sans-serif, system-ui, sans-serif",
       boxShadow: "0 14px 36px rgba(0,0,0,.45)",
     },
@@ -190,9 +190,9 @@ const editorTheme = EditorView.theme(
       fontSize: "12px",
     },
     ".cm-panels": {
-      backgroundColor: "#14171c",
-      color: "#e4e7ec",
-      borderColor: "#2d333c",
+      backgroundColor: "#0a0c0f",
+      color: "#dee2e9",
+      borderColor: "#1c2027",
     },
     ".cm-searchMatch": { backgroundColor: "rgba(226, 185, 92, 0.22)" },
     ".cm-searchMatch.cm-searchMatch-selected": {
@@ -201,8 +201,8 @@ const editorTheme = EditorView.theme(
     ".cm-gutter-lint": { width: "14px" },
     ".cm-gutter-lint .cm-gutterElement": { padding: "0 4px" },
     ".cm-tooltip.cm-tooltip-autocomplete": {
-      backgroundColor: "#14171c",
-      border: "1px solid #2d333c",
+      backgroundColor: "#0a0c0f",
+      border: "1px solid #1c2027",
       borderRadius: "6px",
       boxShadow: "0 14px 36px rgba(0, 0, 0, 0.5)",
       overflow: "hidden",
@@ -215,12 +215,12 @@ const editorTheme = EditorView.theme(
     },
     ".cm-tooltip.cm-tooltip-autocomplete ul li": {
       borderRadius: "3px",
-      color: "#c3cad6",
+      color: "#b6bdc9",
       padding: "4px 8px",
     },
-    ".cm-completionLabel": { color: "#e8ecf4" },
+    ".cm-completionLabel": { color: "#dde1e8" },
     ".cm-completionDetail": {
-      color: "#6b7481",
+      color: "#5e6672",
       fontSize: "10px",
       fontStyle: "normal",
       marginLeft: "10px",
