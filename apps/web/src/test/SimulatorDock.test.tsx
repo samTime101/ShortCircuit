@@ -44,6 +44,8 @@ function setup(overrides: Partial<Parameters<typeof SimulatorDock>[0]> = {}) {
     onStartRecording: vi.fn(),
     onStopRecording: vi.fn(),
     onExpectThis: vi.fn(),
+    displays: {},
+    onDisplayChange: vi.fn(),
     ...overrides,
   };
   render(<SimulatorDock {...props} />);
@@ -117,6 +119,8 @@ describe("simulator dock", () => {
         onStartRecording={() => {}}
         onStopRecording={() => {}}
         onExpectThis={() => {}}
+        displays={{}}
+        onDisplayChange={() => {}}
       />,
     );
     expect(screen.queryByRole("button", { name: /step/i })).toBeNull();

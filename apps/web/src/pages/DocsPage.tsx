@@ -36,6 +36,7 @@ const SECTIONS: SectionDef[] = [
   { id: "diagnostics", label: "Diagnostics", group: "Reference" },
   { id: "limits", label: "Limits", group: "Reference" },
   { id: "snippets", label: "Snippet library", group: "Reference" },
+  { id: "displays", label: "Output displays", group: "Reference" },
   { id: "editor", label: "Editor tips", group: "Reference" },
   { id: "ir", label: "Portable IR", group: "Reference" },
 ];
@@ -1076,6 +1077,49 @@ END`}
                   <CodeBlock code={snippet.preview} />
                 </article>
               ))}
+            </div>
+          </Section>
+
+          <Section
+            id="displays"
+            index="15"
+            eyebrow="Reference"
+            title="Output displays"
+            lead="A value can be read as a number, as LEDs, as a seven-segment digit, as a bar, or as a grid of cells."
+          >
+            <div className="docs-columns">
+              <div>
+                <h4>How it works</h4>
+                <ul className="docs-list">
+                  <li>
+                    Each output picks its own display in the simulator dock. The choice
+                    is kept with the project.
+                  </li>
+                  <li>
+                    <strong>Number</strong> shows the binary value and its decimal
+                    equivalent.
+                  </li>
+                  <li>
+                    <strong>LEDs</strong> draws one light per bit, most significant bit
+                    first.
+                  </li>
+                </ul>
+              </div>
+              <div>
+                <h4>And more</h4>
+                <ul className="docs-list">
+                  <li>
+                    <strong>7-segment</strong> draws a digit from the low four bits.
+                  </li>
+                  <li>
+                    <strong>Bar</strong> shows how full the value is.
+                  </li>
+                  <li>
+                    <strong>Grid</strong> lays the bus out as a board of cells, which is
+                    how a grid of life cells reads.
+                  </li>
+                </ul>
+              </div>
             </div>
           </Section>
 

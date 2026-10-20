@@ -32,6 +32,7 @@ import { SimulatorDock } from "./components/SimulatorDock";
 import { TestsPanel } from "./components/TestsPanel";
 import { TruthTablePanel } from "./components/TruthTablePanel";
 import { WaveformPanel } from "./components/WaveformPanel";
+import type { DisplayMode } from "./components/OutputDisplay";
 import { DocsPage } from "./pages/DocsPage";
 import {
   Activity,
@@ -58,6 +59,7 @@ import { appendSample, sampleFromSnapshot, type TraceSample } from "./lib/trace"
 import { useRoute } from "./lib/router";
 
 const STORAGE_KEY = "shortcircuit.source.v1";
+const DISPLAY_STORAGE_KEY = "shortcircuit.displays.v1";
 const COMPILE_DELAY = 360;
 
 // CodeMirror is the largest dependency in the studio. Load it separately so the
@@ -76,6 +78,15 @@ const EMPTY_TESTS: TestRunResult = {
   unsupported: 0,
   elapsedMs: 0,
 };
+
+function readStoredDisplays(): Record<string, DisplayMode> {
+  try {
+    const raw = window.localStorage.getItem(DISPLAY_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, DisplayMode>) : {};
+  } catch {
+    return {};
+  }
+}
 
 function readStoredSource(): string {
   try {
@@ -114,6 +125,7 @@ function Studio({ onOpenDocs }: { onOpenDocs(): void }) {
   const [recordingName, setRecordingName] = useState("");
   const [recordingOpen, setRecordingOpen] = useState(false);
   const [trace, setTrace] = useState<TraceSample[]>([]);
+  const [displays, setDisplays] = useState<Record<string, DisplayMode>>(readStoredDisplays);
   const [truthTable, setTruthTable] = useState<TruthTable | null>(null);
   const [testResult, setTestResult] = useState<TestRunResult | null>(null);
   const [examplesOpen, setExamplesOpen] = useState(false);
@@ -144,6 +156,14 @@ function Studio({ onOpenDocs }: { onOpenDocs(): void }) {
       // Persistence is a convenience; private browsing can reject writes.
     }
   }, [source]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(DISPLAY_STORAGE_KEY, JSON.stringify(displays));
+    } catch {
+      // The display choices are a convenience, not something to fail over.
+    }
+  }, [displays]);
 
   const activateCircuit = useCallback((circuit: CircuitIR) => {
     activeCircuitRef.current = circuit.name;
@@ -710,6 +730,10 @@ function Studio({ onOpenDocs }: { onOpenDocs(): void }) {
                     onStartRecording={startRecording}
                     onStopRecording={stopRecording}
                     onExpectThis={expectThis}
+                    displays={displays}
+                    onDisplayChange={(name, mode) =>
+                      setDisplays((current) => ({ ...current, [name]: mode }))
+                    }
                   />
 
                   <div className="graph-panel">

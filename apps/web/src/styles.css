@@ -687,6 +687,7 @@ kbd {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  white-space: nowrap;
   padding: 0 9px;
   border: 0;
   border-bottom: 2px solid transparent;
@@ -2814,4 +2815,83 @@ kbd {
   gap: 10px;
   color: var(--text-faint);
   font-size: 11px;
+}
+
+/* ---------------- Output displays ---------------- */
+
+.display-number {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.display-leds {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.display-leds i {
+  width: 8px;
+  height: 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--panel-3);
+}
+
+.display-leds i.is-on {
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: 0 0 6px rgba(108, 158, 255, 0.5);
+}
+
+.display-seven path {
+  fill: var(--line-strong);
+}
+
+.display-seven path.is-on {
+  fill: var(--accent);
+}
+
+.display-bar {
+  display: inline-block;
+  width: 92px;
+  height: 8px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--panel-3);
+}
+
+.display-bar i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.display-grid {
+  display: grid;
+  gap: 2px;
+}
+
+.display-grid i {
+  width: 10px;
+  height: 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  background: var(--panel-3);
+}
+
+.display-grid i.is-on {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.display-mode {
+  height: 20px;
+  padding: 0 3px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--panel-2);
+  color: var(--text-faint);
+  font-size: 10px;
 }

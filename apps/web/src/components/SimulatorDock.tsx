@@ -5,6 +5,7 @@ import {
   type CircuitIR,
   type SimulationSnapshot,
 } from "@shortcircuit/engine";
+import { DISPLAY_MODES, OutputDisplay, type DisplayMode } from "./OutputDisplay";
 import {
   Circle as CircleIcon,
   Clock,
@@ -39,6 +40,9 @@ interface SimulatorDockProps {
   onStopRecording(): void;
   /** Records an expectation for the signal with the given name. */
   onExpectThis(name: string, value: string): void;
+  /** How each output is drawn. */
+  displays: Record<string, DisplayMode>;
+  onDisplayChange(name: string, mode: DisplayMode): void;
 }
 
 function BusTextField({
@@ -159,6 +163,8 @@ export function SimulatorDock({
   onStartRecording,
   onStopRecording,
   onExpectThis,
+  displays,
+  onDisplayChange,
 }: SimulatorDockProps) {
   const clockInputNames = useMemo(() => {
     const labels = new Set<string>();
@@ -385,10 +391,28 @@ export function SimulatorDock({
                       <span className="io-width">{output.width}b</span>
                     </div>
                     <div className="monitor-value">
-                      <span className="binary-value">{signal?.binary ?? "—"}</span>
-                      <span className="decimal-value">
-                        {output.width > 1 && signal ? `#${signal.decimal}` : ""}
-                      </span>
+                      <OutputDisplay
+                        mode={displays[output.name] ?? "number"}
+                        binary={signal?.binary ?? "0".repeat(output.width)}
+                        decimal={signal?.decimal ?? "0"}
+                        width={output.width}
+                      />
+                      {output.width > 1 ? (
+                        <select
+                          className="display-mode"
+                          aria-label={`Display mode for ${output.name}`}
+                          value={displays[output.name] ?? "number"}
+                          onChange={(event) =>
+                            onDisplayChange(output.name, event.target.value as DisplayMode)
+                          }
+                        >
+                          {DISPLAY_MODES.map((mode) => (
+                            <option key={mode.value} value={mode.value}>
+                              {mode.label}
+                            </option>
+                          ))}
+                        </select>
+                      ) : null}
                       {recording && signal ? (
                         <button
                           className="expect-button"
