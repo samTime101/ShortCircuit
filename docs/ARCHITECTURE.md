@@ -435,7 +435,38 @@ Surfaces are flat: hairline borders, 4-6 px radii, one accent color, and
 shadows only on overlays that float above the page (modals, tooltips, the
 graph inspector).
 
-### 6.7 Persistence and safety
+### 6.7 Waveform and trace
+
+Every input change, clock step, and forced state appends a sample to a trace
+held in the app. A sample records the inputs, outputs, states, and the edges
+that fired.
+
+- The **Waveform** tab draws one row per signal: one-bit signals as high and
+  low lines, buses as labelled segments.
+- Edges that fired are marked on the time axis.
+- The trace exports as a Value Change Dump for GTKWave, and as JSON with the
+  schema `shortcircuit.trace/v1`.
+- The history is capped at 10,000 samples, and the panel states the count
+  rather than truncating silently.
+- A reset or a new compile clears the trace.
+
+### 6.8 Recording a test case
+
+The dock can record what the user does. Input flips become `INPUT` lines,
+clock steps become `STEP` blocks, and the **Expect this** button captures the
+value a signal holds. Stopping asks for a case name, shows the generated
+source, and writes it into the file, adding the case to an existing `TEST`
+block when there is one.
+
+### 6.9 Plain-language diagnostics
+
+The engine attaches a plain-language layer to every diagnostic it knows about
+(`packages/engine/src/plainLanguage.ts`). The headline and the explanation are
+written for someone new to the language, and a name mistake carries a
+one-click fix: the source range, the replacement text, and the button label.
+The studio applies the fix and recompiles.
+
+### 6.10 Persistence and safety
 
 - Source persists under `localStorage` key `shortcircuit.source.v1`; failures
   (private browsing, quota) are ignored.
@@ -447,10 +478,22 @@ graph inspector).
 
 ## 7. Verification strategy
 
+The repository runs one vitest workspace with three projects: `engine`
+(`packages/engine`), `web` (`apps/web`, jsdom), and `cross`
+(`tests/`). `npm test` runs all of them.
+
 - **Engine unit tests** (`packages/engine/test/engine.test.ts`) cover gates,
   buses, arithmetic widths, slices/shifts/decoders, nested instances, named
-  arguments, intrinsics, clocking, diagnostics, formatting, truth-table order,
-  and failure behavior.
+  arguments, intrinsics, clocked test sequences, the bus helpers, clocking,
+  diagnostics, formatting, truth-table order, and failure behavior.
+- **Studio tests** (`apps/web/src/test`) render the documentation page, the
+  truth table, the test bench, the simulator dock, the waveform panel, and the
+  whole app, including the docs route, the fatal-diagnostic state, and the
+  one-click fix.
+- **Drift guards.** A test checks that every built-in signature appears in
+  `docs/LANGUAGE.md`, and the documentation page test checks that every
+  built-in, argument list, and example is rendered. The reference cannot fall
+  behind the implementation without a failing test.
 - **Cross-package example tests** (`tests/examples.test.ts`) import the public
   engine API and the web example library, compile and format every example,
   run all declared suites, and assert that every example's focused circuit

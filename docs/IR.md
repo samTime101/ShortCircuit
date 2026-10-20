@@ -505,6 +505,40 @@ the flat views are.
 
 ---
 
+## 5.6 The trace format
+
+The studio records a run of the simulator so it can be drawn and exported.
+
+```json
+{
+  "schema": "shortcircuit.trace/v1",
+  "samples": [
+    {
+      "index": 0,
+      "label": "clock",
+      "inputs": { "clock": "1" },
+      "outputs": { "count": "0001" },
+      "states": { "count": "0001" },
+      "events": [{ "edge": "rising", "clock": "clock" }]
+    }
+  ]
+}
+```
+
+- `samples` are in time order. Each sample is the state of the circuit after
+  one transition.
+- `label` says what caused the sample, usually the input that changed.
+- `inputs`, `outputs`, and `states` map names to zero-padded binary
+  strings.
+- `events` lists the clock edges that fired in that transition, with
+  `edge` of `rising` or `falling`.
+- The same trace is exported as a Value Change Dump for waveform tools.
+
+The trace is a studio format, not part of `shortcircuit.ir/v1`. A host that
+does not need waveforms can ignore it.
+
+---
+
 ## 6. Values
 
 ### 6.1 Binary strings

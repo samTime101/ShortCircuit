@@ -12,7 +12,8 @@
     "build": "npm run build -w @shortcircuit/web",
     "preview": "npm run preview -w @shortcircuit/web",
     "test": "vitest run",
-    "typecheck": "npm run typecheck -w @shortcircuit/engine && npm run typecheck -w @shortcircuit/web && tsc --noEmit -p tests/tsconfig.json"
+    "typecheck": "npm run typecheck -w @shortcircuit/engine && npm run typecheck -w @shortcircuit/web && tsc --noEmit -p tests/tsconfig.json",
+    "docs:generate": "node --experimental-strip-types scripts/generate-docs.mts"
   },
   "devDependencies": {
     "typescript": "^5.9.3",

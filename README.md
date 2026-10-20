@@ -35,10 +35,13 @@ Assignments describe wires, not steps. The compiler validates names, widths, wir
 - **Buses** — `BUS(8)` declarations, indexing (`data[3]`), inclusive slices (`data[7:4]`), concatenation, shifts, decoder/encoder.
 - **Composition** — reusable `CIRCUIT` blocks, positional or named instance ports, nested scopes and flattened IR.
 - **Sequential logic** — explicit `STATE`, rising/falling edge blocks, conditional next-state, atomic edge commits.
-- **Verification** — in-source `TEST` cases plus exhaustive truth-table generation for combinational circuits.
+- **Verification** — in-source `TEST` cases, clocked sequences with `STEP`, `CYCLE`, and `LOAD`, plus exhaustive truth-table generation for combinational circuits.
 - **Live studio** — CodeMirror editor with diagnostics, interactive input controls, dependency graph with values, stored-state monitors, test results, and downloadable IR.
 - **Editor that knows the language** — completions for built-ins, keywords, snippets and your own signals, plus hover cards with signatures, width rules and usage tips.
-- **Built-in documentation** — a full language reference page in the app (`/#/docs`) with the syntax, width policy, operation library, diagnostics, and a copyable snippet library.
+- **Built-in documentation** — a full language reference page in the app (`/#/docs`) with the syntax, width policy, every operation with its arguments and a worked example, diagnostics, and a copyable snippet library. The examples are syntax highlighted, and the same reference is generated into `docs/LANGUAGE.md` so the two cannot drift.
+- **Plain-language errors** — every diagnostic explains itself in everyday words, and a name mistake can be fixed with one click.
+- **Visible sequential behaviour** — a waveform panel records every step, marks the edges that fired, and exports VCD or JSON.
+- **Beginner-friendly** — record what you do in the simulator and the studio writes the test case for you; clicking a gate explains it and shows its truth table.
 - **Dark workbench** — neutral graphite surfaces with an electric-blue accent, readable in a dim room.
 
 ## Run it
@@ -53,9 +56,10 @@ npm run dev
 Vite prints the local URL (usually <http://localhost:5173>). If that port is occupied it picks the next available one.
 
 ```bash
-npm test        # engine and example-library tests
+npm test              # engine, studio, and cross-package tests
 npm run typecheck
 npm run build
+npm run docs:generate # regenerate the operation reference in docs/LANGUAGE.md
 ```
 
 ## Repository layout
@@ -70,15 +74,19 @@ short-circuit/
 │  ├─ src/testing.ts       In-source test runner
 │  ├─ src/truthTable.ts    Exhaustive enumeration
 │  ├─ src/formatter.ts     Canonical source formatting
-│  ├─ src/builtins.ts      Gate/operation registry with signatures and tips
+│  ├─ src/builtins.ts      Operation registry: signatures, widths, examples
 │  ├─ src/snippets.ts      Language snippet library
+│  ├─ src/plainLanguage.ts Plain-language layer for diagnostics
 │  └─ src/types.ts         Portable IR + public API types
 ├─ apps/web/               React 19 + Vite studio
-│  ├─ src/editor/          CodeMirror language support, completions, hover cards
-│  ├─ src/components/      Graph, dock, panels, modals
+│  ├─ src/editor/          CodeMirror language, completions, hover cards
+│  ├─ src/components/      Graph, dock, panels, waveform, modals
 │  ├─ src/pages/           Documentation page
-│  └─ src/lib/examples.ts  Built-in example programs
-├─ tests/                  Cross-package example validation
+│  ├─ src/lib/             Examples, hash router, recorder, trace
+│  ├─ src/test/            Studio test suite
+│  └─ src/styles.css       Design system and theme tokens
+├─ tests/                  Cross-package example and documentation checks
+├─ scripts/                 Documentation generator
 └─ docs/
    ├─ LANGUAGE.md          Syntax, semantics, widths, diagnostics
    ├─ ARCHITECTURE.md      Compiler pipeline and extension points

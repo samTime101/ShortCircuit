@@ -484,7 +484,330 @@ decimal literals. Narrowing with `ZEXT` or `SEXT` is E332: use
 `POPCOUNT` is the usual way to count neighbours in a grid, and the reduce
 operations fold a bus into a single bit without a tree of gates.
 
-### 7.6 Circuit-shaped built-ins
+### 7.6 Operation reference
+
+Every built-in, with its arguments, the width it produces, and a worked
+example.
+
+<!-- BEGIN GENERATED REFERENCE -->
+
+This section is generated from the engine's operation registry. Every built-in lists its
+arguments, the width it produces, and a worked example with the value it returns.
+
+### Logic gates
+
+#### `AND(a, b, ...)`
+
+Bitwise AND. Result is 1 where every input bit is 1.
+
+- **Arguments:** `a` — First input. · `b` — Second input. · `...` — Further inputs, all combined into one gate. (optional)
+- **Result width:** Result width = common input width
+- **Example:** `AND(1, 1, 0)` → `0` — The third bit is 0, so the whole result is 0.
+- **Tip:** Variadic: AND(a, b, c) is one three-input gate, not a chain of two-input gates.
+
+#### `OR(a, b, ...)`
+
+Bitwise OR. Result is 1 where any input bit is 1.
+
+- **Arguments:** `a` — First input. · `b` — Second input. · `...` — Further inputs, all combined into one gate. (optional)
+- **Result width:** Result width = common input width
+- **Example:** `OR(0, 1, 0)` → `1` — One input is high, so the result is high.
+- **Tip:** Variadic. Useful for summing several conditions into one signal.
+
+#### `XOR(a, b, ...)`
+
+Bitwise XOR. Result is 1 where an odd number of inputs are 1.
+
+- **Arguments:** `a` — First input. · `b` — Second input. · `...` — Further inputs, all combined into one gate. (optional)
+- **Result width:** Result width = common input width
+- **Example:** `XOR(1, 1, 0)` → `0` — Two of the three bits are high, which is even, so the result is 0.
+- **Tip:** Parity: XOR(a, b, c) is 1 when an odd number of the bits are set.
+
+#### `NAND(a, b, ...)`
+
+Inverse of multi-input AND.
+
+- **Arguments:** `a` — First input. · `b` — Second input. · `...` — Further inputs, all combined into one gate. (optional)
+- **Result width:** Result width = common input width
+- **Example:** `NAND(1, 1)` → `0` — AND of two high bits is 1, and NAND inverts that to 0.
+- **Tip:** Negates the whole multi-input AND; it is not a chain of two-input NANDs.
+
+#### `NOR(a, b, ...)`
+
+Inverse of multi-input OR.
+
+- **Arguments:** `a` — First input. · `b` — Second input. · `...` — Further inputs, all combined into one gate. (optional)
+- **Result width:** Result width = common input width
+- **Example:** `NOR(0, 0)` → `1` — Nothing is high, so the OR is 0 and NOR inverts that to 1.
+- **Tip:** Negates the whole multi-input OR. Handy for "none of these" conditions.
+
+#### `XNOR(a, b, ...)`
+
+Inverse of multi-input XOR.
+
+- **Arguments:** `a` — First input. · `b` — Second input. · `...` — Further inputs, all combined into one gate. (optional)
+- **Result width:** Result width = common input width
+- **Example:** `XNOR(1, 0)` → `0` — The bits differ, so the equality output is low.
+- **Tip:** Equality per bit. Two inputs gives an equality check.
+
+#### `NOT(x)`
+
+Bitwise inversion of one input.
+
+- **Arguments:** `x` — The value to invert.
+- **Result width:** Result width = input width
+- **Example:** `NOT(0)` → `1` — Inverting a low bit gives a high bit.
+- **Tip:** Exactly one input. NOT(a) inverts every bit of a bus.
+
+#### `BUFFER(x)`
+
+Passes its input through unchanged.
+
+- **Arguments:** `x` — The value to pass through.
+- **Result width:** Result width = input width
+- **Example:** `BUFFER(1)` → `1` — The value arrives unchanged.
+- **Tip:** Names a wire explicitly. Keeps a graph readable when a signal is only a rename.
+
+### Arithmetic
+
+#### `ADD(a, b)`
+
+Unsigned addition at the widest input width. Carry out is discarded.
+
+- **Arguments:** `a` — First addend. · `b` — Second addend.
+- **Result width:** Result width = common input width; wraps modulo 2^w
+- **Example:** `ADD(0011, 0101)` → `1000` — 3 + 5 = 8, written in four bits.
+- **Tip:** Carry out is dropped. Widen the bus if you need the carry.
+
+#### `SUBTRACT(a, b)`
+
+Unsigned modulo subtraction at the widest input width.
+
+- **Arguments:** `a` — The value to subtract from. · `b` — The value to subtract.
+- **Result width:** Result width = common input width; wraps modulo 2^w
+- **Example:** `SUBTRACT(0000, 0001)` → `1111` — 0 - 1 wraps around to 15 in four bits.
+- **Tip:** Borrow is dropped, so 0 - 1 wraps to the largest value.
+
+#### `MULTIPLY(a, b)`
+
+Unsigned multiplication. Result width is the sum of input widths.
+
+- **Arguments:** `a` — First factor. · `b` — Second factor.
+- **Result width:** Result width = 2 x common input width; the full product is kept
+- **Example:** `MULTIPLY(0011, 0101)` → `00001111` — 3 x 5 = 15, written in the eight bits the result width gives.
+- **Tip:** 8-bit x 8-bit gives a 16-bit result, so give the output room.
+
+#### `DIVIDE(a, b)`
+
+Unsigned integer division at the widest input width.
+
+- **Arguments:** `a` — The value to divide. · `b` — The divisor. It must not be zero.
+- **Result width:** Result width = common input width; unsigned floor division
+- **Example:** `DIVIDE(0011, 0010)` → `0001` — 3 divided by 2 is 1, with the remainder discarded.
+- **Tip:** Guard the divisor. A zero divisor is a runtime error (R500), not a silent zero.
+
+### Comparison
+
+#### `EQUAL(a, b)`
+
+1 when all inputs are equal, otherwise 0.
+
+- **Arguments:** `a` — First value to compare. · `b` — Second value to compare.
+- **Result width:** 1-bit result; operands are compared as unsigned integers
+- **Example:** `EQUAL(0011, 0011)` → `1` — The two four-bit values are the same.
+- **Tip:** Literals are fitted to the bus width, so EQUAL(data, 0) checks the whole bus.
+
+#### `LESS(a, b)`
+
+1 when the first input is less than the second.
+
+- **Arguments:** `a` — The value on the left of the comparison. · `b` — The value on the right of the comparison.
+- **Result width:** 1-bit result; unsigned comparison
+- **Example:** `LESS(0010, 0011)` → `1` — 2 is less than 3.
+- **Tip:** Unsigned comparison. Use COMPARE when you need less/equal/greater together.
+
+#### `GREATER(a, b)`
+
+1 when the first input is greater than the second.
+
+- **Arguments:** `a` — The value on the left of the comparison. · `b` — The value on the right of the comparison.
+- **Result width:** 1-bit result; unsigned comparison
+- **Example:** `GREATER(0011, 0010)` → `1` — 3 is greater than 2.
+- **Tip:** Unsigned comparison, the mirror of LESS.
+
+#### `COMPARE(a, b)`
+
+Two-bit compare: 00 equal, 01 less, 10 greater.
+
+- **Arguments:** `a` — The value on the left of the comparison. · `b` — The value on the right of the comparison.
+- **Result width:** 2-bit result: 00 equal, 01 less, 10 greater
+- **Example:** `COMPARE(0011, 0010)` → `10` — 3 is greater than 2, which the two-bit code reports as 10.
+- **Tip:** One comparison, three outcomes. Slice the bits you need.
+
+### Selection
+
+#### `MUX(a, b, select)`
+
+MUX(a, b, select): select 0 chooses a, select 1 chooses b.
+
+- **Arguments:** `a` — Chosen when select is 0. · `b` — Chosen when select is 1. · `select` — One-bit choice.
+- **Result width:** Result width = common width of a and b; select must be 1 bit
+- **Example:** `MUX(1, 0, 0)` → `1` — select is 0, so the first input is passed through.
+- **Tip:** Hardware selection. Chain MUXes for wider selects, and slice a bus for the select bit.
+
+#### `DECODER(select)`
+
+One-hot decoder. A w-bit select produces 2^w output bits.
+
+- **Arguments:** `select` — The value to decode into one-hot bits.
+- **Result width:** Result width = 2^w for a w-bit select
+- **Example:** `DECODER(010)` → `00100` — The value 2 sets the third of the five output bits.
+- **Tip:** One-hot output. A 12-bit select is the widest that fits the 4096-bit limit.
+
+#### `ENCODER(value)`
+
+Highest-set-bit encoder. Output width is ceil(log2(input width)).
+
+- **Arguments:** `value` — The bus to encode.
+- **Result width:** Result width = max(1, ceil(log2(input width)))
+- **Example:** `ENCODER(0100)` → `10` — The highest set bit is bit 2, which is written 10 in two bits.
+- **Tip:** Returns the index of the highest set bit. Zero encodes to zero.
+
+### Bus operations
+
+#### `CONCAT(a, b, ...)`
+
+Joins buses most-significant argument first.
+
+- **Arguments:** `a` — The part that ends up in the high bits. · `b` — The part that ends up in the low bits. · `...` — Further parts, placed below the previous one. (optional)
+- **Result width:** Result width = sum of the operand widths
+- **Example:** `CONCAT(1010, 0101)` → `10100101` — The first argument occupies the high nibble.
+- **Tip:** The first argument ends up in the high bits: CONCAT(hi, lo).
+
+#### `SLICE(value, hi, lo)`
+
+SLICE(value, hi, lo), inclusive, down to bit 0.
+
+- **Arguments:** `value` — The bus to read from. · `hi` — Highest bit to keep. · `lo` — Lowest bit to keep.
+- **Result width:** Result width = hi - lo + 1; bounds are inclusive
+- **Example:** `SLICE(10100101, 7, 4)` → `1010` — Bits 7 down to 4 are the high nibble.
+- **Tip:** Same as value[hi:lo]. Bounds must be plain decimal literals.
+
+#### `SHIFT_LEFT(value, amount)`
+
+Shifts toward the MSB, filling with zeroes at the same width.
+
+- **Arguments:** `value` — The value to shift. · `amount` — How many positions to shift by.
+- **Result width:** Result width = value width; zero fill
+- **Example:** `SHIFT_LEFT(0001, 2)` → `0100` — One shifted left twice becomes four.
+- **Tip:** Shifting by at least the width produces 0. Bits shifted out are dropped.
+
+#### `SHIFT_RIGHT(value, amount)`
+
+Shifts toward the LSB, filling with zeroes at the same width.
+
+- **Arguments:** `value` — The value to shift. · `amount` — How many positions to shift by.
+- **Result width:** Result width = value width; zero fill
+- **Example:** `SHIFT_RIGHT(0100, 1)` → `0010` — Four shifted right once becomes two.
+- **Tip:** Logical shift, never arithmetic. Shifting by at least the width produces 0.
+
+#### `ZEXT(x, width)`
+
+Zero-extends a value to a wider bus.
+
+- **Arguments:** `x` — The value to widen. · `width` — The width to widen it to.
+- **Result width:** Result width = the requested width, which must not be smaller than x
+- **Example:** `ZEXT(1010, 8)` → `00001010` — Four zeroes are added on the left.
+- **Tip:** Pads with zeroes on the left. Use it to widen a signal so it matches a wider bus.
+
+#### `SEXT(x, width)`
+
+Sign-extends a value by repeating its top bit.
+
+- **Arguments:** `x` — The value to widen. · `width` — The width to widen it to.
+- **Result width:** Result width = the requested width, which must not be smaller than x
+- **Example:** `SEXT(1010, 8)` → `11111010` — The top bit is 1, so it is repeated across the new bits.
+- **Tip:** Repeats the most significant bit, the usual two's-complement widening.
+
+#### `POPCOUNT(x)`
+
+Counts the bits that are set.
+
+- **Arguments:** `x` — The bus to count.
+- **Result width:** Result width = ceil(log2(width + 1))
+- **Example:** `POPCOUNT(00001111)` → `0100` — Four bits are set, and four is written 0100 in four bits.
+- **Tip:** Counts the ones in a bus. Handy for neighbour counts and parity checks.
+
+#### `REDUCE_AND(x)`
+
+1 only when every bit of the input is 1.
+
+- **Arguments:** `x` — The bus to fold.
+- **Result width:** Result width = 1
+- **Example:** `REDUCE_AND(1111)` → `1` — Every bit is high, so the folded result is high.
+- **Tip:** Folds a bus into a single bit: all ones.
+
+#### `REDUCE_OR(x)`
+
+1 when any bit of the input is 1.
+
+- **Arguments:** `x` — The bus to fold.
+- **Result width:** Result width = 1
+- **Example:** `REDUCE_OR(0001)` → `1` — One bit is high, so the folded result is high.
+- **Tip:** Folds a bus into a single bit: any one.
+
+#### `REDUCE_XOR(x)`
+
+Parity of the input bits.
+
+- **Arguments:** `x` — The bus to fold.
+- **Result width:** Result width = 1
+- **Example:** `REDUCE_XOR(0011)` → `0` — Two bits are high, which is even parity.
+- **Tip:** Folds a bus into a single bit: odd or even parity.
+
+#### `REPEAT(x, count)`
+
+Concatenates a value with itself a number of times.
+
+- **Arguments:** `x` — The value to repeat. · `count` — How many times to repeat it.
+- **Result width:** Result width = count x width of x
+- **Example:** `REPEAT(1010, 2)` → `10101010` — The four-bit value is written twice.
+- **Tip:** Builds a repeated pattern, such as an alternating mask.
+
+#### `REVERSE(x)`
+
+Reverses the bit order of a value.
+
+- **Arguments:** `x` — The value to reverse.
+- **Result width:** Result width = width of x
+- **Example:** `REVERSE(00000001)` → `10000000` — The only set bit moves from the bottom to the top.
+- **Tip:** Swaps the most and least significant bits. Handy for bit-reversed addressing.
+
+### Circuit-shaped components
+
+#### `HALF_ADDER(a, b) -> sum, carry`
+
+One-bit half adder: sum = XOR(a, b), carry = AND(a, b).
+
+- **Arguments:** `a` — First bit to add. · `b` — Second bit to add.
+- **Outputs:** sum, carry
+- **Result width:** All ports are 1 bit
+- **Example:** `HALF_ADDER(1, 1)` → `sum = 0, carry = 1` — One plus one is two: the sum bit is 0 and the carry is 1.
+- **Tip:** Elaborates to real gates in the graph, so you can inspect the internals.
+
+#### `FULL_ADDER(a, b, carry_in) -> sum, carry_out`
+
+One-bit full adder built from two half adders and an OR gate.
+
+- **Arguments:** `a` — First bit to add. · `b` — Second bit to add. · `carry_in` — Carry from the previous stage.
+- **Outputs:** sum, carry_out
+- **Result width:** All ports are 1 bit
+- **Example:** `FULL_ADDER(1, 1, 1)` → `sum = 1, carry_out = 1` — One plus one plus a carry in is three.
+- **Tip:** Built from two half adders. Chain them for ripple-carry addition.
+
+<!-- END GENERATED REFERENCE -->
+
+### 7.7 Circuit-shaped built-ins
 
 `HALF_ADDER(a, b) -> {sum, carry}` and
 `FULL_ADDER(a, b, carry_in) -> {sum, carry_out}` are ordinary circuits that
@@ -756,7 +1079,19 @@ E305.
 - A runtime error inside a case (for example division by zero) fails that case
   with the error message recorded in its result rows.
 
-### 10.5 Clocked test sequences
+### 10.5 Recording a case
+
+The studio can write the test for you. **Record test** captures what you do in
+the simulator, and **Expect this** captures the value a signal holds right
+now. Stopping asks for a case name, shows the generated code, and writes it
+into the source — adding the case to an existing `TEST` block when the circuit
+already has one.
+
+The result is ordinary LogicFlow, using the statements above. The recorder
+never hides the code, so reading what it wrote is a good way to learn the
+syntax.
+
+### 10.6 Clocked test sequences
 
 A case may drive a circuit through time. Each case starts from a fresh
 simulator, with every `STATE` at its declared initial value.
@@ -845,7 +1180,26 @@ Every diagnostic carries:
 Diagnostics are sorted by line, then column, then code. Compilation stops
 collecting after `maxDiagnostics` (default 100) and reports what it has.
 
-### 12.2 Diagnostic families
+### 12.2 Plain-language messages
+
+Every diagnostic keeps its stable code, but the headline and the explanation
+are written for someone who has never used a compiler:
+
+> **These two signals are different sizes**
+> You're adding an 8-bit signal (a) to a 4-bit signal (b). Add can only
+> combine signals of the same size.
+
+When the mistake is a name, the diagnostic also offers a one-click fix:
+
+> **There is no signal with that name**
+> Check the spelling, or declare the signal before using it.
+> [Replace with \`carry\`]
+
+The fix rewrites that range in the source and recompiles. The same plain text
+is used by the studio, the editor hover, and any other host, so an error never
+reads differently depending on where you meet it.
+
+### 12.3 Diagnostic families
 
 **Lexical (E0xx)**
 
@@ -943,7 +1297,7 @@ collecting after `maxDiagnostics` (default 100) and reports what it has.
 | `W302` | A clocked block updates no state |
 | `W303` | A state is assigned more than once along one clock path |
 
-### 12.3 Runtime errors
+### 12.4 Runtime errors
 
 Simulation raises `SimulationError` with a stable code and fails the
 transition rather than returning a plausible value:
@@ -967,7 +1321,7 @@ circuit graph. A stale, plausible output is never left on screen. A
 divide-by-zero in the initial all-zero input state is shown the same way, but
 the input controls remain available so a safe divisor can be entered.
 
-### 12.4 Suggestions
+### 12.5 Suggestions
 
 Unknown names are matched against the actual candidates with a bounded
 edit distance, including case-insensitive matches. Diagnostics prefer telling
