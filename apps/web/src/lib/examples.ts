@@ -339,6 +339,29 @@ END
 OUTPUT stored
 
 END
+
+
+TEST Register8
+
+CASE "captures data on the rising edge"
+  INPUT enable = 1
+  INPUT data = 10101010
+  STEP
+    INPUT clock = 1
+  END
+  EXPECT stored = 10101010
+END
+
+CASE "holds the value when enable is low"
+  INPUT enable = 0
+  INPUT data = 11110000
+  STEP
+    INPUT clock = 1
+  END
+  EXPECT stored = 00000000
+END
+
+END
 `;
 
 const COUNTER_4 = `# A stateful counter: combinational logic computes next,
@@ -362,6 +385,28 @@ ON RISING_EDGE(clock):
 END
 
 OUTPUT count
+
+END
+
+
+TEST Counter4
+
+CASE "counts three ticks"
+  INPUT reset = 0
+  INPUT clock = 0
+  EXPECT count = 0000
+  CYCLE clock 3
+  EXPECT count = 0011
+END
+
+CASE "reset clears the count"
+  INPUT reset = 0
+  CYCLE clock 5
+  EXPECT count = 0101
+  INPUT reset = 1
+  CYCLE clock 1
+  EXPECT count = 0000
+END
 
 END
 `;

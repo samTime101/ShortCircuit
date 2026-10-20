@@ -696,16 +696,48 @@ END`}
 END`}
                 />
                 <ul className="docs-list">
-                  <li>Every input must be set in every case.</li>
+                  <li>Every input must be set in every combinational case.</li>
                   <li>
                     Test values made only of 0 and 1 are binary: <code>10</code> is two.
                   </li>
                   <li>Expectations compare the whole binary value, leading zeroes included.</li>
-                  <li>Clocked circuits are reported as unsupported rather than assumed to pass.</li>
+                  <li>
+                    A case can also check a <code>STATE</code> signal, such as{" "}
+                    <code>EXPECT count = 0011</code>.
+                  </li>
                 </ul>
               </div>
               <div>
-                <h4>Truth tables</h4>
+                <h4>Clocked cases</h4>
+            <CodeBlock
+              code={`TEST Counter4
+  CASE "counts three ticks"
+    INPUT reset = 0
+    INPUT clock = 0
+    EXPECT count = 0000
+    CYCLE clock 3
+    EXPECT count = 0011
+  END
+END`}
+            />
+            <ul className="docs-list">
+              <li>
+                <strong>STEP</strong> groups input changes into one simulation step, so they
+                apply together before edges fire.
+              </li>
+              <li>
+                <strong>CYCLE clock N</strong> pulses a clock 0 → 1 → 0, N times.
+              </li>
+              <li>
+                <strong>LOAD state = value</strong> forces a state to a starting value.
+              </li>
+              <li>
+                A failing expectation reports the case, the step, the signal, and both
+                values.
+              </li>
+            </ul>
+
+            <h4>Truth tables</h4>
                 <p>
                   The studio enumerates every input combination of a combinational circuit, bit by
                   bit for buses, and evaluates the outputs on the compiled graph.
