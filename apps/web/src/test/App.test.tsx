@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import App from "../App";
 
@@ -308,5 +308,37 @@ ${HALF_ADDER}`);
     });
     expect(screen.queryAllByText(/not a comment/i).length).toBe(0);
     expect(window.localStorage.getItem(STORAGE_KEY)).toContain("// an old style comment");
+  });
+
+  it("does not add a line below the source when the keyboard formats it", async () => {
+    store(`CIRCUIT HalfAdder
+INPUT a
+OUTPUT a
+END`);
+    render(<App />);
+
+    await waitFor(() => {
+      expect(document.querySelector(".cm-content")).not.toBeNull();
+    });
+
+    fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+
+    await waitFor(() => {
+      expect(window.localStorage.getItem(STORAGE_KEY)).toBe(
+        "CIRCUIT HalfAdder\n  INPUT a\n  OUTPUT a\nEND",
+      );
+    });
+    expect(document.querySelectorAll(".cm-line")).toHaveLength(4);
+
+    // A second run has nothing left to change.
+    fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+
+    await waitFor(() => {
+      expect(screen.getByText("Source is already formatted")).toBeInTheDocument();
+    });
+    expect(document.querySelectorAll(".cm-line")).toHaveLength(4);
+    expect(window.localStorage.getItem(STORAGE_KEY)).toBe(
+      "CIRCUIT HalfAdder\n  INPUT a\n  OUTPUT a\nEND",
+    );
   });
 });

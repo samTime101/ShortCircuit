@@ -380,9 +380,15 @@ deferred by one frame and then runs synchronously.
 
 `Run` and example loading compile immediately and bypass the debounce. The
 editor's `Mod-Enter` runs; global `Mod-S` formats then compiles. Formatting
-replaces the source and triggers a fresh compile. `Mod-Shift-M` maximizes the
-editor over the inspection pane and `Esc` leaves it; the editor text size
-steps between 12px and 22px and is stored in `localStorage`.
+replaces the source and triggers a fresh compile. The studio formats with
+`formatSourceForEditor`, which keeps the trailing newline of the current
+source, so formatting never adds a blank line under the circuit. `Mod-Shift-M`
+maximizes the editor over the inspection pane and `Esc` leaves it; the editor
+text size steps between 12px and 22px and is stored in `localStorage`.
+
+The editor installs a highest precedence keymap on top of the CodeMirror
+default keymap: `Tab` accepts the highlighted completion, `Enter` inserts a
+newline instead of accepting a completion, and `Mod-Enter` runs the source.
 
 ### 6.2 Simulator lifecycle
 

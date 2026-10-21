@@ -1421,6 +1421,12 @@ END`}
                     <kbd>Ctrl</kbd> <kbd>Space</kbd> — completions.
                   </li>
                   <li>
+                    <kbd>Tab</kbd> — accept the highlighted completion.
+                  </li>
+                  <li>
+                    <kbd>Enter</kbd> — new line, never accepts a completion.
+                  </li>
+                  <li>
                     <kbd>Esc</kbd> — close completions and hover cards.
                   </li>
                 </ul>

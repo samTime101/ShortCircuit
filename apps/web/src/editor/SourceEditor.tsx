@@ -1,3 +1,5 @@
+import { acceptCompletion } from "@codemirror/autocomplete";
+import { insertNewlineAndIndent } from "@codemirror/commands";
 import { HighlightStyle, indentUnit, syntaxHighlighting } from "@codemirror/language";
 import {
   forceLinting,
@@ -5,7 +7,7 @@ import {
   linter,
   type Diagnostic as LintMessage,
 } from "@codemirror/lint";
-import { Compartment, EditorState } from "@codemirror/state";
+import { Compartment, EditorState, Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { basicSetup } from "codemirror";
@@ -236,6 +238,22 @@ export const SourceEditor = forwardRef<SourceEditorHandle, SourceEditorProps>(
         state: EditorState.create({
           doc: value,
           extensions: [
+            /* Completion is opened by the language data in basicSetup. These
+               bindings have to outrank its built-in completion keymap, where
+               Enter accepts a completion and Tab does nothing. */
+            Prec.highest(
+              keymap.of([
+                { key: "Tab", run: acceptCompletion },
+                { key: "Enter", run: insertNewlineAndIndent },
+                {
+                  key: "Mod-Enter",
+                  run: () => {
+                    onRunRef.current();
+                    return true;
+                  },
+                },
+              ]),
+            ),
             basicSetup,
             EditorState.tabSize.of(2),
             indentUnit.of("  "),
@@ -257,15 +275,6 @@ export const SourceEditor = forwardRef<SourceEditorHandle, SourceEditorProps>(
               { delay: 140 },
             ),
             lintGutter(),
-            keymap.of([
-              {
-                key: "Mod-Enter",
-                run: () => {
-                  onRunRef.current();
-                  return true;
-                },
-              },
-            ]),
             EditorView.updateListener.of((update) => {
               if (update.docChanged) onChangeRef.current(update.state.doc.toString());
             }),

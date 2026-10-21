@@ -124,6 +124,16 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * The engine formatter ends its output with a newline so CLI files are
+ * POSIX-friendly. In the editor that trailing newline looks like an extra
+ * blank line, so keep the editor's existing end-of-file style instead.
+ */
+function formatSourceForEditor(source: string): string {
+  const formatted = formatSource(source);
+  return source.endsWith("\n") ? formatted : formatted.slice(0, -1);
+}
+
 export default function App() {
   const [route, navigate] = useRoute();
   const [mode, setMode] = useState<StudioMode>(readMode);
@@ -507,7 +517,7 @@ function Studio({
   };
 
   const handleFormat = useCallback(() => {
-    const formatted = formatSource(source);
+    const formatted = formatSourceForEditor(source);
     if (formatted === source) {
       notify("Source is already formatted");
       return;
