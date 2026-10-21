@@ -49,13 +49,99 @@ Wrote dist/packages.json (3 packages)
 
 ---
 
-## 2. Create the package directory
+## Quick start: scaffold with the CLI
 
-From `vendor/ShortCircuit-Packages`:
+The registry ships an interactive authoring CLI. Run it from the main
+repository root:
+
+```bash
+npm run package:init
+```
+
+Or run it from the package repository:
 
 ```bash
 cd vendor/ShortCircuit-Packages
+npm run package:init
+```
 
+With no flags, it asks for each value:
+
+```text
+What is the name of the package? (e.g. @acme/parity): @acme/parity
+Public export name (PARITY): PARITY3
+Export kind (macro or circuit) (macro):
+Description (A Short Circuit package.): Three-input parity built from NAND.
+Version (0.1.0):
+License (MIT):
+Dependencies (comma-separated, blank for none): @shortcircuit/gates
+Auto-import without an IMPORT? (y/N): y
+```
+
+Press Enter to accept the value in brackets. Package names are scoped npm
+names such as `@acme/parity`. The command creates `package.json`,
+`manifest.json`, a `.lf` source file, docs, and a package test. It also adds the
+package to `registry.json` unless `--no-registry` is used.
+
+The generated source is a NAND scaffold. Replace it with the real
+implementation, then build and test:
+
+```bash
+npm run package:build   # validate manifests and rebuild dist/packages.json
+npm run package:test    # build, then run the package tests
+npm run package:check   # build and test in one command
+npm run package:list    # show registered packages and export counts
+```
+
+`package:test` runs `npm run test:packages` in the main repository. If the
+package repository is checked out outside the main repository, point it at the
+main checkout:
+
+```bash
+SHORTCIRCUIT_ROOT=/path/to/ShortCircuit npm run package:test
+```
+
+### Non-interactive init
+
+For scripts and automation, pass the fields directly:
+
+```bash
+npm run package:init -- \
+  --name @acme/parity \
+  --export PARITY3 \
+  --kind macro \
+  --description "Three-input parity built from NAND." \
+  --dependencies @shortcircuit/gates \
+  --auto-import
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--name <@scope/name>` | Scoped package name. Required when not prompted. |
+| `--export <NAME>` | Public macro or circuit name. Defaults to the upper-case directory name. |
+| `--kind <macro\|circuit>` | Export kind. Default: `macro`. |
+| `--description <text>` | Catalog description. |
+| `--version <semver>` | Package version. Default: `0.1.0`. |
+| `--license <id>` | License identifier. Default: `MIT`. |
+| `--dependencies <list>` | Comma-separated package names. |
+| `--auto-import` | Set `recommendedAutoImport` to `true`. |
+| `--no-registry` | Do not edit `registry.json`. |
+| `--force` | Replace an existing package directory and registry entry. |
+| `--yes` | Accept defaults and never prompt. `--name` is still required. |
+
+When stdin is not a TTY, init behaves like `--yes`: it uses defaults for fields
+that were not passed and requires `--name`.
+
+The numbered steps below show exactly what the CLI generates, which is useful
+when you want to understand or hand-edit every file.
+
+---
+
+## 2. Create the package directory
+
+From the package repository root (`vendor/ShortCircuit-Packages`):
+
+```bash
 mkdir -p packages/parity/macros/parity3
 mkdir -p packages/parity/docs
 mkdir -p packages/parity/tests
@@ -298,10 +384,10 @@ calling GitHub.
 From `vendor/ShortCircuit-Packages`:
 
 ```bash
-node scripts/build.mjs
+npm run package:build
 ```
 
-Expected output:
+This runs `node scripts/build.mjs`. Expected output:
 
 ```text
 Wrote dist/packages.json (4 packages)
@@ -323,7 +409,14 @@ Do not edit `dist/packages.json` by hand. It is generated.
 
 ## 10. Run the package tests
 
-Return to the main repository:
+From `vendor/ShortCircuit-Packages`:
+
+```bash
+npm run package:test
+```
+
+This rebuilds the bundle, then runs `npm run test:packages` in the main
+repository. You can also run the test directly from the main repository:
 
 ```bash
 cd ../..
@@ -489,13 +582,13 @@ is listed in both `package.json` and `manifest.json`.
 ## Minimal checklist
 
 ```text
-[ ] Create packages/<name>/ with package.json and manifest.json
+[ ] Run npm run package:init (or create packages/<name>/ by hand)
 [ ] Put implementations in .lf files
 [ ] Point every export at its source
 [ ] Add docs and tests
-[ ] Add the manifest to registry.json
-[ ] Run node scripts/build.mjs
-[ ] Run npx vitest run packages/engine/test/packages.test.ts
+[ ] Add the manifest to registry.json (package:init does this by default)
+[ ] Run npm run package:build
+[ ] Run npm run package:test
 [ ] Commit and push the package repository
 [ ] Commit the updated submodule pointer in the main repository
 ```

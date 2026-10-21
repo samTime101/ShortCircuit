@@ -72,9 +72,17 @@ npm run build
 npm run docs:generate # regenerate the operation reference in docs/LANGUAGE.md
 ```
 
-To create and publish your own package, follow the step-by-step guide in
-[`docs/PACKAGES.md`](docs/PACKAGES.md). It covers the source layout, manifest,
-registry entry, bundle build, package tests, imports, and submodule commit.
+To create and publish your own package, start with the interactive scaffolder:
+
+```bash
+npm run package:init
+```
+
+It asks for the package name, export name, kind, docs, dependencies, and
+auto-import setting, then writes the package, tests, docs, and registry entry.
+Build and test it with `npm run package:build` and `npm run package:test`. See
+[`docs/PACKAGES.md`](docs/PACKAGES.md) for the full guide, including the
+non-interactive flags and the manual source layout.
 
 ## Repository layout
 
