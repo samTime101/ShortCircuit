@@ -139,6 +139,11 @@ when you want to understand or hand-edit every file.
 
 ## 2. Create the package directory
 
+> **Using the CLI?** Skip steps 2–8. `npm run package:init` creates the package
+> directory, `package.json`, `manifest.json`, `.lf` source, docs, tests, and the
+> registry entry for you. The manual steps below show exactly what it generates,
+> or how to build a package by hand.
+
 From the package repository root (`vendor/ShortCircuit-Packages`):
 
 ```bash
