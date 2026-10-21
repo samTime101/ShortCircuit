@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
-import { BUILTINS, INTRINSIC_CIRCUITS } from "@shortcircuit/engine";
+import {
+  BUILTINS,
+  DEFAULT_PACKAGE_CIRCUITS,
+  DEFAULT_PACKAGE_MACROS,
+} from "@shortcircuit/engine";
 import { DocsPage } from "../pages/DocsPage";
 
 describe("documentation page", () => {
@@ -20,12 +24,58 @@ describe("documentation page", () => {
     }
   });
 
+  it("documents the gates and circuits included by default", () => {
+    const { container } = render(<DocsPage onBack={() => {}} />);
+    const defaults = container.querySelector(".docs-defaults");
+    const text = defaults?.textContent ?? "";
+    for (const group of [
+      "Basic Logic Gates",
+      "Universal Logic Gates",
+      "Exclusive Gates",
+      "Arithmetic Circuits",
+    ]) {
+      expect(text, group).toContain(group);
+    }
+    for (const name of [
+      "AND",
+      "OR",
+      "NOT",
+      "BUFFER",
+      "NAND",
+      "NOR",
+      "XOR",
+      "XNOR",
+      "HALF_ADDER",
+      "FULL_ADDER",
+    ]) {
+      expect(text, name).toContain(name);
+    }
+  });
+
+  it("documents every default package macro", () => {
+    render(<DocsPage onBack={() => {}} />);
+    for (const macro of DEFAULT_PACKAGE_MACROS) {
+      const entry = document.getElementById(`fn-${macro.name.toLowerCase()}`);
+      expect(entry, macro.name).not.toBeNull();
+      const text = entry?.textContent ?? "";
+      expect(text, macro.name).toContain(macro.signature);
+      expect(text, macro.name).toContain(macro.summary ?? "");
+      for (const arg of macro.args) {
+        expect(text, `${macro.name}.${arg}`).toContain(arg);
+      }
+    }
+  });
+
   it("documents the circuit-shaped components", () => {
     render(<DocsPage onBack={() => {}} />);
-    for (const spec of INTRINSIC_CIRCUITS) {
-      const entry = document.getElementById(`fn-${spec.name.toLowerCase()}`);
-      expect(entry, spec.name).not.toBeNull();
-      expect(entry?.textContent ?? "").toContain(spec.example.call);
+    for (const { circuit } of DEFAULT_PACKAGE_CIRCUITS) {
+      const entry = document.getElementById(`fn-${circuit.name.toLowerCase()}`);
+      expect(entry, circuit.name).not.toBeNull();
+      const text = entry?.textContent ?? "";
+      expect(text, circuit.name).toContain(circuit.name);
+      for (const port of circuit.ports?.inputs ?? []) {
+        expect(text, `${circuit.name}.${port.name}`).toContain(port.name);
+      }
     }
   });
 

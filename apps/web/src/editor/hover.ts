@@ -1,7 +1,8 @@
 import { EditorView, hoverTooltip, type Tooltip } from "@codemirror/view";
 import {
   BUILTINS,
-  INTRINSIC_CIRCUITS,
+  DEFAULT_PACKAGE_CIRCUITS,
+  DEFAULT_PACKAGE_MACROS,
   LANGUAGE_SNIPPETS,
 } from "@shortcircuit/engine";
 import { scanDocument, wordAt } from "./documentModel";
@@ -47,19 +48,36 @@ function builtinCard(name: string): HTMLElement | null {
   });
 }
 
-function intrinsicCard(name: string): HTMLElement | null {
-  const spec = INTRINSIC_CIRCUITS.find((entry) => entry.name === name);
-  if (!spec) return null;
+function packageMacroCard(name: string): HTMLElement | null {
+  const macro = DEFAULT_PACKAGE_MACROS.find((entry) => entry.name === name);
+  if (!macro) return null;
   return infoCard({
-    title: spec.name,
-    badge: "component",
+    title: macro.name,
+    badge: macro.group ?? "package macro",
     rows: [
-      { label: "Signature", value: spec.signature },
-      { label: "Ports", value: `${spec.inputs.join(", ")} -> ${spec.outputs.join(", ")}` },
-      { label: "Width", value: spec.widthRule },
+      { label: "Signature", value: macro.signature },
+      { label: "Width", value: macro.widthRule ?? "Result width follows compiler width rules" },
     ],
-    code: `inst = ${spec.name}(${spec.inputs.join(", ")})\nresult = inst.${spec.outputs[0] ?? "out"}`,
-    note: `${spec.description} ${spec.tip}`,
+    code: `result = ${macro.name}(${macro.args.join(", ")})`,
+    note: macro.tip ?? macro.summary ?? "Package macro.",
+  });
+}
+
+function packageCircuitCard(name: string): HTMLElement | null {
+  const entry = DEFAULT_PACKAGE_CIRCUITS.find(({ circuit }) => circuit.name === name);
+  if (!entry) return null;
+  const { circuit } = entry;
+  const inputs = circuit.ports?.inputs.map((port) => port.name) ?? [];
+  const outputs = circuit.ports?.outputs.map((port) => port.name) ?? [];
+  return infoCard({
+    title: circuit.name,
+    badge: circuit.group ?? "component",
+    rows: [
+      { label: "Signature", value: `${circuit.name}(${inputs.join(", ")})` },
+      { label: "Ports", value: `${inputs.join(", ")} -> ${outputs.join(", ")}` },
+    ],
+    code: `inst = ${circuit.name}(${inputs.join(", ")})\nresult = inst.${outputs[0] ?? "out"}`,
+    note: circuit.summary ?? "Package circuit.",
   });
 }
 
@@ -90,8 +108,9 @@ export function logicFlowHover(view: EditorView, pos: number): Tooltip | null {
 
   const upper = word.text.toUpperCase();
   const dom =
+    packageMacroCard(upper) ??
+    packageCircuitCard(upper) ??
     builtinCard(upper) ??
-    intrinsicCard(upper) ??
     keywordCard(upper) ??
     snippetCard(word.text);
 

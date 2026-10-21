@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   BUILTINS,
+  DEFAULT_PACKAGE_CIRCUITS,
+  DEFAULT_PACKAGE_MACROS,
   GLOSSARY,
-  INTRINSIC_CIRCUITS,
   LANGUAGE_SNIPPETS,
   LANGUAGE_VERSION,
   IR_SCHEMA,
@@ -53,6 +54,8 @@ const CATEGORY_LABEL: Record<string, string> = {
   bus: "bus",
   selection: "selection",
 };
+
+
 
 function useActiveSection(scroller: React.RefObject<HTMLElement | null>): string {
   const [active, setActive] = useState(SECTIONS[0]!.id);
@@ -153,6 +156,23 @@ function Note({ kind = "info", children }: { kind?: "info" | "warn"; children: R
 export function DocsPage({ onBack, beginner }: DocsPageProps) {
   const pageRef = useRef<HTMLDivElement>(null);
   const active = useActiveSection(pageRef);
+  const packageGroups = useMemo(() => {
+    const map = new Map<string, string[]>();
+    const add = (group: string, name: string) => {
+      const items = map.get(group) ?? [];
+      if (!items.includes(name)) items.push(name);
+      map.set(group, items);
+    };
+    for (const macro of DEFAULT_PACKAGE_MACROS) {
+      add(macro.group ?? "Package Macros", macro.name);
+    }
+    for (const { circuit } of DEFAULT_PACKAGE_CIRCUITS) {
+      add(circuit.group ?? "Package Circuits", circuit.name);
+    }
+    // NAND is the one core gate that stays in the kernel.
+    add("Universal Logic Gates", "NAND");
+    return [...map.entries()].map(([title, items]) => ({ title, items }));
+  }, []);
   const groups = useMemo(() => {
     const map = new Map<string, SectionDef[]>();
     for (const section of SECTIONS) {
@@ -551,9 +571,64 @@ STATE armed = 1`}
             id="operations"
             index="05"
             eyebrow="Language"
-            title="Built-in operations"
-            lead="Every operation is a real node in the compiled graph. Hover one in the editor to see the same details."
+            title="Operations and packages"
+            lead="Every operation is a real node in the compiled graph. Core operations and package macros share one catalog, and hovering either in the editor shows the same details."
           >
+            <div className="docs-defaults">
+              <span className="eyebrow">Included by default</span>
+              <p>
+                These gates and circuits come from the bundled packages, so you never have to
+                define them yourself. Gate macros expand to NAND, and package circuits expand
+                into the same graph nodes as any other circuit.
+              </p>
+              <div className="docs-default-grid">
+                {packageGroups.map((group) => (
+                  <div className="docs-default-group" key={group.title}>
+                    <h5>{group.title}</h5>
+                    <ul className="docs-default-items">
+                      {group.items.map((name) => (
+                        <li key={name}>
+                          <a href={`#fn-${name.toLowerCase()}`}>{name}</a>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {DEFAULT_PACKAGE_MACROS.length > 0 ? (
+              <div className="docs-op-group">
+                <h4>
+                  <Layers size={14} />
+                  package gates
+                </h4>
+                <table className="docs-table">
+                  <thead>
+                    <tr>
+                      <th>Call</th>
+                      <th>Result width</th>
+                      <th>What it does</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {DEFAULT_PACKAGE_MACROS.map((macro) => (
+                      <tr key={macro.name}>
+                        <td>
+                          <code>{macro.signature}</code>
+                          <span className="docs-op-tip">
+                            {macro.examples?.[0] ?? macro.summary}
+                          </span>
+                        </td>
+                        <td>{macro.widthRule ?? "Follows compiler width rules"}</td>
+                        <td>{macro.summary}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+
             {(["gate", "arithmetic", "compare", "bus", "selection"] as const).map((category) => (
               <div className="docs-op-group" key={category}>
                 <h4>
@@ -597,19 +672,21 @@ STATE armed = 1`}
                 </tr>
               </thead>
               <tbody>
-                {INTRINSIC_CIRCUITS.map((spec) => (
-                  <tr key={spec.name}>
-                    <td>
-                      <code>{spec.signature}</code>
-                    </td>
-                    <td>
-                      {spec.inputs.join(", ")} → {spec.outputs.join(", ")}
-                    </td>
-                    <td>
-                      {spec.description} {spec.tip}
-                    </td>
-                  </tr>
-                ))}
+                {DEFAULT_PACKAGE_CIRCUITS.map(({ circuit }) => {
+                  const inputs = circuit.ports?.inputs.map((port) => port.name) ?? [];
+                  const outputs = circuit.ports?.outputs.map((port) => port.name) ?? [];
+                  return (
+                    <tr key={circuit.name}>
+                      <td>
+                        <code>{circuit.name}({inputs.join(", ")})</code>
+                      </td>
+                      <td>
+                        {inputs.join(", ")} → {outputs.join(", ")}
+                      </td>
+                      <td>{circuit.summary}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </Section>
@@ -619,20 +696,73 @@ STATE armed = 1`}
             index="06"
             eyebrow="Language"
             title="Function reference"
-            lead="Every built-in operation, with its arguments, the width it produces, and a worked example."
+            lead="Every built-in operation and package macro, with its arguments, the width it produces, and a call example."
           >
             <div className="docs-fn-index">
+              {DEFAULT_PACKAGE_MACROS.map((macro) => (
+                <a key={macro.name} href={`#fn-${macro.name.toLowerCase()}`}>
+                  {macro.name}
+                </a>
+              ))}
               {BUILTINS.map((spec) => (
                 <a key={spec.name} href={`#fn-${spec.name.toLowerCase()}`}>
                   {spec.name}
                 </a>
               ))}
-              {INTRINSIC_CIRCUITS.map((spec) => (
-                <a key={spec.name} href={`#fn-${spec.name.toLowerCase()}`}>
-                  {spec.name}
+              {DEFAULT_PACKAGE_CIRCUITS.map(({ circuit }) => (
+                <a key={circuit.name} href={`#fn-${circuit.name.toLowerCase()}`}>
+                  {circuit.name}
                 </a>
               ))}
             </div>
+
+            {DEFAULT_PACKAGE_MACROS.map((macro) => (
+              <article className="docs-fn" id={`fn-${macro.name.toLowerCase()}`} key={macro.name}>
+                <header>
+                  <h4>
+                    <code>{macro.signature}</code>
+                    <span className="docs-fn-category">package macro</span>
+                  </h4>
+                  <p>{macro.summary}</p>
+                </header>
+                <div className="docs-fn-body">
+                  <dl className="docs-fn-args">
+                    {macro.args.map((name) => (
+                      <div key={name}>
+                        <dt><code>{name}</code></dt>
+                        <dd>Input.</dd>
+                      </div>
+                    ))}
+                    {macro.variadic ? (
+                      <div>
+                        <dt><code>...</code></dt>
+                        <dd>Further inputs, folded by the package macro.</dd>
+                      </div>
+                    ) : null}
+                  </dl>
+                  <div className="docs-fn-meta">
+                    <span>
+                      <strong>Result width</strong>
+                      {macro.widthRule ?? "Follows compiler width rules."}
+                    </span>
+                    <span>
+                      <strong>Expands to</strong>
+                      <code>{macro.body ?? `FOLD ${macro.fold ?? "helper"}`}</code>
+                    </span>
+                    <span>
+                      <strong>Package</strong>
+                      {macro.group ?? "Package macro"}
+                    </span>
+                    {macro.examples?.[0] ? (
+                      <span>
+                        <strong>Example</strong>
+                        <code>{macro.examples[0]}</code>
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+              </article>
+            ))}
 
             {BUILTINS.map((spec) => (
               <article className="docs-fn" id={`fn-${spec.name.toLowerCase()}`} key={spec.name}>
@@ -679,52 +809,45 @@ STATE armed = 1`}
             ))}
 
             <h4>Circuit-shaped components</h4>
-            {INTRINSIC_CIRCUITS.map((spec) => (
-              <article className="docs-fn" id={`fn-${spec.name.toLowerCase()}`} key={spec.name}>
-                <header>
-                  <h4>
-                    <code>{spec.signature}</code>
-                    <span className="docs-fn-category">component</span>
-                  </h4>
-                  <p>{spec.description}</p>
-                </header>
-                <div className="docs-fn-body">
-                  <dl className="docs-fn-args">
-                    {spec.args.map((arg) => (
-                      <div key={arg.name}>
-                        <dt>
-                          <code>{arg.name}</code>
-                        </dt>
-                        <dd>{arg.description}</dd>
+            {DEFAULT_PACKAGE_CIRCUITS.map(({ circuit }) => {
+              const inputs = circuit.ports?.inputs.map((port) => port.name) ?? [];
+              const outputs = circuit.ports?.outputs.map((port) => port.name) ?? [];
+              return (
+                <article className="docs-fn" id={`fn-${circuit.name.toLowerCase()}`} key={circuit.name}>
+                  <header>
+                    <h4>
+                      <code>{circuit.name}({inputs.join(", ")})</code>
+                      <span className="docs-fn-category">component</span>
+                    </h4>
+                    <p>{circuit.summary}</p>
+                  </header>
+                  <div className="docs-fn-body">
+                    <dl className="docs-fn-args">
+                      {inputs.map((name) => (
+                        <div key={name}>
+                          <dt><code>{name}</code></dt>
+                          <dd>Input port.</dd>
+                        </div>
+                      ))}
+                      <div>
+                        <dt><code>outputs</code></dt>
+                        <dd>{outputs.join(", ")}</dd>
                       </div>
-                    ))}
-                    <div>
-                      <dt>
-                        <code>outputs</code>
-                      </dt>
-                      <dd>{spec.outputs.join(", ")}</dd>
-                    </div>
-                  </dl>
-                  <div className="docs-fn-meta">
-                    <span>
-                      <strong>Result width</strong>
-                      {spec.widthRule}
-                    </span>
-                    <span>
-                      <strong>Tip</strong>
-                      {spec.tip}
-                    </span>
-                    <span>
-                      <strong>Example</strong>
-                      <code>{spec.example.call}</code>
-                      <span className="docs-fn-expected">
-                        {spec.example.result} — {spec.example.note}
+                    </dl>
+                    <div className="docs-fn-meta">
+                      <span>
+                        <strong>Package</strong>
+                        {circuit.group ?? "Package circuit"}
                       </span>
-                    </span>
+                      <span>
+                        <strong>Tip</strong>
+                        Assign an instance, then read its output ports: <code>inst.{outputs[0] ?? "out"}</code>.
+                      </span>
+                    </div>
                   </div>
-                </div>
-              </article>
-            ))}
+                </article>
+              );
+            })}
           </Section>
 
           <Section

@@ -56,6 +56,13 @@ export interface CompileOptions {
   maxLoopDepth?: number;
   /** Maximum number of statements a FOR loop may expand to. */
   maxUnrolledItems?: number;
+  /**
+   * Additional package manifests to make available to the compiler. The
+   * default package snapshot is included unless disabled below.
+   */
+  packages?: import("./packages").PackageBundle | import("./packages").PackageManifest[];
+  /** Set to true for a NAND-only compile with no bundled packages. */
+  disableDefaultPackages?: boolean;
 }
 
 export interface CircuitInput {

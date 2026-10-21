@@ -1,6 +1,11 @@
 import { ProgramAnalyzer } from "./analyzer";
 import { expandProgram } from "./expand";
 import { Parser } from "./parser";
+import {
+  createPackageCatalog,
+  packageCircuitAsts,
+  resolvePackageBundle,
+} from "./packages";
 import type { CompileOptions, CompileResult, Diagnostic } from "./types";
 
 export type {
@@ -41,8 +46,31 @@ export {
   parseLanguageLiteral,
   parseSimulationInput,
 } from "./values";
-export { BUILTINS, BUILTIN_BY_NAME, INTRINSIC_CIRCUITS } from "./builtins";
-export type { BuiltinArgument, BuiltinExample, BuiltinSpec, IntrinsicCircuit } from "./builtins";
+export { BUILTINS, BUILTIN_BY_NAME } from "./builtins";
+export type { BuiltinArgument, BuiltinExample, BuiltinSpec } from "./builtins";
+export {
+  DEFAULT_PACKAGE_BUNDLE,
+  DEFAULT_PACKAGE_CATALOG,
+  DEFAULT_PACKAGE_CIRCUITS,
+  DEFAULT_PACKAGE_MACROS,
+  createPackageCatalog,
+  findPackageMacro,
+  macroBodyForArity,
+  parseMacroExpression,
+  parsePackageMacroSource,
+  resolvePackageBundle,
+} from "./packages";
+export type {
+  PackageBundle,
+  PackageCatalog,
+  PackageCircuitExport,
+  PackageCircuitPort,
+  PackageExport,
+  PackageMacroExport,
+  PackageManifest,
+  ParsedPackageMacro,
+  ResolvedPackageMacro,
+} from "./packages";
 export { plainFor } from "./plainLanguage";
 export { expandProgram } from "./expand";
 export { GLOSSARY, GLOSSARY_BY_TERM } from "./glossary";
@@ -66,6 +94,10 @@ export function compile(source: string, options: CompileOptions = {}): CompileRe
     const parser = new Parser(source, [], options.maxDiagnostics ?? 100);
     const program = parser.parse();
     const parserDiagnostics = parser.diagnostics;
+    const packageCatalog = createPackageCatalog([resolvePackageBundle(options)]);
+    // Package circuits are appended after the user's circuits so the first
+    // circuit in the result is still the one the user wrote.
+    program.circuits.push(...packageCircuitAsts(packageCatalog));
     // Constants and loops are resolved before analysis, so every limit applies
     // to the unrolled design.
     const expanded = expandProgram(program, {
@@ -77,6 +109,7 @@ export function compile(source: string, options: CompileOptions = {}): CompileRe
       expanded.program,
       options,
       [...parserDiagnostics, ...expanded.diagnostics],
+      packageCatalog,
     );
     return analyzer.analyze();
   } catch (error) {

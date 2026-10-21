@@ -30,7 +30,8 @@ short-circuit/
 │  ├─ src/parser.ts              # line-oriented recursive descent
 │  ├─ src/ast.ts                 # source-shaped AST with spans
 │  ├─ src/analyzer.ts            # validation + elaboration to flat IR
-│  ├─ src/builtins.ts            # operation registry + intrinsic circuits
+│  ├─ src/builtins.ts            # core operation metadata
+│  ├─ src/packages.ts            # package catalog + .lf macro parser
 │  ├─ src/snippets.ts            # language snippet library
 │  ├─ src/values.ts              # bigint bit values, literal parsing, masks
 │  ├─ src/diagnostics.ts         # stable codes, suggestions, ordering
@@ -49,6 +50,7 @@ short-circuit/
 │  ├─ src/lib/                   # examples + hash router
 │  └─ src/styles.css             # design system and theme tokens
 │
+├─ vendor/ShortCircuit-Packages/ # package registry submodule
 └─ tests/examples.test.ts        # cross-package example validation
 ```
 
@@ -127,8 +129,9 @@ demand:
 
 1. `resolveEntry(name)` memoizes the graph value for each local signal.
 2. `resolveExpression` compiles literals, references, calls, and slices.
-3. User-circuit and intrinsic calls instantiate child `ScopeBuilder`s with the
-   bindings for that instance.
+3. User-circuit and package-circuit calls instantiate child `ScopeBuilder`s
+   with the bindings for that instance. Package macros expand to typed NAND
+   references before the operation switch is reached.
 4. A recursion stack detects direct and mutual instantiation cycles (E324).
 5. A dependency stack detects combinational feedback (E310) and reports the
    cycle path.
@@ -185,6 +188,20 @@ E322) instead of allowing unbounded work, and compilation fails.
 If the whole compile throws unexpectedly, `compile()` catches it and returns a
 single `E999` diagnostic with `ok: false` and `ir: null`. It never returns a
 partial IR as if it were valid.
+
+### 2.5 Packages
+
+`compile()` resolves the bundled package snapshot plus any host-provided
+packages. Macro exports point at real `.lf` files; `packages.ts` parses their
+`MACRO` declarations, validates the exported name, and registers the resolved
+body/fold. A macro body is never stored in JSON.
+
+Package circuits are parsed from their `.lf` sources and registered as internal
+structures. They can be instantiated by user circuits and by other package
+circuits, but they are skipped when the result circuit list and Verilog modules
+are built. That keeps package internals out of the user's project while still
+elaborating them into the same flat IR.
+
 
 ### 2.4 Result contract
 
@@ -407,8 +424,9 @@ language:
 The completion source is registered through the CodeMirror language-data
 mechanism (`languageData.autocomplete`), so the standard completion UI and key
 bindings do the rest. All descriptive text comes from the engine
-(`BUILTINS`, `INTRINSIC_CIRCUITS`, `LANGUAGE_SNIPPETS`), which keeps the
-editor, the documentation page, and the language reference in sync.
+(`BUILTINS`, `DEFAULT_PACKAGE_MACROS`, `DEFAULT_PACKAGE_CIRCUITS`,
+`LANGUAGE_SNIPPETS`), which keeps the editor, the documentation page, and the
+language reference in sync.
 
 ### 6.5 Documentation page
 
@@ -583,8 +601,9 @@ test contract, so a language change that breaks the showcase fails CI.
 5. Document the width policy in `LANGUAGE.md` and the op contract in `IR.md`.
 
 Built-ins must be primitive IR operations; opaque library calls would violate
-the "graph is the program" model. Circuit-shaped behavior belongs in
-`INTRINSIC_CIRCUITS` and should elaborate to primitive nodes.
+the "graph is the program" model. Derived gates and circuit-shaped behavior
+belong in packages. A package macro expands before the built-in switch, and a
+package circuit elaborates to the same primitive nodes as a user circuit.
 
 ### Adding a backend
 

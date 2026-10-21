@@ -232,12 +232,17 @@ function expressionFor(node: CircuitNode, context: ModuleContext): string {
 
   switch (op) {
     case "AND":
+      return operands.join(" & ");
     case "OR":
+      return operands.join(" | ");
     case "XOR":
+      return operands.join(" ^ ");
     case "NAND":
+      return `~(${operands.join(" & ")})`;
     case "NOR":
+      return `~(${operands.join(" | ")})`;
     case "XNOR":
-      return operands.join(op === "AND" ? " & " : op === "OR" ? " | " : op === "XOR" ? " ^ " : op === "NAND" ? " & " : op === "NOR" ? " | " : " ^ ");
+      return `~(${operands.join(" ^ ")})`;
     case "NOT":
       return `~${operands[0] ?? "1'b0"}`;
     case "BUFFER":

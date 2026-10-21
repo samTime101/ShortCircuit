@@ -43,69 +43,6 @@ export interface BuiltinSpec {
 
 export const BUILTINS: BuiltinSpec[] = [
   {
-    name: "AND",
-    category: "gate",
-    minArgs: 2,
-    maxArgs: Number.POSITIVE_INFINITY,
-    description: "Bitwise AND. Result is 1 where every input bit is 1.",
-    symbol: "&",
-    signature: "AND(a, b, ...)",
-    widthRule: "Result width = common input width",
-    tip: "Variadic: AND(a, b, c) is one three-input gate, not a chain of two-input gates.",
-    args: [
-      { name: "a", description: "First input." },
-      { name: "b", description: "Second input." },
-      { name: "...", description: "Further inputs, all combined into one gate.", optional: true },
-    ],
-    example: {
-      call: "AND(1, 1, 0)",
-      result: "0",
-      note: "The third bit is 0, so the whole result is 0.",
-    },
-  },
-  {
-    name: "OR",
-    category: "gate",
-    minArgs: 2,
-    maxArgs: Number.POSITIVE_INFINITY,
-    description: "Bitwise OR. Result is 1 where any input bit is 1.",
-    symbol: "≥1",
-    signature: "OR(a, b, ...)",
-    widthRule: "Result width = common input width",
-    tip: "Variadic. Useful for summing several conditions into one signal.",
-    args: [
-      { name: "a", description: "First input." },
-      { name: "b", description: "Second input." },
-      { name: "...", description: "Further inputs, all combined into one gate.", optional: true },
-    ],
-    example: {
-      call: "OR(0, 1, 0)",
-      result: "1",
-      note: "One input is high, so the result is high.",
-    },
-  },
-  {
-    name: "XOR",
-    category: "gate",
-    minArgs: 2,
-    maxArgs: Number.POSITIVE_INFINITY,
-    description: "Bitwise XOR. Result is 1 where an odd number of inputs are 1.",
-    symbol: "=1",
-    signature: "XOR(a, b, ...)",
-    widthRule: "Result width = common input width",
-    tip: "Parity: XOR(a, b, c) is 1 when an odd number of the bits are set.",
-    args: [
-      { name: "a", description: "First input." },
-      { name: "b", description: "Second input." },
-      { name: "...", description: "Further inputs, all combined into one gate.", optional: true },
-    ],
-    example: {
-      call: "XOR(1, 1, 0)",
-      result: "0",
-      note: "Two of the three bits are high, which is even, so the result is 0.",
-    },
-  },
-  {
     name: "NAND",
     category: "gate",
     minArgs: 2,
@@ -124,82 +61,6 @@ export const BUILTINS: BuiltinSpec[] = [
       call: "NAND(1, 1)",
       result: "0",
       note: "AND of two high bits is 1, and NAND inverts that to 0.",
-    },
-  },
-  {
-    name: "NOR",
-    category: "gate",
-    minArgs: 2,
-    maxArgs: Number.POSITIVE_INFINITY,
-    description: "Inverse of multi-input OR.",
-    symbol: "≥̄1",
-    signature: "NOR(a, b, ...)",
-    widthRule: "Result width = common input width",
-    tip: "Negates the whole multi-input OR. Handy for \"none of these\" conditions.",
-    args: [
-      { name: "a", description: "First input." },
-      { name: "b", description: "Second input." },
-      { name: "...", description: "Further inputs, all combined into one gate.", optional: true },
-    ],
-    example: {
-      call: "NOR(0, 0)",
-      result: "1",
-      note: "Nothing is high, so the OR is 0 and NOR inverts that to 1.",
-    },
-  },
-  {
-    name: "XNOR",
-    category: "gate",
-    minArgs: 2,
-    maxArgs: Number.POSITIVE_INFINITY,
-    description: "Inverse of multi-input XOR.",
-    symbol: "=̄1",
-    signature: "XNOR(a, b, ...)",
-    widthRule: "Result width = common input width",
-    tip: "Equality per bit. Two inputs gives an equality check.",
-    args: [
-      { name: "a", description: "First input." },
-      { name: "b", description: "Second input." },
-      { name: "...", description: "Further inputs, all combined into one gate.", optional: true },
-    ],
-    example: {
-      call: "XNOR(1, 0)",
-      result: "0",
-      note: "The bits differ, so the equality output is low.",
-    },
-  },
-  {
-    name: "NOT",
-    category: "gate",
-    minArgs: 1,
-    maxArgs: 1,
-    description: "Bitwise inversion of one input.",
-    symbol: "!",
-    signature: "NOT(x)",
-    widthRule: "Result width = input width",
-    tip: "Exactly one input. NOT(a) inverts every bit of a bus.",
-    args: [{ name: "x", description: "The value to invert." }],
-    example: {
-      call: "NOT(0)",
-      result: "1",
-      note: "Inverting a low bit gives a high bit.",
-    },
-  },
-  {
-    name: "BUFFER",
-    category: "gate",
-    minArgs: 1,
-    maxArgs: 1,
-    description: "Passes its input through unchanged.",
-    symbol: "▷",
-    signature: "BUFFER(x)",
-    widthRule: "Result width = input width",
-    tip: "Names a wire explicitly. Keeps a graph readable when a signal is only a rename.",
-    args: [{ name: "x", description: "The value to pass through." }],
-    example: {
-      call: "BUFFER(1)",
-      result: "1",
-      note: "The value arrives unchanged.",
     },
   },
   {
@@ -652,67 +513,6 @@ export function lookupBuiltin(name: string): BuiltinSpec | undefined {
   return BUILTIN_BY_NAME.get(name.toUpperCase());
 }
 
-export interface IntrinsicCircuit {
-  name: string;
-  inputs: string[];
-  outputs: string[];
-  description: string;
-  signature: string;
-  widthRule: string;
-  tip: string;
-  args: BuiltinArgument[];
-  example: BuiltinExample;
-}
-
-/** Circuit-shaped built-ins. They elaborate to primitive gates, not opaque boxes. */
-export const INTRINSIC_CIRCUITS: IntrinsicCircuit[] = [
-  {
-    name: "HALF_ADDER",
-    inputs: ["a", "b"],
-    outputs: ["sum", "carry"],
-    description: "One-bit half adder: sum = XOR(a, b), carry = AND(a, b).",
-    signature: "HALF_ADDER(a, b) -> sum, carry",
-    widthRule: "All ports are 1 bit",
-    tip: "Elaborates to real gates in the graph, so you can inspect the internals.",
-    args: [
-      { name: "a", description: "First bit to add." },
-      { name: "b", description: "Second bit to add." },
-    ],
-    example: {
-      call: "HALF_ADDER(1, 1)",
-      result: "sum = 0, carry = 1",
-      note: "One plus one is two: the sum bit is 0 and the carry is 1.",
-    },
-  },
-  {
-    name: "FULL_ADDER",
-    inputs: ["a", "b", "carry_in"],
-    outputs: ["sum", "carry_out"],
-    description: "One-bit full adder built from two half adders and an OR gate.",
-    signature: "FULL_ADDER(a, b, carry_in) -> sum, carry_out",
-    widthRule: "All ports are 1 bit",
-    tip: "Built from two half adders. Chain them for ripple-carry addition.",
-    args: [
-      { name: "a", description: "First bit to add." },
-      { name: "b", description: "Second bit to add." },
-      { name: "carry_in", description: "Carry from the previous stage." },
-    ],
-    example: {
-      call: "FULL_ADDER(1, 1, 1)",
-      result: "sum = 1, carry_out = 1",
-      note: "One plus one plus a carry in is three.",
-    },
-  },
-];
-
-export const INTRINSIC_BY_NAME = new Map(
-  INTRINSIC_CIRCUITS.map((circuit) => [circuit.name, circuit]),
-);
-
-export function lookupIntrinsic(name: string): IntrinsicCircuit | undefined {
-  return INTRINSIC_BY_NAME.get(name.toUpperCase());
-}
-
 export const KEYWORDS = new Set([
   "CIRCUIT",
   "END",
@@ -735,7 +535,7 @@ export const KEYWORDS = new Set([
 /** Built-in names are case-insensitive and cannot be redefined as signals. */
 export function isReservedName(name: string): boolean {
   const upper = name.toUpperCase();
-  return KEYWORDS.has(upper) || BUILTIN_BY_NAME.has(upper) || INTRINSIC_BY_NAME.has(upper);
+  return KEYWORDS.has(upper) || BUILTIN_BY_NAME.has(upper);
 }
 
 export function builtinLabel(spec: BuiltinSpec): string {

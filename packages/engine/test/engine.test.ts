@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   BUILTINS,
-  INTRINSIC_CIRCUITS,
   LANGUAGE_SNIPPETS,
   Simulator,
   compile,
@@ -154,7 +153,7 @@ END`,
     expect(outputs["result.carry"]?.binary).toBe("1");
   });
 
-  it("elaborates intrinsic circuit-shaped components", () => {
+  it("elaborates package circuit-shaped components", () => {
     const { circuit } = combinational(`CIRCUIT Intrinsic
 INPUT a
 INPUT b
@@ -163,7 +162,8 @@ full = FULL_ADDER(a, b, c)
 OUTPUT full.sum
 OUTPUT full.carry_out
 END`);
-    expect(circuit.nodes.some((node) => node.op === "XOR")).toBe(true);
+    expect(circuit.nodes.some((node) => node.op === "NAND")).toBe(true);
+    expect(circuit.nodes.some((node) => node.op === "XOR")).toBe(false);
     const simulator = new Simulator(circuit);
     const outputs = simulator.setInputs({ a: "1", b: "1", c: "1" }).outputs;
     expect(outputs["full.sum"]?.binary).toBe("1");
@@ -947,8 +947,8 @@ END`);
     expect(verilog).toContain("module HalfAdder (");
     expect(verilog).toContain("input  a");
     expect(verilog).toContain("output sum");
-    expect(verilog).toContain("assign sum = a ^ b;");
-    expect(verilog).toContain("assign carry = a & b;");
+    expect(verilog).toMatch(/assign sum = ~\(/);
+    expect(verilog).toMatch(/assign carry = ~\(/);
     expect(verilog).toContain("endmodule");
   });
 
@@ -1007,10 +1007,6 @@ describe("language metadata", () => {
     for (const spec of BUILTINS) {
       expect(spec.signature, spec.name).toContain(spec.name);
       expect(spec.widthRule.length, spec.name).toBeGreaterThan(4);
-      expect(spec.tip.length, spec.name).toBeGreaterThan(10);
-    }
-    for (const spec of INTRINSIC_CIRCUITS) {
-      expect(spec.signature, spec.name).toContain(spec.name);
       expect(spec.tip.length, spec.name).toBeGreaterThan(10);
     }
   });

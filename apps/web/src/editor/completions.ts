@@ -6,7 +6,8 @@ import {
 } from "@codemirror/autocomplete";
 import {
   BUILTINS,
-  INTRINSIC_CIRCUITS,
+  DEFAULT_PACKAGE_CIRCUITS,
+  DEFAULT_PACKAGE_MACROS,
   LANGUAGE_SNIPPETS,
 } from "@shortcircuit/engine";
 import { scanDocument } from "./documentModel";
@@ -132,44 +133,73 @@ const CATEGORY_LABEL: Record<string, string> = {
   selection: "selection",
 };
 
-function functionCompletions(): Completion[] {
-  const functions: Completion[] = BUILTINS.map((spec) => ({
-    label: spec.name,
+function packageMacroCompletions(): Completion[] {
+  return DEFAULT_PACKAGE_MACROS.map((macro) => ({
+    label: macro.name,
     type: "function",
-    detail: spec.signature,
+    detail: macro.signature,
     boost: 1,
     info: () =>
       infoCard({
-        title: spec.name,
-        badge: CATEGORY_LABEL[spec.category] ?? spec.category,
+        title: macro.name,
+        badge: macro.group ?? "package macro",
         rows: [
-          { label: "Signature", value: spec.signature },
-          { label: "Width", value: spec.widthRule },
+          { label: "Signature", value: macro.signature },
+          { label: "Width", value: macro.widthRule ?? "Result width follows compiler width rules" },
         ],
-        code: `${spec.name.toLowerCase()}_result = ${spec.signature}`,
-        note: spec.tip,
+        code: `result = ${macro.name}(${macro.args.join(", ")})`,
+        note: macro.tip ?? macro.summary ?? "Package macro.",
       }),
   }));
+}
 
-  const intrinsics: Completion[] = INTRINSIC_CIRCUITS.map((spec) => ({
-    label: spec.name,
-    type: "class",
-    detail: spec.signature,
-    boost: 1,
-    info: () =>
-      infoCard({
-        title: spec.name,
-        badge: "component",
-        rows: [
-          { label: "Signature", value: spec.signature },
-          { label: "Width", value: spec.widthRule },
-        ],
-        code: `inst = ${spec.name}(${spec.inputs.join(", ")})\nsum = inst.${spec.outputs[0] ?? "out"}`,
-        note: spec.tip,
-      }),
-  }));
+function packageCircuitCompletions(): Completion[] {
+  return DEFAULT_PACKAGE_CIRCUITS.map(({ circuit }) => {
+    const inputs = circuit.ports?.inputs.map((port) => port.name) ?? [];
+    const outputs = circuit.ports?.outputs.map((port) => port.name) ?? [];
+    return {
+      label: circuit.name,
+      type: "class",
+      detail: circuit.summary ?? "package circuit",
+      boost: 1,
+      info: () =>
+        infoCard({
+          title: circuit.name,
+          badge: circuit.group ?? "component",
+          rows: [
+            { label: "Signature", value: `${circuit.name}(${inputs.join(", ")})` },
+            { label: "Ports", value: `${inputs.join(", ")} -> ${outputs.join(", ")}` },
+          ],
+          code: `inst = ${circuit.name}(${inputs.join(", ")})\nresult = inst.${outputs[0] ?? "out"}`,
+          note: circuit.summary ?? "Package circuit.",
+        }),
+    };
+  });
+}
 
-  return [...functions, ...intrinsics];
+function functionCompletions(): Completion[] {
+  const packageNames = new Set(DEFAULT_PACKAGE_MACROS.map((macro) => macro.name));
+  const functions: Completion[] = BUILTINS.filter((spec) => !packageNames.has(spec.name)).map(
+    (spec) => ({
+      label: spec.name,
+      type: "function",
+      detail: spec.signature,
+      boost: 1,
+      info: () =>
+        infoCard({
+          title: spec.name,
+          badge: CATEGORY_LABEL[spec.category] ?? spec.category,
+          rows: [
+            { label: "Signature", value: spec.signature },
+            { label: "Width", value: spec.widthRule },
+          ],
+          code: `${spec.name.toLowerCase()}_result = ${spec.signature}`,
+          note: spec.tip,
+        }),
+    }),
+  );
+
+  return [...functions, ...packageMacroCompletions(), ...packageCircuitCompletions()];
 }
 
 function keywordCompletions(): Completion[] {

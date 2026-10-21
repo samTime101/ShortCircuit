@@ -402,6 +402,19 @@ All built-ins are case-insensitive. Every operation is a real graph node in
 the IR; none is simulated as an opaque shortcut. Slices and constant fitting
 are visible in the elaborated graph.
 
+These gates and circuits are included by default, so a program never needs to
+define them:
+
+| Group | Default components |
+| --- | --- |
+| Basic logic gates | `AND`, `OR`, `NOT`, `BUFFER` |
+| Universal logic gates | `NAND`, `NOR` |
+| Exclusive gates | `XOR`, `XNOR` |
+| Arithmetic circuits | `HALF_ADDER`, `FULL_ADDER` |
+
+`HALF_ADDER` and `FULL_ADDER` are ordinary circuits that elaborate into
+primitive gates. Their internals are visible in the compiled graph.
+
 ### 7.1 Logic gates
 
 | Call | Args | Description |
@@ -497,42 +510,80 @@ operations fold a bus into a single bit without a tree of gates.
 
 ### 7.6 Operation reference
 
-Every built-in, with its arguments, the width it produces, and a worked
-example.
+Every built-in and default package operation, with its arguments, the width it
+produces, and a call example.
 
 <!-- BEGIN GENERATED REFERENCE -->
 
-This section is generated from the engine's operation registry. Every built-in lists its
-arguments, the width it produces, and a worked example with the value it returns.
+This section is generated from the engine and package catalogs. Every operation lists its
+arguments, the width it produces, and a call example.
 
-### Logic gates
+### Package gates
+
+#### `NOT(x)`
+
+Bitwise inversion. Expands to NAND(x, x).
+
+- **Arguments:** x
+- **Result width:** Result width = input width
+- **Example:** `y = NOT(a)`
+- **Package:** Basic Logic Gates
 
 #### `AND(a, b, ...)`
 
-Bitwise AND. Result is 1 where every input bit is 1.
+Bitwise AND. Expands to NOT(NAND(a, b, ...)).
 
-- **Arguments:** `a` — First input. · `b` — Second input. · `...` — Further inputs, all combined into one gate. (optional)
+- **Arguments:** a · b
 - **Result width:** Result width = common input width
-- **Example:** `AND(1, 1, 0)` → `0` — The third bit is 0, so the whole result is 0.
-- **Tip:** Variadic: AND(a, b, c) is one three-input gate, not a chain of two-input gates.
+- **Example:** `y = AND(a, b)`
+- **Package:** Basic Logic Gates
 
 #### `OR(a, b, ...)`
 
-Bitwise OR. Result is 1 where any input bit is 1.
+Bitwise OR. Folds OR2 across the inputs.
 
-- **Arguments:** `a` — First input. · `b` — Second input. · `...` — Further inputs, all combined into one gate. (optional)
+- **Arguments:** a · b
 - **Result width:** Result width = common input width
-- **Example:** `OR(0, 1, 0)` → `1` — One input is high, so the result is high.
-- **Tip:** Variadic. Useful for summing several conditions into one signal.
+- **Example:** `y = OR(a, b)`
+- **Package:** Basic Logic Gates
+
+#### `BUFFER(x)`
+
+Identity buffer. Expands to NOT(NOT(x)).
+
+- **Arguments:** x
+- **Result width:** Result width = input width
+- **Example:** `y = BUFFER(a)`
+- **Package:** Basic Logic Gates
+
+#### `NOR(a, b, ...)`
+
+Bitwise NOR. Expands to NOT(OR(a, b, ...)).
+
+- **Arguments:** a · b
+- **Result width:** Result width = common input width
+- **Example:** `y = NOR(a, b)`
+- **Package:** Universal Logic Gates
 
 #### `XOR(a, b, ...)`
 
-Bitwise XOR. Result is 1 where an odd number of inputs are 1.
+Bitwise XOR. Folds XOR2 across the inputs.
 
-- **Arguments:** `a` — First input. · `b` — Second input. · `...` — Further inputs, all combined into one gate. (optional)
+- **Arguments:** a · b
 - **Result width:** Result width = common input width
-- **Example:** `XOR(1, 1, 0)` → `0` — Two of the three bits are high, which is even, so the result is 0.
-- **Tip:** Parity: XOR(a, b, c) is 1 when an odd number of the bits are set.
+- **Example:** `y = XOR(a, b)`
+- **Package:** Exclusive Gates
+
+#### `XNOR(a, b, ...)`
+
+Bitwise XNOR. Expands to NOT(XOR(a, b, ...)).
+
+- **Arguments:** a · b
+- **Result width:** Result width = common input width
+- **Example:** `y = XNOR(a, b)`
+- **Package:** Exclusive Gates
+
+### Logic gates
 
 #### `NAND(a, b, ...)`
 
@@ -542,42 +593,6 @@ Inverse of multi-input AND.
 - **Result width:** Result width = common input width
 - **Example:** `NAND(1, 1)` → `0` — AND of two high bits is 1, and NAND inverts that to 0.
 - **Tip:** Negates the whole multi-input AND; it is not a chain of two-input NANDs.
-
-#### `NOR(a, b, ...)`
-
-Inverse of multi-input OR.
-
-- **Arguments:** `a` — First input. · `b` — Second input. · `...` — Further inputs, all combined into one gate. (optional)
-- **Result width:** Result width = common input width
-- **Example:** `NOR(0, 0)` → `1` — Nothing is high, so the OR is 0 and NOR inverts that to 1.
-- **Tip:** Negates the whole multi-input OR. Handy for "none of these" conditions.
-
-#### `XNOR(a, b, ...)`
-
-Inverse of multi-input XOR.
-
-- **Arguments:** `a` — First input. · `b` — Second input. · `...` — Further inputs, all combined into one gate. (optional)
-- **Result width:** Result width = common input width
-- **Example:** `XNOR(1, 0)` → `0` — The bits differ, so the equality output is low.
-- **Tip:** Equality per bit. Two inputs gives an equality check.
-
-#### `NOT(x)`
-
-Bitwise inversion of one input.
-
-- **Arguments:** `x` — The value to invert.
-- **Result width:** Result width = input width
-- **Example:** `NOT(0)` → `1` — Inverting a low bit gives a high bit.
-- **Tip:** Exactly one input. NOT(a) inverts every bit of a bus.
-
-#### `BUFFER(x)`
-
-Passes its input through unchanged.
-
-- **Arguments:** `x` — The value to pass through.
-- **Result width:** Result width = input width
-- **Example:** `BUFFER(1)` → `1` — The value arrives unchanged.
-- **Tip:** Names a wire explicitly. Keeps a graph readable when a signal is only a rename.
 
 ### Arithmetic
 
@@ -796,25 +811,21 @@ Reverses the bit order of a value.
 
 ### Circuit-shaped components
 
-#### `HALF_ADDER(a, b) -> sum, carry`
+#### `HALF_ADDER(a, b)`
 
 One-bit half adder: sum = XOR(a, b), carry = AND(a, b).
 
-- **Arguments:** `a` — First bit to add. · `b` — Second bit to add.
+- **Inputs:** a, b
 - **Outputs:** sum, carry
-- **Result width:** All ports are 1 bit
-- **Example:** `HALF_ADDER(1, 1)` → `sum = 0, carry = 1` — One plus one is two: the sum bit is 0 and the carry is 1.
-- **Tip:** Elaborates to real gates in the graph, so you can inspect the internals.
+- **Package:** Arithmetic Circuits
 
-#### `FULL_ADDER(a, b, carry_in) -> sum, carry_out`
+#### `FULL_ADDER(a, b, carry_in)`
 
 One-bit full adder built from two half adders and an OR gate.
 
-- **Arguments:** `a` — First bit to add. · `b` — Second bit to add. · `carry_in` — Carry from the previous stage.
+- **Inputs:** a, b, carry_in
 - **Outputs:** sum, carry_out
-- **Result width:** All ports are 1 bit
-- **Example:** `FULL_ADDER(1, 1, 1)` → `sum = 1, carry_out = 1` — One plus one plus a carry in is three.
-- **Tip:** Built from two half adders. Chain them for ripple-carry addition.
+- **Package:** Arithmetic Circuits
 
 <!-- END GENERATED REFERENCE -->
 

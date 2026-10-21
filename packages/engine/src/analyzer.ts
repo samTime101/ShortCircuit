@@ -19,12 +19,16 @@ import type {
   TestStatementAst,
 } from "./ast";
 import {
-  isReservedName,
+  isReservedName as isCoreReservedName,
   lookupBuiltin,
-  lookupIntrinsic,
   type BuiltinSpec,
-  type IntrinsicCircuit,
 } from "./builtins";
+import {
+  findPackageMacro,
+  macroBodyForArity,
+  type PackageCatalog,
+  type ResolvedPackageMacro,
+} from "./packages";
 import { DiagnosticBag, suggestName } from "./diagnostics";
 import { plainFor } from "./plainLanguage";
 import { valueAsIndex } from "./values";
@@ -150,6 +154,8 @@ const DEFAULT_OPTIONS: Required<CompileOptions> = {
   maxDiagnostics: 100,
   maxLoopDepth: 4,
   maxUnrolledItems: 20_000,
+  packages: [],
+  disableDefaultPackages: false,
 };
 
 function spanLine(span: SourceSpan): number {
@@ -199,6 +205,7 @@ export class ProgramAnalyzer {
   private readonly structuresInOrder: CircuitStructure[] = [];
   private readonly circuits: CircuitIR[] = [];
   private readonly tests: TestSuiteIR[] = [];
+  private readonly internalCircuitNames: Set<string>;
   private instanceCounter = 0;
   private nodeLimitReported = false;
 
@@ -207,10 +214,18 @@ export class ProgramAnalyzer {
     private readonly program: ProgramAst,
     options: CompileOptions = {},
     parserDiagnostics: Diagnostic[] = [],
+    private readonly packageCatalog: PackageCatalog = {
+      packages: [],
+      macros: new Map(),
+      circuits: [],
+      diagnostics: [],
+    },
   ) {
     this.options = { ...DEFAULT_OPTIONS, ...options };
     this.bag = new DiagnosticBag(this.options.maxDiagnostics);
+    this.internalCircuitNames = new Set(packageCatalog.circuits.map((entry) => entry.circuit.name));
     for (const diagnostic of parserDiagnostics) this.bag.add(diagnostic);
+    for (const diagnostic of packageCatalog.diagnostics) this.bag.add(diagnostic);
   }
 
   analyze(): CompileResult {
@@ -218,6 +233,7 @@ export class ProgramAnalyzer {
     this.buildStructures();
 
     for (const structure of this.structuresInOrder) {
+      if (this.internalCircuitNames.has(structure.name)) continue;
       this.buildTopCircuit(structure);
     }
 
@@ -280,7 +296,7 @@ export class ProgramAnalyzer {
   private buildStructure(ast: CircuitAst): CircuitStructure {
     const line = ast.span.line;
     const column = ast.span.column;
-    if (isReservedName(ast.name)) {
+    if (this.isReservedName(ast.name)) {
       this.bag.error(
         "E200",
         `"${ast.name}" is reserved and cannot be used as a circuit name.`,
@@ -301,7 +317,7 @@ export class ProgramAnalyzer {
     const ons: OnBlockAst[] = [];
 
     const declare = (decl: SignalDecl): boolean => {
-      if (isReservedName(decl.name)) {
+      if (this.isReservedName(decl.name)) {
         this.bag.error(
           "E200",
           `"${decl.name}" is reserved and cannot be used as a signal name.`,
@@ -1088,6 +1104,19 @@ export class ProgramAnalyzer {
     return this.structures.get(name);
   }
 
+  getPackageMacro(name: string): ResolvedPackageMacro | undefined {
+    return findPackageMacro(this.packageCatalog, name);
+  }
+
+  /** Keywords, core built-ins, and package macros all own their names. */
+  isReservedName(name: string): boolean {
+    return isCoreReservedName(name) || this.packageCatalog.macros.has(name.toUpperCase());
+  }
+
+  getPackageMacros(): Iterable<ResolvedPackageMacro> {
+    return this.packageCatalog.macros.values();
+  }
+
   getStructures(): Iterable<CircuitStructure> {
     return this.structuresInOrder;
   }
@@ -1387,13 +1416,29 @@ class ScopeBuilder {
   }
 
   private isBundleCall(name: string): boolean {
-    return Boolean(this.analyzer.getStructure(name)) || Boolean(lookupIntrinsic(name));
+    return Boolean(this.analyzer.getStructure(name));
   }
 
-  private resolveReference(reference: ReferenceAst): ValueRef {
+  private resolveReference(
+    reference: ReferenceAst,
+    macroBindings?: Map<string, ValueRef>,
+  ): ValueRef {
     const [first, ...rest] = reference.path;
     if (!first) return this.fallbackRef(reference.span.line, reference.span.column);
     const base = first.name;
+    const macroRef = macroBindings?.get(base);
+    if (macroRef) {
+      if (rest.length > 0) {
+        this.analyzer.error(
+          "E212",
+          `Macro parameter "${base}" has no ports, so "${pathName(reference.path)}" cannot be accessed.`,
+          reference.span.line,
+          reference.span.column,
+        );
+        return macroRef;
+      }
+      return macroRef;
+    }
     const entry = this.entries.get(base);
     if (!entry) {
       const suggestion = suggestName(base, this.entries.keys(), 2);
@@ -1469,7 +1514,11 @@ class ScopeBuilder {
     return output;
   }
 
-  private resolveExpression(expr: ExpressionAst, preferredLabel?: string): ValueRef {
+  private resolveExpression(
+    expr: ExpressionAst,
+    preferredLabel?: string,
+    macroBindings?: Map<string, ValueRef>,
+  ): ValueRef {
     switch (expr.kind) {
       case "Literal": {
         const literal = this.analyzer.readLiteral(expr);
@@ -1482,19 +1531,19 @@ class ScopeBuilder {
         );
       }
       case "Reference":
-        return this.resolveReference(expr);
+        return this.resolveReference(expr, macroBindings);
       case "Call":
-        return this.compileCall(expr, preferredLabel);
+        return this.compileCall(expr, preferredLabel, macroBindings);
       case "Index": {
         const index = this.analyzer.constNumber(expr.index, "Bit index");
         if (index === null) return this.fallbackRef(expr.span.line, expr.span.column);
-        return this.compileSlice(expr.target, index, index, expr.span, preferredLabel);
+        return this.compileSlice(expr.target, index, index, expr.span, preferredLabel, macroBindings);
       }
       case "Slice": {
         const hi = this.analyzer.constNumber(expr.hi, "Slice bound");
         const lo = this.analyzer.constNumber(expr.lo, "Slice bound");
         if (hi === null || lo === null) return this.fallbackRef(expr.span.line, expr.span.column);
-        return this.compileSlice(expr.target, hi, lo, expr.span, preferredLabel);
+        return this.compileSlice(expr.target, hi, lo, expr.span, preferredLabel, macroBindings);
       }
     }
   }
@@ -1505,8 +1554,9 @@ class ScopeBuilder {
     lo: number,
     span: SourceSpan,
     preferredLabel?: string,
+    macroBindings?: Map<string, ValueRef>,
   ): ValueRef {
-    const ref = this.resolveExpression(target);
+    const ref = this.resolveExpression(target, undefined, macroBindings);
     if (!Number.isInteger(hi) || !Number.isInteger(lo) || hi < 0 || lo < 0) {
       this.analyzer.error(
         "E214",
@@ -1552,7 +1602,15 @@ class ScopeBuilder {
     return { node: id, width };
   }
 
-  private compileCall(call: CallAst, preferredLabel?: string): ValueRef {
+  private compileCall(
+    call: CallAst,
+    preferredLabel?: string,
+    macroBindings?: Map<string, ValueRef>,
+  ): ValueRef {
+    const packageMacro = this.analyzer.getPackageMacro(call.name);
+    if (packageMacro) {
+      return this.compileMacroCall(call, packageMacro, preferredLabel, macroBindings);
+    }
     if (this.isBundleCall(call.name)) {
       this.analyzer.error(
         "E217",
@@ -1570,7 +1628,7 @@ class ScopeBuilder {
         ...new Set([
           ...[...this.analyzer.getStructures()].map((entry) => entry.name),
           ...BUILTIN_NAMES,
-          ...INTRINSIC_NAMES,
+          ...[...this.analyzer.getPackageMacros()].map((macro) => macro.name),
         ]),
       ];
       const suggestion = suggestName(call.name, candidates, 3);
@@ -1598,7 +1656,7 @@ class ScopeBuilder {
       );
     }
 
-    const refs = call.args.map((arg) => this.resolveExpression(arg.value));
+    const refs = call.args.map((arg) => this.resolveExpression(arg.value, undefined, macroBindings));
     const argExprs = call.args.map((arg) => arg.value);
     if (call.args.length < spec.minArgs || call.args.length > spec.maxArgs) {
       this.analyzer.error(
@@ -1612,19 +1670,7 @@ class ScopeBuilder {
     }
 
     switch (spec.name) {
-      case "NOT":
-      case "BUFFER": {
-        const ref = refs[0]!;
-        return this.addOperation(spec.name, ref.width, preferredLabel ?? spec.name, [ref.node], call.span, {
-          arity: call.args.length,
-        });
-      }
-      case "AND":
-      case "OR":
-      case "XOR":
-      case "NAND":
-      case "NOR":
-      case "XNOR": {
+      case "NAND": {
         const width = this.commonWidth(refs, argExprs, spec.name, call.span);
         return this.addOperation(spec.name, width, preferredLabel ?? spec.name, refs.map((ref) => ref.node), call.span, {
           arity: call.args.length,
@@ -1905,6 +1951,99 @@ class ScopeBuilder {
     }
   }
 
+  private compileMacroCall(
+    call: CallAst,
+    macro: ResolvedPackageMacro,
+    preferredLabel?: string,
+    outerBindings?: Map<string, ValueRef>,
+  ): ValueRef {
+    if (call.args.some((arg) => arg.name !== null)) {
+      this.analyzer.error(
+        "E218",
+        `Package macro ${macro.name} uses positional arguments, not named arguments.`,
+        call.span.line,
+        call.span.column,
+        `Write ${macro.name}(${call.args.map((arg) => exprDescription(arg.value)).join(", ")}).`,
+      );
+    }
+    const refs = call.args.map((arg) =>
+      this.resolveExpression(arg.value, undefined, outerBindings),
+    );
+    return this.compileMacroWithRefs(macro, refs, call.span, preferredLabel);
+  }
+
+  private compileMacroWithRefs(
+    macro: ResolvedPackageMacro,
+    refs: ValueRef[],
+    span: SourceSpan,
+    preferredLabel?: string,
+  ): ValueRef {
+    const min = macro.minArgs ?? macro.args.length;
+    const max = macro.maxArgs === null || macro.maxArgs === undefined
+      ? Number.POSITIVE_INFINITY
+      : macro.maxArgs;
+    if (refs.length < min || refs.length > max) {
+      const expectation = max === Number.POSITIVE_INFINITY
+        ? `at least ${min} argument${min === 1 ? "" : "s"}`
+        : min === max
+          ? `${min} argument${min === 1 ? "" : "s"}`
+          : `${min} to ${max} arguments`;
+      this.analyzer.error(
+        "E302",
+        `${macro.name} expects ${expectation}, but received ${refs.length}.`,
+        span.line,
+        span.column,
+        macro.signature ? `Signature: ${macro.signature}.` : undefined,
+      );
+      return this.fallbackRef(span.line, span.column);
+    }
+
+    if (macro.fold) {
+      const foldMacro = this.analyzer.getPackageMacro(macro.fold);
+      if (!foldMacro) {
+        this.analyzer.error(
+          "E999",
+          `Package macro ${macro.name} references missing fold helper ${macro.fold}.`,
+          span.line,
+          span.column,
+        );
+        return this.fallbackRef(span.line, span.column);
+      }
+      let result = refs[0]!;
+      for (let index = 1; index < refs.length; index += 1) {
+        result = this.compileMacroWithRefs(
+          foldMacro,
+          [result, refs[index]!],
+          span,
+          preferredLabel,
+        );
+      }
+      return result;
+    }
+
+    const body = macroBodyForArity(macro, refs.length);
+    if (!body.ast) {
+      this.analyzer.error(
+        "E999",
+        body.error ?? macro.parseError ?? `Package macro ${macro.name} has no body.`,
+        span.line,
+        span.column,
+      );
+      return this.fallbackRef(span.line, span.column);
+    }
+
+    const bindings = new Map<string, ValueRef>();
+    for (let index = 0; index < macro.args.length; index += 1) {
+      const ref = refs[index];
+      if (ref) bindings.set(macro.args[index]!, ref);
+    }
+    for (let index = 0; index < body.restNames.length; index += 1) {
+      const ref = refs[macro.args.length + index];
+      if (ref) bindings.set(body.restNames[index]!, ref);
+    }
+    return this.resolveExpression(body.ast, preferredLabel ?? macro.name, bindings);
+  }
+
   private constantArgument(call: CallAst, expr: ExpressionAst | undefined, context: string): number | null {
     if (!expr || expr.kind !== "Literal") {
       this.analyzer.error(
@@ -1931,9 +2070,6 @@ class ScopeBuilder {
 
   private arityHint(spec: BuiltinSpec): string {
     switch (spec.name) {
-      case "NOT":
-      case "BUFFER":
-        return `${spec.name} accepts exactly one input.`;
       case "MUX":
         return "MUX(value_a, value_b, select) selects value_a when select is 0 and value_b when select is 1.";
       case "SLICE":
@@ -2132,10 +2268,8 @@ class ScopeBuilder {
   }
 
   private instantiateCall(call: CallAst, instanceName: string): ResolvedEntry {
-    const intrinsic = lookupIntrinsic(call.name);
     const custom = this.analyzer.getStructure(call.name);
     if (custom) return this.instantiateCustom(custom, call, instanceName);
-    if (intrinsic) return this.instantiateIntrinsic(intrinsic, call, instanceName);
     return {
       kind: "value",
       ref: this.fallbackRef(call.span.line, call.span.column),
@@ -2335,157 +2469,6 @@ class ScopeBuilder {
     return bindings;
   }
 
-  private instantiateIntrinsic(
-    target: IntrinsicCircuit,
-    call: CallAst,
-    instanceName: string,
-  ): ResolvedEntry {
-    const span = call.span;
-    if (!this.analyzer.beginInstance(this.context, span.line, span.column)) {
-      return {
-        kind: "bundle",
-        circuit: target.name,
-        outputs: new Map(),
-        shortOutputs: new Map(),
-      };
-    }
-    if (call.args.length !== target.inputs.length) {
-      this.analyzer.error(
-        "E307",
-        `${target.name} expects ${target.inputs.length} inputs, but received ${call.args.length}.`,
-        span.line,
-        span.column,
-      );
-      return {
-        kind: "bundle",
-        circuit: target.name,
-        outputs: new Map(),
-        shortOutputs: new Map(),
-      };
-    }
-    if (call.args.some((arg) => arg.name !== null)) {
-      this.analyzer.error(
-        "E218",
-        `${target.name} does not use named arguments.`,
-        span.line,
-        span.column,
-      );
-    }
-
-    const refs = call.args.map((arg, index) => {
-      const resolved = this.resolveExpression(arg.value);
-      return this.coerce(
-        resolved,
-        1,
-        arg.value,
-        `${target.name} input ${target.inputs[index] ?? index + 1}`,
-        arg.span,
-      );
-    });
-    const childPrefix = `${this.prefix}/${instanceName}`;
-    const childScope = [...this.scope, instanceName];
-
-    if (target.name === "HALF_ADDER") {
-      const sum = this.addScopedOperation("XOR", 1, "sum", refs.map((ref) => ref.node), childPrefix, childScope, span);
-      const carry = this.addScopedOperation("AND", 1, "carry", refs.map((ref) => ref.node), childPrefix, childScope, span);
-      return {
-        kind: "bundle",
-        circuit: target.name,
-        outputs: new Map([
-          ["sum", sum],
-          ["carry", carry],
-        ]),
-        shortOutputs: new Map([
-          ["sum", sum],
-          ["carry", carry],
-        ]),
-      };
-    }
-
-    const firstXor = this.addScopedOperation(
-      "XOR",
-      1,
-      "first_sum",
-      [refs[0]!.node, refs[1]!.node],
-      childPrefix,
-      childScope,
-      span,
-    );
-    const firstAnd = this.addScopedOperation(
-      "AND",
-      1,
-      "first_carry",
-      [refs[0]!.node, refs[1]!.node],
-      childPrefix,
-      childScope,
-      span,
-    );
-    const sum = this.addScopedOperation(
-      "XOR",
-      1,
-      "sum",
-      [firstXor.node, refs[2]!.node],
-      childPrefix,
-      childScope,
-      span,
-    );
-    const secondAnd = this.addScopedOperation(
-      "AND",
-      1,
-      "second_carry",
-      [firstXor.node, refs[2]!.node],
-      childPrefix,
-      childScope,
-      span,
-    );
-    const carry = this.addScopedOperation(
-      "OR",
-      1,
-      "carry_out",
-      [firstAnd.node, secondAnd.node],
-      childPrefix,
-      childScope,
-      span,
-    );
-    return {
-      kind: "bundle",
-      circuit: target.name,
-      outputs: new Map([
-        ["sum", sum],
-        ["carry_out", carry],
-      ]),
-      shortOutputs: new Map([
-        ["sum", sum],
-        ["carry_out", carry],
-      ]),
-    };
-  }
-
-  private addScopedOperation(
-    op: string,
-    width: number,
-    label: string,
-    operands: string[],
-    prefix: string,
-    scope: string[],
-    span: SourceSpan,
-  ): ValueRef {
-    const id = this.analyzer.nextOperationId(prefix);
-    this.addNode({
-      id,
-      kind: "operation",
-      op,
-      width,
-      label,
-      scope,
-      operands,
-      params: {},
-      line: span.line,
-      column: span.column,
-    });
-    return { node: id, width };
-  }
-
   private compileEvents(): void {
     for (const block of this.onBlocks) {
       const clock = this.resolveReference(block.clock);
@@ -2666,7 +2649,6 @@ const BUILTIN_NAMES = [
   "ENCODER",
 ];
 
-const INTRINSIC_NAMES = ["HALF_ADDER", "FULL_ADDER"];
 
 function arityText(spec: BuiltinSpec): string {
   if (spec.maxArgs === Number.POSITIVE_INFINITY) {

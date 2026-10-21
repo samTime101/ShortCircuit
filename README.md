@@ -33,6 +33,7 @@ Comments use `//` for a line and `/* ... */` for a block that may span lines. Lo
 ## What works in v0.1
 
 - **Readable hardware expressions** — function-style gates, named signals, comments, no semicolons or braces.
+- **Default packages** — `AND`, `OR`, `NOT`, `BUFFER`, `NAND`, `NOR`, `XOR`, `XNOR`, `HALF_ADDER` and `FULL_ADDER` work out of the box. Gates and adders are provided by bundled packages; the compiler core keeps `NAND` and structural wiring.
 - **Static validation first** — undeclared/duplicate signals, width mismatches, missing ports, illegal recursion, combinational loops and clock conflicts are diagnosed before simulation.
 - **Buses** — `BUS(8)` declarations, indexing (`data[3]`), inclusive slices (`data[7:4]`), concatenation, shifts, decoder/encoder.
 - **Composition** — reusable `CIRCUIT` blocks, positional or named instance ports, nested scopes and flattened IR.
@@ -83,7 +84,8 @@ short-circuit/
 │  ├─ src/testing.ts       In-source test runner
 │  ├─ src/truthTable.ts    Exhaustive enumeration
 │  ├─ src/formatter.ts     Canonical source formatting
-│  ├─ src/builtins.ts      Operation registry: signatures, widths, examples
+│  ├─ src/builtins.ts      Core operation metadata: signatures, widths, examples
+│  ├─ src/packages.ts      Package catalog, .lf macro parser, offline bundle
 │  ├─ src/snippets.ts      Language snippet library
 │  ├─ src/plainLanguage.ts Plain-language layer for diagnostics
 │  └─ src/types.ts         Portable IR + public API types
@@ -94,6 +96,7 @@ short-circuit/
 │  ├─ src/lib/             Examples, hash router, recorder, trace
 │  ├─ src/test/            Studio test suite
 │  └─ src/styles.css       Design system and theme tokens
+├─ vendor/ShortCircuit-Packages/  Package registry submodule
 ├─ tests/                  Cross-package example and documentation checks
 ├─ scripts/                 Documentation generator
 └─ docs/
@@ -137,7 +140,7 @@ The engine has no DOM, React, or browser dependency. Another implementation can 
 ## Roadmap
 
 - Built-in latches, registers, RAM primitives and timed delays
-- NAND-only netlist expansion as an optional backend
+- Finish moving the remaining arithmetic, selection, and shift builtins into packages
 - HDL / Verilog export from the IR
 - Faster truth tables for wider buses and symbolic input grouping
 - Clocked test sequences and multi-cycle traces
@@ -183,6 +186,7 @@ request.
 
 ## Documentation
 
+- [Fundamentals and package plan](FUNDAMENTALS.md)
 - [Language reference](docs/LANGUAGE.md)
 - [Architecture and pipeline](docs/ARCHITECTURE.md)
 - [Portable IR](docs/IR.md)

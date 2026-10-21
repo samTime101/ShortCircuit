@@ -404,6 +404,61 @@
   margin-top: 16px;
 }
 
+.docs-defaults {
+  margin-top: 18px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+
+.docs-defaults > p {
+  max-width: 68ch;
+  margin: 6px 0 0;
+  color: var(--text-dim);
+  font-size: var(--fs-base);
+}
+
+.docs-default-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+  margin-top: 14px;
+}
+
+.docs-default-group h5 {
+  margin: 0 0 7px;
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.docs-default-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.docs-default-items a {
+  display: inline-flex;
+  padding: 2px 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  background: var(--panel-2);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  text-decoration: none;
+}
+
+.docs-default-items a:hover {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
 .docs-op-tip {
   display: block;
   margin-top: 3px;
