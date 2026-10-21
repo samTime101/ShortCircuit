@@ -1,3 +1,3 @@
 [submodule "vendor/ShortCircuit-Packages"]
 	path = vendor/ShortCircuit-Packages
-	url = git@github.com:samTime101/ShortCircuit-Packages.git
+	url = https://github.com/samTime101/ShortCircuit-Packages.git
