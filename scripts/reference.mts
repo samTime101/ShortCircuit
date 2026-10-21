@@ -38,10 +38,7 @@ export interface PackageReference {
 
 const CATEGORY_TITLES: Record<string, string> = {
   gate: "Logic gates",
-  arithmetic: "Arithmetic",
-  compare: "Comparison",
   bus: "Bus operations",
-  selection: "Selection",
 };
 
 function argumentList(args: BuiltinArgument[]): string {
@@ -65,7 +62,7 @@ export function operationReferenceMarkdown(packages: PackageReference): string {
   lines.push("");
 
   if (packages.macros.length > 0) {
-    lines.push("### Package gates");
+    lines.push("### Package macros");
     lines.push("");
     for (const macro of packages.macros) {
       lines.push(`#### \`${macro.signature}\``);

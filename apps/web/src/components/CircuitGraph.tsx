@@ -46,6 +46,7 @@ interface GraphNode {
 
 interface GraphEdge {
   id: string;
+  key: string;
   from: string;
   to: string;
   width: number;
@@ -178,6 +179,7 @@ function buildLayout(
   const all = [...baseNodes.values(), ...outputNodes];
   const dependencies = new Map<string, string[]>();
   const edges: GraphEdge[] = [];
+  let edgeSerial = 0;
   for (const node of baseNodes.values()) {
     const original = byId.get(node.id);
     if (!original) continue;
@@ -186,6 +188,7 @@ function buildLayout(
     for (const dep of deps) {
       edges.push({
         id: `${dep}->${node.id}`,
+        key: `${dep}->${node.id}:${edgeSerial++}`,
         from: dep,
         to: node.id,
         width: baseNodes.get(dep)?.width ?? 1,
@@ -197,6 +200,7 @@ function buildLayout(
       dependencies.set(outputNode.id, [outputNode.sourceId]);
       edges.push({
         id: `${outputNode.sourceId}->${outputNode.id}`,
+        key: `${outputNode.sourceId}->${outputNode.id}:${edgeSerial++}`,
         from: outputNode.sourceId,
         to: outputNode.id,
         width: outputNode.width,
@@ -521,7 +525,7 @@ export function CircuitGraph({ circuit, snapshot }: CircuitGraphProps) {
               const muted = Boolean(activeNode) && !active;
               return (
                 <g
-                  key={edge.id}
+                  key={edge.key}
                   className={`graph-edge ${edgeValue(edge)} ${active ? "is-active" : ""} ${
                     muted ? "is-muted" : ""
                   }`}
@@ -600,7 +604,7 @@ export function CircuitGraph({ circuit, snapshot }: CircuitGraphProps) {
                         : node.kind === "state"
                           ? "STATE"
                           : node.kind === "constant"
-                            ? "CONST"
+                            ? "LITERAL"
                             : "OUTPUT"}
                   </text>
                   <text className="node-value" x={node.w - 11} y={22} textAnchor="end">

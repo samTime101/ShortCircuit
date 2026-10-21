@@ -22,7 +22,6 @@ const TWO_INPUT: Record<string, (bits: number[]) => number> = {
   NAND: (bits) => (bits[0] && bits[1] ? 0 : 1),
   NOR: (bits) => (bits[0] || bits[1] ? 0 : 1),
   XNOR: (bits) => (((bits[0] ?? 0) ^ (bits[1] ?? 0)) & 1) === 0 ? 1 : 0,
-  EQUAL: (bits) => ((bits[0] ?? 0) === (bits[1] ?? 0) ? 1 : 0),
 };
 
 /** The truth table of a gate, or undefined when the operation has no simple table. */

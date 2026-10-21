@@ -10,12 +10,15 @@ const KEYWORDS = new Set([
   "ON",
   "RISING_EDGE",
   "FALLING_EDGE",
-  "IF",
-  "ELSE",
   "END",
   "TEST",
   "CASE",
   "EXPECT",
+  "IMPORT",
+  "AS",
+  "LOAD",
+  "STEP",
+  "CYCLE",
   "BUS",
 ]);
 
@@ -28,23 +31,18 @@ const FUNCTIONS = new Set([
   "XNOR",
   "NOT",
   "BUFFER",
-  "ADD",
-  "SUBTRACT",
-  "MULTIPLY",
-  "DIVIDE",
-  "EQUAL",
-  "LESS",
-  "GREATER",
-  "COMPARE",
   "MUX",
   "CONCAT",
+  "BROADCAST",
   "SLICE",
-  "SHIFT_LEFT",
-  "SHIFT_RIGHT",
-  "DECODER",
-  "ENCODER",
+  "ZEXT",
+  "SEXT",
+  "REPEAT",
+  "REVERSE",
   "HALF_ADDER",
   "FULL_ADDER",
+  "ADD4",
+  "ADD8",
 ]);
 
 export interface LogicFlowState {
@@ -94,8 +92,8 @@ export const logicflowLanguage = StreamLanguage.define<LogicFlowState>({
       if (stream.match(/^\s*\(/, false)) return "callName";
       return "variableName";
     }
-    if (stream.match(/^(?:==|=|:|,|\.)/)) return "operator";
-    if (stream.match(/^[()[\]{}]/)) return "punctuation";
+    if (stream.match(/^(?:=|:|,|\.)/)) return "operator";
+    if (stream.match(/^[()[\]]/)) return "punctuation";
     stream.next();
     return null;
   },

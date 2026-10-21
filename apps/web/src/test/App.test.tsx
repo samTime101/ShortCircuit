@@ -62,6 +62,31 @@ describe("studio app", () => {
     expect(screen.queryByRole("button", { name: "Toggle a" })).toBeNull();
   });
 
+  it("disables a package from the package manager and recompiles", async () => {
+    store(HALF_ADDER);
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Evaluation graph")).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Packages" }));
+    expect(screen.getByRole("dialog", { name: "Installed packages" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("checkbox", { name: "@shortcircuit/gates" }));
+    await waitFor(() => {
+      expect(screen.getByText(/Simulation paused/)).toBeInTheDocument();
+    });
+    expect(window.localStorage.getItem("shortcircuit.disabledPackages.v1")).toContain(
+      "@shortcircuit/gates",
+    );
+
+    await userEvent.click(screen.getByRole("checkbox", { name: "@shortcircuit/gates" }));
+    await waitFor(() => {
+      expect(screen.getByText("Evaluation graph")).toBeInTheDocument();
+    });
+  });
+
   it("opens the documentation page and returns to the studio", async () => {
     store(HALF_ADDER);
     render(<App />);

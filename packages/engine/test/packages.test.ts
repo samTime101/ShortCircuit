@@ -5,6 +5,7 @@ import {
   compile,
   createPackageCatalog,
   parsePackageMacroSource,
+  runPackageTests,
   type PackageBundle,
   type PackageManifest,
 } from "../src/index";
@@ -128,6 +129,23 @@ END`);
     expect(result.diagnostics.some((entry) => entry.code === "E200")).toBe(true);
   });
 
+  it("reserves enabled package circuit names", () => {
+    const result = compile(`CIRCUIT ADD4
+INPUT a
+OUTPUT a
+END`);
+    expect(result.diagnostics.some((entry) => entry.code === "E200")).toBe(true);
+
+    const disabled = compile(
+      `CIRCUIT ADD4
+INPUT a
+OUTPUT a
+END`,
+      { disabledPackages: ["@shortcircuit/arithmetic"] },
+    );
+    expect(disabled.diagnostics.some((entry) => entry.code === "E200")).toBe(false);
+  });
+
   it("does not fall back to gate builtins when packages are disabled", () => {
     const result = compile(
       `CIRCUIT NoPackages
@@ -150,5 +168,123 @@ OUTPUT h.sum
 OUTPUT h.carry
 END`);
     expect(result.circuits.map((entry) => entry.name)).toEqual(["Use"]);
+  });
+
+  it("supports qualified imports for macros and circuits", () => {
+    const result = compile(`IMPORT "@shortcircuit/gates" AS Gates
+IMPORT "@shortcircuit/arithmetic" AS Arith
+
+CIRCUIT Main
+INPUT a
+INPUT b
+OUTPUT y
+
+y = Gates.AND(a, b)
+h = Arith.HALF_ADDER(a, b)
+OUTPUT h.sum
+END`);
+    expect(result.diagnostics.filter((entry) => entry.severity === "error")).toEqual([]);
+    expect(result.circuits[0]?.outputs.map((entry) => entry.name)).toEqual(["y", "h.sum"]);
+    const circuit = result.circuits[0]!;
+    const simulator = new Simulator(circuit).setInputs({ a: "1", b: "1" });
+    expect(simulator.outputs.y?.binary).toBe("1");
+    expect(simulator.outputs["h.sum"]?.binary).toBe("0");
+  });
+
+  it("reports a missing or disabled import", () => {
+    const missing = compile(`IMPORT "@missing/package"
+CIRCUIT Empty
+END`);
+    expect(missing.diagnostics.some((entry) => entry.code === "E602")).toBe(true);
+
+    const disabled = compile(
+      `IMPORT "@shortcircuit/gates"
+CIRCUIT Empty
+END`,
+      { disabledPackages: ["@shortcircuit/gates"] },
+    );
+    expect(disabled.diagnostics.some((entry) => entry.code === "E602")).toBe(true);
+  });
+
+  it("removes disabled package exports from compilation", () => {
+    const result = compile(
+      `CIRCUIT NoGates
+INPUT a
+INPUT b
+y = AND(a, b)
+OUTPUT y
+END`,
+      { disabledPackages: ["@shortcircuit/gates"] },
+    );
+    expect(result.diagnostics.some((entry) => entry.code === "E210")).toBe(true);
+  });
+
+  it("restricts the catalog to enabledPackages", () => {
+    const result = compile(
+      `CIRCUIT NoGates
+INPUT a
+INPUT b
+y = AND(a, b)
+OUTPUT y
+END`,
+      { enabledPackages: ["@shortcircuit/selection"] },
+    );
+    expect(result.diagnostics.some((entry) => entry.code === "E210")).toBe(true);
+
+    const selectionOnly = compile(
+      `CIRCUIT Choose
+INPUT low
+INPUT high
+INPUT select
+y = MUX(low, high, select)
+OUTPUT y
+END`,
+      { enabledPackages: ["@shortcircuit/selection"] },
+    );
+    expect(selectionOnly.diagnostics.some((entry) => entry.code === "E210")).toBe(true);
+  });
+
+  it("expands the package MUX and broadcasts its select bit", () => {
+    const result = compile(`CIRCUIT Choose
+INPUT low : BUS(4)
+INPUT high : BUS(4)
+INPUT select
+y = MUX(low, high, select)
+OUTPUT y
+END`);
+    expect(result.diagnostics.filter((entry) => entry.severity === "error")).toEqual([]);
+    const circuit = result.circuits[0]!;
+    expect(circuit.nodes.some((node) => node.op === "BROADCAST")).toBe(true);
+    expect(circuit.nodes.every((node) => node.kind !== "operation" || node.op === "NAND" || node.op === "BROADCAST")).toBe(true);
+    const simulator = new Simulator(circuit).setInputs({
+      low: "0011",
+      high: "1100",
+      select: "1",
+    });
+    expect(simulator.outputs.y?.binary).toBe("1100");
+  });
+
+  it("runs every package test in the bundled snapshot", () => {
+    const report = runPackageTests();
+    expect(report.files.length).toBeGreaterThan(0);
+    if (!report.ok) {
+      const details = report.files
+        .filter((file) => !file.ok)
+        .map((file) => {
+          const errors = file.diagnostics
+            .filter((entry) => entry.severity === "error")
+            .map((entry) => `${entry.code} ${entry.message}`)
+            .join("; ");
+          const failedCases = file.run?.suites
+            .flatMap((suite) => suite.cases)
+            .filter((testCase) => !testCase.pass)
+            .map((testCase) => testCase.error ?? testCase.label)
+            .join("; ");
+          return `${file.packageName}${file.exportName ? `/${file.exportName}` : ""}: ${errors || failedCases || "unknown failure"}`;
+        })
+        .join("\n");
+      throw new Error(details);
+    }
+    expect(report.passed).toBeGreaterThan(0);
   });
 });

@@ -82,7 +82,7 @@ const TEMPLATES: Record<string, Template> = {
   },
   E200: {
     headline: "That name is taken by the language",
-    detail: "Pick a name that is not a keyword or a built-in operation.",
+    detail: "Pick a name that is not a keyword, a built-in operation, or an enabled package export.",
   },
   E201: {
     headline: "There is no signal with that name",
@@ -196,10 +196,6 @@ const TEMPLATES: Record<string, Template> = {
     headline: "This signal is the wrong size",
     detail: "Slice or widen the signal so it matches the port.",
   },
-  E309: {
-    headline: "Dividing by zero has no answer",
-    detail: "Guard the divisor, or choose a safe value with a MUX when it is zero.",
-  },
   E310: {
     headline: "This signal depends on itself",
     detail: "Use a STATE signal and a clocked block when a circuit needs to remember something.",
@@ -220,41 +216,13 @@ const TEMPLATES: Record<string, Template> = {
     headline: "That would make the value narrower",
     detail: "ZEXT and SEXT only widen a value. Use SLICE(value, 3, 0) to narrow it.",
   },
-  E401: {
-    headline: "That name is not known here",
-    detail: "Compile-time values come from a CONST declaration or a loop variable that is in scope.",
-  },
-  E402: {
-    headline: "This constant is declared twice",
-    detail: "Give every constant a unique name.",
-  },
   E403: {
-    headline: "This has to be a compile-time value",
-    detail: "Use a number, a CONST, or a loop variable. Arithmetic uses + - * / %.",
-  },
-  E404: {
-    headline: "These loops are nested too deeply",
-    detail: "Flatten the loops, or compute the values with a constant.",
-  },
-  E405: {
-    headline: "This loop expands to too much",
-    detail: "Narrow the loop range, or split the design up.",
-  },
-  E406: {
-    headline: "This signal is assigned in a loop without an index",
-    detail: "Write name[i] = ... so every iteration gets its own signal.",
-  },
-  W401: {
-    headline: "This loop has no values to run",
-    detail: "Write the lower bound first, for example FOR i IN 0..7.",
+    headline: "This has to be a whole number",
+    detail: "Widths, indexes, and slice bounds are plain numeric literals.",
   },
   W402: {
     headline: "This number could be read two ways",
     detail: "A number made only of 0 and 1 can be decimal or binary. Use the 0b prefix to be explicit.",
-  },
-  R500: {
-    headline: "Division by zero",
-    detail: "Guard the divisor before dividing.",
   },
 };
 

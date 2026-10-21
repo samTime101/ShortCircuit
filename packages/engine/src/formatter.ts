@@ -9,11 +9,10 @@ const UPPERCASE_KEYWORDS = new Set([
   "TEST",
   "CASE",
   "EXPECT",
-  "IF",
-  "ELSE",
+  "IMPORT",
 ]);
 
-const OPENERS = new Set(["CIRCUIT", "TEST", "CASE", "IF", "ELSE"]);
+const OPENERS = new Set(["CIRCUIT", "TEST", "CASE"]);
 
 type Part = { kind: "code" | "comment"; text: string };
 
@@ -157,7 +156,7 @@ export function formatSource(source: string): string {
 
     const leadMatch = KEYWORD_LINE.exec(codePart.text.trim());
     const firstWord = leadMatch?.[1]?.toUpperCase() ?? "";
-    const isDedent = firstWord === "END" || firstWord === "ELSE";
+    const isDedent = firstWord === "END";
     if (isDedent) depth = Math.max(0, depth - 1);
 
     const leading = parts[0] === codePart;

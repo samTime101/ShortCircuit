@@ -8,13 +8,10 @@ const SOURCE = `CIRCUIT Counter4
 INPUT clock
 INPUT reset
 STATE count : BUS(4) = 0000
-next = ADD(count, 1)
+incremented = ADD4(count, 0, 1)
+next = MUX(incremented.sum, 0, reset)
 ON RISING_EDGE(clock):
-  IF reset:
-    count = 0
-  ELSE:
-    count = next
-  END
+  count = next
 END
 OUTPUT count
 END`;
@@ -141,8 +138,8 @@ describe("simulator dock", () => {
   });
 
   it("shows a runtime error without hiding the controls", () => {
-    setup({ runtimeError: "R500: DIVIDE by zero" });
-    expect(screen.getByText(/DIVIDE by zero/)).toBeInTheDocument();
+    setup({ runtimeError: "R500: simulation stopped" });
+    expect(screen.getByText(/simulation stopped/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /step/i })).toBeInTheDocument();
   });
 });

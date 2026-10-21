@@ -109,22 +109,6 @@ export const LANGUAGE_SNIPPETS: LanguageSnippet[] = [
     preview: "ON FALLING_EDGE(clock):\n  stored = data\nEND",
   },
   {
-    id: "if",
-    title: "Conditional update",
-    category: "sequential",
-    description: "Update state only when a condition holds; otherwise it holds.",
-    template: "IF ${condition}:\n  ${state} = ${value}\nEND",
-    preview: "IF enable:\n  stored = data\nEND",
-  },
-  {
-    id: "if-else",
-    title: "Conditional update with else",
-    category: "sequential",
-    description: "Choose between two next-state values.",
-    template: "IF ${condition}:\n  ${state} = ${when_true}\nELSE:\n  ${state} = ${when_false}\nEND",
-    preview: "IF reset:\n  count = 0\nELSE:\n  count = next\nEND",
-  },
-  {
     id: "test",
     title: "Test suite",
     category: "test",
@@ -142,22 +126,6 @@ export const LANGUAGE_SNIPPETS: LanguageSnippet[] = [
     template:
       "CASE \"${label}\"\n  INPUT ${signal} = 0\n  EXPECT ${output} = 0\nEND",
     preview: "CASE \"1 + 1\"\n  INPUT a = 1\n  EXPECT sum = 0\nEND",
-  },
-  {
-    id: "const",
-    title: "Compile-time constant",
-    category: "pattern",
-    description: "A named whole number that can be used in widths, indexes, and loop bounds.",
-    template: "CONST ${name} = ${value}",
-    preview: "CONST W = 4",
-  },
-  {
-    id: "for",
-    title: "Compile-time loop",
-    category: "pattern",
-    description: "Repeats a block once per value, from the first bound to the last.",
-    template: "FOR ${variable} IN ${from}..${to}\n  ${name}[${variable}] = ${value}\nEND",
-    preview: "FOR i IN 0..7\n  bit[i] = data[i]\nEND",
   },
   {
     id: "half-adder",
@@ -184,9 +152,9 @@ export const LANGUAGE_SNIPPETS: LanguageSnippet[] = [
     category: "pattern",
     description: "An 8-bit register that latches data on a rising edge.",
     template:
-      "CIRCUIT Register8\n  INPUT data : BUS(8)\n  INPUT clock\n  INPUT enable\n\n  STATE stored : BUS(8) = 0\n\n  ON RISING_EDGE(clock):\n    IF enable:\n      stored = data\n    END\n  END\n\n  OUTPUT stored\nEND",
+      "CIRCUIT Register8\n  INPUT data : BUS(8)\n  INPUT clock\n  INPUT enable\n\n  STATE stored : BUS(8) = 0\n\n  next = MUX(stored, data, enable)\n\n  ON RISING_EDGE(clock):\n    stored = next\n  END\n\n  OUTPUT stored\nEND",
     preview:
-      "CIRCUIT Register8\n  INPUT data : BUS(8)\n  INPUT clock\n  INPUT enable\n\n  STATE stored : BUS(8) = 0\n\n  ON RISING_EDGE(clock):\n    IF enable:\n      stored = data\n    END\n  END\n\n  OUTPUT stored\nEND",
+      "CIRCUIT Register8\n  INPUT data : BUS(8)\n  INPUT clock\n  INPUT enable\n\n  STATE stored : BUS(8) = 0\n\n  next = MUX(stored, data, enable)\n\n  ON RISING_EDGE(clock):\n    stored = next\n  END\n\n  OUTPUT stored\nEND",
   },
   {
     id: "counter",
@@ -194,9 +162,9 @@ export const LANGUAGE_SNIPPETS: LanguageSnippet[] = [
     category: "pattern",
     description: "A 4-bit counter with a synchronous reset.",
     template:
-      "CIRCUIT Counter4\n  INPUT clock\n  INPUT reset\n\n  STATE count : BUS(4) = 0000\n\n  next = ADD(count, 1)\n\n  ON RISING_EDGE(clock):\n    IF reset:\n      count = 0\n    ELSE:\n      count = next\n    END\n  END\n\n  OUTPUT count\nEND",
+      "CIRCUIT Counter4\n  INPUT clock\n  INPUT reset\n\n  STATE count : BUS(4) = 0000\n\n  incremented = ADD4(count, 0, 1)\n  next = MUX(incremented.sum, 0, reset)\n\n  ON RISING_EDGE(clock):\n    count = next\n  END\n\n  OUTPUT count\nEND",
     preview:
-      "CIRCUIT Counter4\n  INPUT clock\n  INPUT reset\n\n  STATE count : BUS(4) = 0000\n\n  next = ADD(count, 1)\n\n  ON RISING_EDGE(clock):\n    IF reset:\n      count = 0\n    ELSE:\n      count = next\n    END\n  END\n\n  OUTPUT count\nEND",
+      "CIRCUIT Counter4\n  INPUT clock\n  INPUT reset\n\n  STATE count : BUS(4) = 0000\n\n  incremented = ADD4(count, 0, 1)\n  next = MUX(incremented.sum, 0, reset)\n\n  ON RISING_EDGE(clock):\n    count = next\n  END\n\n  OUTPUT count\nEND",
   },
 ];
 

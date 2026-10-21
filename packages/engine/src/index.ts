@@ -1,10 +1,10 @@
 import { ProgramAnalyzer } from "./analyzer";
-import { expandProgram } from "./expand";
 import { Parser } from "./parser";
 import {
   createPackageCatalog,
   packageCircuitAsts,
   resolvePackageBundle,
+  resolvePackageImports,
 } from "./packages";
 import type { CompileOptions, CompileResult, Diagnostic } from "./types";
 
@@ -38,6 +38,11 @@ export type {
 export type { BitValue } from "./values";
 export { Simulator, SimulationError } from "./simulator";
 export { runTests } from "./testing";
+export { runPackageTests } from "./packageTests";
+export type {
+  PackageTestFileResult,
+  PackageTestReport,
+} from "./packageTests";
 export { generateTruthTable, type TruthTableOptions } from "./truthTable";
 export { formatSource } from "./formatter";
 export {
@@ -59,6 +64,7 @@ export {
   parseMacroExpression,
   parsePackageMacroSource,
   resolvePackageBundle,
+  resolvePackageImports,
 } from "./packages";
 export type {
   PackageBundle,
@@ -70,9 +76,10 @@ export type {
   PackageManifest,
   ParsedPackageMacro,
   ResolvedPackageMacro,
+  ImportResolution,
+  ResolvedPackageImport,
 } from "./packages";
 export { plainFor } from "./plainLanguage";
-export { expandProgram } from "./expand";
 export { GLOSSARY, GLOSSARY_BY_TERM } from "./glossary";
 export type { GlossaryEntry } from "./glossary";
 export { exportVerilog } from "./verilog";
@@ -94,22 +101,23 @@ export function compile(source: string, options: CompileOptions = {}): CompileRe
     const parser = new Parser(source, [], options.maxDiagnostics ?? 100);
     const program = parser.parse();
     const parserDiagnostics = parser.diagnostics;
-    const packageCatalog = createPackageCatalog([resolvePackageBundle(options)]);
+    const bundle = resolvePackageBundle(options);
+    const packageCatalog = createPackageCatalog([bundle]);
+    const importResolution = resolvePackageImports(
+      packageCatalog,
+      program.imports,
+      options,
+    );
     // Package circuits are appended after the user's circuits so the first
     // circuit in the result is still the one the user wrote.
     program.circuits.push(...packageCircuitAsts(packageCatalog));
-    // Constants and loops are resolved before analysis, so every limit applies
-    // to the unrolled design.
-    const expanded = expandProgram(program, {
-      maxLoopDepth: options.maxLoopDepth,
-      maxUnrolledItems: options.maxUnrolledItems,
-    });
     const analyzer = new ProgramAnalyzer(
       source,
-      expanded.program,
+      program,
       options,
-      [...parserDiagnostics, ...expanded.diagnostics],
+      parserDiagnostics,
       packageCatalog,
+      importResolution,
     );
     return analyzer.analyze();
   } catch (error) {

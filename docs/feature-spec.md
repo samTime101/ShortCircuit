@@ -1,6 +1,14 @@
 # Short Circuit: Feature Specification
 
-Proposed features for LogicFlow (`logicflow/0.2`) and the Short Circuit studio. Each entry gives a summary, the expected behaviour, an example, and notes on errors or edge cases. All syntax shown is **proposed**, not yet implemented.
+> **Historical document.** This file records the original feature proposals. The
+> language has since moved in a different direction: `FOR`, `CONST`, circuit and
+> call parameters, `IF`/`ELSE`, infix operators, and generic word-level built-ins
+> were removed. Gates, selection, and fixed-width arithmetic now live in
+> packages. See [FUNDAMENTALS.md](../FUNDAMENTALS.md) for the architecture and
+> [LANGUAGE.md](LANGUAGE.md) for the current language. Sections below that
+> describe those removed proposals are retained only as design history.
+
+Proposed features for LogicFlow (`logicflow/0.2`) and the Short Circuit studio. Each entry gives a summary, the expected behaviour, an example, and notes on errors or edge cases. All syntax shown is **proposed**, not necessarily implemented.
 
 Priority key: **P1** = do first, **P2** = next, **P3** = later.
 

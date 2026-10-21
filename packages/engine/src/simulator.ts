@@ -10,7 +10,6 @@ import {
   maskFor,
   normalize,
   parseSimulationInput,
-  valueAsIndex,
 } from "./values";
 
 export class SimulationError extends Error {
@@ -57,7 +56,6 @@ export class Simulator {
   private clockValues = new Map<string, string>();
   private firedEvents: Array<{ edge: ClockEdge; clock: string; scope: string[] }> = [];
   private initialRuntimeError: SimulationError | null = null;
-  private tolerateDivideByZero = false;
 
   constructor(readonly circuit: CircuitIR) {
     this.nodes = new Map(circuit.nodes.map((node) => [node.id, node]));
@@ -75,14 +73,13 @@ export class Simulator {
       this.stateValues.set(state.node, value);
     }
     this.order = this.topologicalOrder();
-    // Initial inputs are all zero. A DIVIDE by zero must not make the circuit
-    // impossible to open: record it, keep the simulator usable, and let the
-    // host show the error until inputs make the graph evaluable.
-    this.evaluate(true);
+    // Evaluate the all-zero initial state so the simulator is usable before
+    // the host applies test inputs.
+    this.evaluate();
     this.captureClockBaseline();
   }
 
-  /** Divide-by-zero encountered while evaluating the all-zero initial state. */
+  /** Evaluation error captured while constructing the simulator, if any. */
   get runtimeError(): SimulationError | null {
     return this.initialRuntimeError;
   }
@@ -347,44 +344,39 @@ export class Simulator {
     }
   }
 
-  private evaluate(tolerateDivideByZero = false): void {
+  private evaluate(): void {
     const values = new Map<string, bigint>();
-    this.tolerateDivideByZero = tolerateDivideByZero;
-    try {
-      for (const id of this.order) {
-        const node = this.nodes.get(id)!;
-        let value: bigint;
-        switch (node.kind) {
-          case "input":
-            value = normalize(this.inputs.get(node.inputName ?? "") ?? 0n, node.width);
-            break;
-          case "constant":
-            value = normalize(bitsToBigInt(node.value), node.width);
-            break;
-          case "state":
-            value = normalize(this.stateValues.get(node.id) ?? 0n, node.width);
-            break;
-          case "operation": {
-            const operands = node.operands.map((operand) => {
-              const operandValue = values.get(operand);
-              if (operandValue === undefined) {
-                throw new SimulationError(
-                  "R404",
-                  `Node ${node.label} depends on ${operand}, which was not evaluated.`,
-                );
-              }
-              return operandValue;
-            });
-            value = this.evaluateOperation(node, operands);
-            break;
-          }
+    for (const id of this.order) {
+      const node = this.nodes.get(id)!;
+      let value: bigint;
+      switch (node.kind) {
+        case "input":
+          value = normalize(this.inputs.get(node.inputName ?? "") ?? 0n, node.width);
+          break;
+        case "constant":
+          value = normalize(bitsToBigInt(node.value), node.width);
+          break;
+        case "state":
+          value = normalize(this.stateValues.get(node.id) ?? 0n, node.width);
+          break;
+        case "operation": {
+          const operands = node.operands.map((operand) => {
+            const operandValue = values.get(operand);
+            if (operandValue === undefined) {
+              throw new SimulationError(
+                "R404",
+                `Node ${node.label} depends on ${operand}, which was not evaluated.`,
+              );
+            }
+            return operandValue;
+          });
+          value = this.evaluateOperation(node, operands);
+          break;
         }
-        values.set(id, normalize(value, node.width));
       }
-      this.values = values;
-    } finally {
-      this.tolerateDivideByZero = false;
+      values.set(id, normalize(value, node.width));
     }
+    this.values = values;
   }
 
   private evaluateOperation(node: CircuitNode, operands: bigint[]): bigint {
@@ -392,75 +384,10 @@ export class Simulator {
     const mask = maskFor(width);
     const op = node.op ?? "";
     switch (op) {
-      case "AND": {
-        let result = mask;
-        for (const operand of operands) result &= operand;
-        return result;
-      }
-      case "OR": {
-        let result = 0n;
-        for (const operand of operands) result |= operand;
-        return result;
-      }
-      case "XOR": {
-        let result = 0n;
-        for (const operand of operands) result ^= operand;
-        return result;
-      }
       case "NAND": {
         let result = mask;
         for (const operand of operands) result &= operand;
         return (~result) & mask;
-      }
-      case "NOR": {
-        let result = 0n;
-        for (const operand of operands) result |= operand;
-        return (~result) & mask;
-      }
-      case "XNOR": {
-        let result = 0n;
-        for (const operand of operands) result ^= operand;
-        return (~result) & mask;
-      }
-      case "NOT":
-        return (~(operands[0] ?? 0n)) & mask;
-      case "BUFFER":
-        return operands[0] ?? 0n;
-      case "ADD":
-        return ((operands[0] ?? 0n) + (operands[1] ?? 0n)) & mask;
-      case "SUBTRACT":
-        return ((operands[0] ?? 0n) - (operands[1] ?? 0n)) & mask;
-      case "MULTIPLY":
-        return ((operands[0] ?? 0n) * (operands[1] ?? 0n)) & mask;
-      case "DIVIDE": {
-        const divisor = operands[1] ?? 0n;
-        if (divisor === 0n) {
-          const error = new SimulationError(
-            "R500",
-            `DIVIDE by zero in ${node.label}. Guard the divisor before dividing.`,
-          );
-          if (this.tolerateDivideByZero) {
-            this.initialRuntimeError = error;
-            return 0n;
-          }
-          throw error;
-        }
-        return ((operands[0] ?? 0n) / divisor) & mask;
-      }
-      case "EQUAL":
-        return (operands[0] ?? 0n) === (operands[1] ?? 0n) ? 1n : 0n;
-      case "LESS":
-        return (operands[0] ?? 0n) < (operands[1] ?? 0n) ? 1n : 0n;
-      case "GREATER":
-        return (operands[0] ?? 0n) > (operands[1] ?? 0n) ? 1n : 0n;
-      case "COMPARE": {
-        const a = operands[0] ?? 0n;
-        const b = operands[1] ?? 0n;
-        return a === b ? 0n : a < b ? 1n : 2n;
-      }
-      case "MUX": {
-        const select = operands[2] ?? 0n;
-        return select === 0n ? (operands[0] ?? 0n) : (operands[1] ?? 0n);
       }
       case "CONCAT": {
         let result = 0n;
@@ -471,20 +398,13 @@ export class Simulator {
         }
         return result & mask;
       }
+      case "BROADCAST": {
+        return (operands[0] ?? 0n) & 1n ? mask : 0n;
+      }
       case "SLICE": {
         const hi = Number(node.params?.hi ?? 0);
         const lo = Number(node.params?.lo ?? 0);
         return ((operands[0] ?? 0n) >> BigInt(lo)) & maskFor(hi - lo + 1);
-      }
-      case "SHIFT_LEFT": {
-        const amount = BigInt(valueAsIndex(operands[1] ?? 0n));
-        if (amount >= BigInt(width)) return 0n;
-        return ((operands[0] ?? 0n) << amount) & mask;
-      }
-      case "SHIFT_RIGHT": {
-        const amount = BigInt(valueAsIndex(operands[1] ?? 0n));
-        if (amount >= BigInt(width)) return 0n;
-        return (operands[0] ?? 0n) >> amount;
       }
       case "ZEXT": {
         return operands[0] ?? 0n;
@@ -496,32 +416,6 @@ export class Simulator {
         if (signBit === 0n) return value;
         const extension = maskFor(width) ^ maskFor(sourceWidth);
         return (value | extension) & mask;
-      }
-      case "POPCOUNT": {
-        let value = operands[0] ?? 0n;
-        let count = 0n;
-        while (value > 0n) {
-          count += value & 1n;
-          value >>= 1n;
-        }
-        return count;
-      }
-      case "REDUCE_AND": {
-        const sourceWidth = this.operandWidth(node, 0);
-        const value = operands[0] ?? 0n;
-        return value === maskFor(sourceWidth) ? 1n : 0n;
-      }
-      case "REDUCE_OR": {
-        return (operands[0] ?? 0n) !== 0n ? 1n : 0n;
-      }
-      case "REDUCE_XOR": {
-        let value = operands[0] ?? 0n;
-        let parity = 0n;
-        while (value > 0n) {
-          parity ^= value & 1n;
-          value >>= 1n;
-        }
-        return parity;
       }
       case "REPEAT": {
         const sourceWidth = this.operandWidth(node, 0);
@@ -542,16 +436,6 @@ export class Simulator {
           result |= bit << BigInt(sourceWidth - 1 - index);
         }
         return result;
-      }
-      case "DECODER": {
-        const select = valueAsIndex(operands[0] ?? 0n);
-        if (select >= width) return 0n;
-        return 1n << BigInt(select);
-      }
-      case "ENCODER": {
-        const input = operands[0] ?? 0n;
-        if (input === 0n) return 0n;
-        return BigInt(input.toString(2).length - 1);
       }
       default:
         throw new SimulationError("R406", `Unsupported operation "${op}" in node ${node.id}.`);

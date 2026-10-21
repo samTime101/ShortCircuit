@@ -52,10 +52,6 @@ export interface CompileOptions {
   maxWidth?: number;
   /** Stop collecting diagnostics after this many entries. */
   maxDiagnostics?: number;
-  /** Maximum nesting depth of FOR loops. */
-  maxLoopDepth?: number;
-  /** Maximum number of statements a FOR loop may expand to. */
-  maxUnrolledItems?: number;
   /**
    * Additional package manifests to make available to the compiler. The
    * default package snapshot is included unless disabled below.
@@ -63,6 +59,13 @@ export interface CompileOptions {
   packages?: import("./packages").PackageBundle | import("./packages").PackageManifest[];
   /** Set to true for a NAND-only compile with no bundled packages. */
   disableDefaultPackages?: boolean;
+  /**
+   * If provided, only these packages are loaded. Package names are matched
+   * exactly, for example "@shortcircuit/gates".
+   */
+  enabledPackages?: string[];
+  /** Packages to hide even when they are bundled or auto-imported. */
+  disabledPackages?: string[];
 }
 
 export interface CircuitInput {
@@ -98,7 +101,7 @@ export type NodeKind = "input" | "constant" | "state" | "operation";
 export interface CircuitNode {
   id: string;
   kind: NodeKind;
-  /** Primitive operation name for operation nodes, e.g. AND, ADD, MUX. */
+  /** Primitive operation name for operation nodes, e.g. NAND, CONCAT, SLICE. */
   op?: string;
   width: number;
   /** Short display label, usually the assigned signal name. */
@@ -273,8 +276,7 @@ export interface SimulationSnapshot {
   firedEvents: Array<{ edge: ClockEdge; clock: string; scope: string[] }>;
   /**
    * Present when the initial all-zero input state could not be fully
-   * evaluated, currently only for DIVIDE by zero. The simulator remains usable
-   * so the host can supply a safe divisor.
+   * evaluated. The simulator remains usable so the host can correct inputs.
    */
   runtimeError?: { code: string; message: string };
 }

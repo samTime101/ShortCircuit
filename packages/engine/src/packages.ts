@@ -3,6 +3,7 @@ import type {
   AssignmentAst,
   CircuitAst,
   ExpressionAst,
+  ImportAst,
 } from "./ast";
 import { lex, type Token } from "./lexer";
 import { Parser } from "./parser";
@@ -57,6 +58,10 @@ export interface PackageManifest {
   description?: string;
   recommendedAutoImport?: boolean;
   dependencies?: Record<string, string>;
+  /** Package-relative path to package-wide tests. */
+  tests?: string;
+  /** Inlined package-wide test source, present in the bundled snapshot. */
+  testText?: string;
   exports: PackageExport[];
 }
 
@@ -67,6 +72,8 @@ export interface PackageBundle {
 }
 
 export interface ResolvedPackageMacro extends PackageMacroExport {
+  packageName: string;
+  packageVersion: string;
   args: string[];
   minArgs: number;
   maxArgs: number | null;
@@ -509,6 +516,8 @@ export function createPackageCatalog(bundles: PackageBundle[]): PackageCatalog {
             }
             macros.set(key, {
               ...metadata,
+              packageName: manifest.name,
+              packageVersion: manifest.version,
               args,
               minArgs: args.length,
               maxArgs: variadic ? null : args.length,
@@ -556,9 +565,134 @@ export function resolvePackageBundle(options: CompileOptions): PackageBundle {
   if (!options.disableDefaultPackages) bundles.push(DEFAULT_PACKAGE_BUNDLE);
   const custom = normalizeBundle(options.packages);
   if (custom.packages.length > 0) bundles.push(custom);
+
+  const enabled = options.enabledPackages
+    ? new Set(options.enabledPackages)
+    : null;
+  const disabled = new Set(options.disabledPackages ?? []);
+  const packages = bundles
+    .flatMap((bundle) => bundle.packages)
+    .filter((manifest) => {
+      if (disabled.has(manifest.name)) return false;
+      if (enabled && !enabled.has(manifest.name)) return false;
+      return true;
+    });
+
   return {
     schema: "shortcircuit.packages/v1",
-    packages: bundles.flatMap((bundle) => bundle.packages),
+    packages,
+  };
+}
+
+export interface ResolvedPackageImport {
+  packageName: string;
+  alias: string | null;
+  line: number;
+  column: number;
+}
+
+export interface ImportResolution {
+  /** Alias -> package name, for `IMPORT "pkg" AS Alias`. */
+  aliases: Map<string, string>;
+  /** Packages whose exports are available without a qualifier. */
+  unqualifiedPackages: Set<string>;
+  /** Every package explicitly named by an IMPORT. */
+  importedPackages: Set<string>;
+  imports: ResolvedPackageImport[];
+  diagnostics: Diagnostic[];
+}
+
+/**
+ * Resolve the source-level import list against the enabled package catalog.
+ *
+ * Default/recommended packages are auto-imported. An explicit import adds a
+ * package to the unqualified set, or registers an alias for qualified use.
+ */
+export function resolvePackageImports(
+  catalog: PackageCatalog,
+  imports: ImportAst[],
+  options: CompileOptions = {},
+): ImportResolution {
+  const aliases = new Map<string, string>();
+  const customPackages = new Set(
+    normalizeBundle(options.packages).packages.map((manifest) => manifest.name),
+  );
+  const unqualifiedPackages = new Set(
+    catalog.packages
+      .filter(
+        (manifest) =>
+          manifest.recommendedAutoImport !== false &&
+          (manifest.recommendedAutoImport || customPackages.has(manifest.name)),
+      )
+      .map((manifest) => manifest.name),
+  );
+  const importedPackages = new Set<string>();
+  const resolved: ResolvedPackageImport[] = [];
+  const diagnostics: Diagnostic[] = [];
+  const byName = new Map(catalog.packages.map((manifest) => [manifest.name, manifest]));
+  const disabled = new Set(options.disabledPackages ?? []);
+  const enabled = options.enabledPackages ? new Set(options.enabledPackages) : null;
+
+  for (const declaration of imports) {
+    const packageName = declaration.packageName;
+    const manifest = byName.get(packageName);
+    if (!manifest) {
+      const why = disabled.has(packageName)
+        ? "It is disabled in the package toggles."
+        : enabled && !enabled.has(packageName)
+          ? "It is not enabled for this project."
+          : "It is not installed in this project.";
+      diagnostics.push({
+        code: "E602",
+        severity: "error",
+        message: `Cannot import "${packageName}". ${why}`,
+        line: declaration.span.line,
+        column: declaration.span.column,
+        length: declaration.span.length,
+        hint: "Enable the package in the package manager or install it in the project.",
+      });
+      continue;
+    }
+
+    if (
+      !manifest.recommendedAutoImport &&
+      !unqualifiedPackages.has(packageName)
+    ) {
+      // An explicit import is enough to enable a non-default package.
+      if (!declaration.alias) unqualifiedPackages.add(packageName);
+    }
+
+    importedPackages.add(packageName);
+    if (declaration.alias) {
+      const existing = aliases.get(declaration.alias);
+      if (existing && existing !== packageName) {
+        diagnostics.push({
+          code: "E603",
+          severity: "error",
+          message: `Import alias "${declaration.alias}" is already used by ${existing}.`,
+          line: declaration.span.line,
+          column: declaration.span.column,
+          length: declaration.span.length,
+          hint: "Choose a unique alias, for example IMPORT \"@scope/package\" AS Package.",
+        });
+        continue;
+      }
+      aliases.set(declaration.alias, packageName);
+    }
+    resolved.push({
+      packageName,
+      alias: declaration.alias,
+      line: declaration.span.line,
+      column: declaration.span.column,
+    });
+  }
+
+  return {
+    aliases,
+    unqualifiedPackages,
+    importedPackages,
+    imports: resolved,
+    diagnostics,
   };
 }
 
@@ -570,7 +704,11 @@ export function findPackageMacro(
 }
 
 export function packageCircuitAsts(catalog: PackageCatalog): CircuitAst[] {
-  return catalog.circuits.map((entry) => entry.ast);
+  return catalog.circuits.map((entry) => ({
+    ...entry.ast,
+    packageName: entry.packageName,
+    packageVersion: entry.packageVersion,
+  }));
 }
 
 

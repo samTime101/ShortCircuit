@@ -118,7 +118,10 @@ function buildContext(circuit: CircuitIR, warnings: string[]): ModuleContext {
       continue;
     }
     if (node.kind === "constant") {
+      const base = node.scope.length ? `${node.scope.join("_")}_${node.label}` : node.label;
+      const name = reserve(sanitize(base));
       constants.set(node.id, node.value ?? "0");
+      wires.set(node.id, name);
       continue;
     }
     // An operation that drives an output is assigned straight to the port.
@@ -231,71 +234,16 @@ function expressionFor(node: CircuitNode, context: ModuleContext): string {
   const op = node.op ?? "";
 
   switch (op) {
-    case "AND":
-      return operands.join(" & ");
-    case "OR":
-      return operands.join(" | ");
-    case "XOR":
-      return operands.join(" ^ ");
     case "NAND":
       return `~(${operands.join(" & ")})`;
-    case "NOR":
-      return `~(${operands.join(" | ")})`;
-    case "XNOR":
-      return `~(${operands.join(" ^ ")})`;
-    case "NOT":
-      return `~${operands[0] ?? "1'b0"}`;
-    case "BUFFER":
-      return operands[0] ?? "1'b0";
-    case "ADD":
-      return `(${operands[0] ?? "0"} + ${operands[1] ?? "0"})`;
-    case "SUBTRACT":
-      return `(${operands[0] ?? "0"} - ${operands[1] ?? "0"})`;
-    case "MULTIPLY":
-      return `(${operands[0] ?? "0"} * ${operands[1] ?? "0"})`;
-    case "DIVIDE": {
-      const divisor = operands[1] ?? "0";
-      context.warnings.push(
-        `DIVIDE in ${node.label} has no direct hardware meaning when the divisor is zero; the export guards it with zero.`,
-      );
-      return `((${divisor} != 0) ? (${operands[0] ?? "0"} / ${divisor}) : 0)`;
-    }
-    case "EQUAL":
-      return `(${operands[0] ?? "0"} == ${operands[1] ?? "0"})`;
-    case "LESS":
-      return `(${operands[0] ?? "0"} < ${operands[1] ?? "0"})`;
-    case "GREATER":
-      return `(${operands[0] ?? "0"} > ${operands[1] ?? "0"})`;
-    case "COMPARE":
-      return `((${operands[0] ?? "0"} == ${operands[1] ?? "0"}) ? 2'b00 : ((${operands[0] ?? "0"} < ${operands[1] ?? "0"}) ? 2'b01 : 2'b10))`;
-    case "MUX": {
-      const select = operands[2] ?? "1'b0";
-      return `(${select} ? ${operands[1] ?? "0"} : ${operands[0] ?? "0"})`;
-    }
     case "CONCAT":
       return `{${operands.join(", ")}}`;
+    case "BROADCAST":
+      return `{${node.width}{${operands[0] ?? "1'b0"}}}`;
     case "SLICE": {
       const hi = Number(node.params?.hi ?? 0);
       const lo = Number(node.params?.lo ?? 0);
       return `${operands[0] ?? "0"}[${hi}:${lo}]`;
-    }
-    case "SHIFT_LEFT":
-      return `(${operands[0] ?? "0"} << ${operands[1] ?? "0"})`;
-    case "SHIFT_RIGHT":
-      return `(${operands[0] ?? "0"} >> ${operands[1] ?? "0"})`;
-    case "DECODER": {
-      const width = node.width;
-      const shift = `{{${Math.max(0, width - 1)}{1'b0}}, 1'b1}`;
-      return `(${shift} << ${operands[0] ?? "0"})`;
-    }
-    case "ENCODER": {
-      const source = operands[0] ?? "0";
-      const sourceWidth = Number(node.params?.sourceWidth ?? node.width);
-      let expression = "0";
-      for (let bit = sourceWidth - 1; bit >= 0; bit -= 1) {
-        expression = `(${source}[${bit}] ? ${bit} : ${expression})`;
-      }
-      return expression;
     }
     case "ZEXT": {
       const sourceWidth = Number(node.params?.sourceWidth ?? node.width);
@@ -305,18 +253,6 @@ function expressionFor(node: CircuitNode, context: ModuleContext): string {
       const sourceWidth = Number(node.params?.sourceWidth ?? node.width);
       return `{{${Math.max(0, node.width - sourceWidth)}{${operands[0] ?? "0"}[${Math.max(0, sourceWidth - 1)}]}}, ${operands[0] ?? "0"}}`;
     }
-    case "POPCOUNT": {
-      const sourceWidth = Number(node.params?.sourceWidth ?? node.width);
-      const source = operands[0] ?? "0";
-      const bits = Array.from({ length: sourceWidth }, (_, index) => `${source}[${index}]`);
-      return bits.length > 0 ? `(${bits.join(" + ")})` : "0";
-    }
-    case "REDUCE_AND":
-      return `&${operands[0] ?? "1'b0"}`;
-    case "REDUCE_OR":
-      return `|${operands[0] ?? "1'b0"}`;
-    case "REDUCE_XOR":
-      return `^${operands[0] ?? "1'b0"}`;
     case "REPEAT": {
       const count = Number(node.params?.count ?? 1);
       return `{${count}{${operands[0] ?? "1'b0"}}}`;

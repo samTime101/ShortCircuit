@@ -10,23 +10,20 @@ import { infoCard } from "./infoCard";
 
 const CATEGORY_LABEL: Record<string, string> = {
   gate: "gate",
-  arithmetic: "arithmetic",
-  compare: "comparison",
   bus: "bus",
-  selection: "selection",
 };
 
 const KEYWORD_NOTES: Record<string, string> = {
   CIRCUIT: "Starts a circuit block. Every signal inside is defined exactly once.",
-  END: "Closes a CIRCUIT, TEST, CASE, IF, or ON block.",
+  END: "Closes a CIRCUIT, TEST, CASE, or ON block.",
   INPUT: "Declares an input port. Use : BUS(n) for a bus.",
   OUTPUT: "Exposes a signal, or an instance port such as result.sum.",
   STATE: "Declares stored state. Give it a width and an initial value.",
   ON: "Starts a clocked block: ON RISING_EDGE(clock):",
   RISING_EDGE: "Fires when the clock changes from 0 to 1.",
   FALLING_EDGE: "Fires when the clock changes from 1 to 0.",
-  IF: "Conditional update inside a clocked block. Closes with END.",
-  ELSE: "Optional alternative branch of an IF block.",
+  IMPORT: "Imports a package. Add AS Alias for qualified access.",
+  AS: "Names an imported package for qualified access.",
   TEST: "Starts a test suite for the circuit with the same name.",
   CASE: "One test case with a label, INPUT lines, and EXPECT lines.",
   EXPECT: "Expected output value inside a test case.",

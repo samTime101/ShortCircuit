@@ -7,37 +7,31 @@ export interface SourceSpan {
 
 export interface ProgramAst {
   kind: "Program";
-  /** Compile-time constants declared before the circuits. */
-  constants: ConstDeclAst[];
+  imports: ImportAst[];
   circuits: CircuitAst[];
   tests: TestAst[];
 }
 
-/** A compile-time integer expression. */
-export type ConstExprAst =
-  | { kind: "ConstNumber"; value: number; span: SourceSpan }
-  | { kind: "ConstName"; name: string; span: SourceSpan }
-  | {
-      kind: "ConstBinary";
-      op: "+" | "-" | "*" | "/" | "%";
-      left: ConstExprAst;
-      right: ConstExprAst;
-      span: SourceSpan;
-    }
-  | { kind: "ConstUnary"; op: "-"; operand: ConstExprAst; span: SourceSpan };
+/** A top-level package import. */
+export interface ImportAst {
+  kind: "Import";
+  packageName: string;
+  /** Optional qualifier, as in `IMPORT "@scope/pkg" AS Pkg`. */
+  alias: string | null;
+  span: SourceSpan;
+}
 
-/** A compile-time constant declaration. */
-export interface ConstDeclAst {
-  kind: "Const";
-  name: string;
-  value: ConstExprAst;
+/** A numeric width, bit index, or slice bound. */
+export interface ConstExprAst {
+  kind: "ConstNumber";
+  value: number;
   span: SourceSpan;
 }
 
 /** One segment of a path, optionally indexed as in cell[0].port. */
 export interface PathSegment {
   name: string;
-  /** Compile-time indexes, as in cell[0][1]. */
+  /** Numeric instance indexes, as in cell[0][1]. */
   indexes: ConstExprAst[];
 }
 
@@ -46,17 +40,11 @@ export type Path = PathSegment[];
 export interface CircuitAst {
   kind: "Circuit";
   name: string;
-  /** Compile-time parameters, as in CIRCUIT Register(N = 8). */
-  params: CircuitParamAst[];
+  /** Set when the circuit came from a package. */
+  packageName?: string;
+  packageVersion?: string;
   span: SourceSpan;
   body: CircuitItemAst[];
-}
-
-/** A parameter of a circuit, with its default value. */
-export interface CircuitParamAst {
-  name: string;
-  default: ConstExprAst;
-  span: SourceSpan;
 }
 
 export type CircuitItemAst =
@@ -64,7 +52,6 @@ export type CircuitItemAst =
   | OutputDeclAst
   | StateDeclAst
   | AssignmentAst
-  | ForAst
   | OnBlockAst;
 
 export interface InputDeclAst {
@@ -95,16 +82,6 @@ export interface AssignmentAst {
   span: SourceSpan;
 }
 
-/** A compile-time loop, unrolled before analysis. */
-export interface ForAst {
-  kind: "For";
-  variable: string;
-  from: ConstExprAst;
-  to: ConstExprAst;
-  body: CircuitItemAst[];
-  span: SourceSpan;
-}
-
 export interface OnBlockAst {
   kind: "On";
   edge: "rising" | "falling";
@@ -113,20 +90,12 @@ export interface OnBlockAst {
   span: SourceSpan;
 }
 
-export type SequentialStatementAst = SequentialAssignmentAst | IfAst;
+export type SequentialStatementAst = SequentialAssignmentAst;
 
 export interface SequentialAssignmentAst {
   kind: "SequentialAssignment";
   target: Path;
   value: ExpressionAst;
-  span: SourceSpan;
-}
-
-export interface IfAst {
-  kind: "If";
-  condition: ExpressionAst;
-  thenBody: SequentialStatementAst[];
-  elseBody: SequentialStatementAst[] | null;
   span: SourceSpan;
 }
 
@@ -159,15 +128,6 @@ export interface CallAst {
   kind: "Call";
   name: string;
   args: CallArgumentAst[];
-  /** Parameter values, as in Register<16>(data, clock). */
-  params: CallParamAst[];
-  span: SourceSpan;
-}
-
-/** A parameter value given at an instantiation. */
-export interface CallParamAst {
-  name: string | null;
-  value: ConstExprAst;
   span: SourceSpan;
 }
 

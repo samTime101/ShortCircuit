@@ -6,9 +6,9 @@ import { Simulator } from "@shortcircuit/engine";
 const SOURCE = `CIRCUIT Counter4
 INPUT clock
 STATE count : BUS(4) = 0000
-next = ADD(count, 1)
+incremented = ADD4(count, 0, 1)
 ON RISING_EDGE(clock):
-  count = next
+  count = incremented.sum
 END
 OUTPUT count
 END`;

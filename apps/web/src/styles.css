@@ -2523,6 +2523,78 @@ kbd {
   padding: 16px 18px 18px;
 }
 
+/* ---------------- Package manager ---------------- */
+
+.package-list {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.package-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 12px 13px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  cursor: pointer;
+}
+
+.package-row:hover {
+  border-color: var(--line-strong);
+  background: var(--panel-3);
+}
+
+.package-row input {
+  margin: 3px 0 0;
+  accent-color: var(--accent);
+}
+
+.package-row-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.package-row-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.package-row-title strong {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+}
+
+.package-version {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+}
+
+.package-description {
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+.package-exports {
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+}
+
+.package-note {
+  margin: 13px 0 0;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+}
+
 /* ---------------- Examples modal ---------------- */
 
 .example-grid {

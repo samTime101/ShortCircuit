@@ -32,17 +32,14 @@ const KEYWORDS = new Set([
   "ON",
   "RISING_EDGE",
   "FALLING_EDGE",
-  "IF",
-  "ELSE",
   "TEST",
   "CASE",
   "EXPECT",
+  "IMPORT",
+  "AS",
   "LOAD",
   "STEP",
   "CYCLE",
-  "CONST",
-  "FOR",
-  "IN",
 ]);
 
 const FUNCTIONS = new Set([
@@ -54,35 +51,22 @@ const FUNCTIONS = new Set([
   "XNOR",
   "NOT",
   "BUFFER",
-  "ADD",
-  "SUBTRACT",
-  "MULTIPLY",
-  "DIVIDE",
-  "EQUAL",
-  "LESS",
-  "GREATER",
-  "COMPARE",
   "MUX",
   "CONCAT",
+  "BROADCAST",
   "SLICE",
-  "SHIFT_LEFT",
-  "SHIFT_RIGHT",
-  "DECODER",
-  "ENCODER",
   "ZEXT",
   "SEXT",
-  "POPCOUNT",
-  "REDUCE_AND",
-  "REDUCE_OR",
-  "REDUCE_XOR",
   "REPEAT",
   "REVERSE",
   "HALF_ADDER",
   "FULL_ADDER",
+  "ADD4",
+  "ADD8",
 ]);
 
-const OPERATORS = new Set(["=", "==", ":", ",", ".", "<", ">", "+", "-", "*", "/"]);
-const PUNCTUATION = new Set(["(", ")", "[", "]", "{", "}"]);
+const OPERATORS = new Set(["=", ":", ",", "."]);
+const PUNCTUATION = new Set(["(", ")", "[", "]"]);
 
 /** Splits LogicFlow source into styled tokens. */
 export function highlightLogicFlow(code: string): HighlightToken[] {
@@ -160,12 +144,6 @@ export function highlightLogicFlow(code: string): HighlightToken[] {
     }
 
     if (OPERATORS.has(char)) {
-      const two = code.slice(index, index + 2);
-      if (two === "==") {
-        push(two, "operator");
-        index += 2;
-        continue;
-      }
       push(char, "operator");
       index += 1;
       continue;

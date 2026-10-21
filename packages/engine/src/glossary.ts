@@ -124,10 +124,17 @@ export const GLOSSARY: GlossaryEntry[] = [
     group: "building block",
   },
   {
+    term: "Package",
+    short: "A source-backed collection of gates and circuits.",
+    long:
+      "Packages keep gates, selection, and arithmetic out of the kernel. Their implementation files are ordinary LogicFlow source, and their manifests describe names, ports, tests, and docs.",
+    group: "building block",
+  },
+  {
     term: "Compile-time",
     short: "Something that is decided before the circuit runs.",
     long:
-      "Constants and loops are resolved while compiling. A FOR loop is unrolled into ordinary statements, so the circuit that runs has no loops in it.",
+      "Circuit structure is elaborated while compiling. Package macros expand to NAND and structural wiring, and package circuits are flattened into the graph before simulation begins.",
     group: "behaviour",
   },
 ];

@@ -20,33 +20,31 @@ function combinational(source: string, circuitName?: string) {
   return { result, circuit: circuit! };
 }
 
-const HALF_ADDER = `// A one-bit half adder
+const HALF_ADDER = `// A one-bit half adder made from package gates.
 CIRCUIT HalfAdder
+  INPUT a
+  INPUT b
 
-INPUT a
-INPUT b
+  sum = XOR(a, b)
+  carry = AND(a, b)
 
-sum = XOR(a, b)
-carry = AND(a, b)
-
-OUTPUT sum
-OUTPUT carry
-
+  OUTPUT sum
+  OUTPUT carry
 END
 
 TEST HalfAdder
-CASE "0 + 0"
-  INPUT a = 0
-  INPUT b = 0
-  EXPECT sum = 0
-  EXPECT carry = 0
-END
-CASE "1 + 1"
-  INPUT a = 1
-  INPUT b = 1
-  EXPECT sum = 0
-  EXPECT carry = 1
-END
+  CASE "0 + 0"
+    INPUT a = 0
+    INPUT b = 0
+    EXPECT sum = 0
+    EXPECT carry = 0
+  END
+  CASE "1 + 1"
+    INPUT a = 1
+    INPUT b = 1
+    EXPECT sum = 0
+    EXPECT carry = 1
+  END
 END
 `;
 
@@ -75,7 +73,7 @@ describe("combinational core", () => {
     expect(testResult.failed).toBe(0);
   });
 
-  it("supports variadic gates and nested expressions", () => {
+  it("supports variadic package gates and nested expressions", () => {
     const { circuit } = combinational(`CIRCUIT Gates
 INPUT a
 INPUT b
@@ -153,7 +151,7 @@ END`,
     expect(outputs["result.carry"]?.binary).toBe("1");
   });
 
-  it("elaborates package circuit-shaped components", () => {
+  it("elaborates package circuit-shaped components into the NAND kernel", () => {
     const { circuit } = combinational(`CIRCUIT Intrinsic
 INPUT a
 INPUT b
@@ -163,7 +161,22 @@ OUTPUT full.sum
 OUTPUT full.carry_out
 END`);
     expect(circuit.nodes.some((node) => node.op === "NAND")).toBe(true);
-    expect(circuit.nodes.some((node) => node.op === "XOR")).toBe(false);
+    expect(
+      circuit.nodes.every(
+        (node) =>
+          node.kind !== "operation" ||
+          node.op === "NAND" ||
+          [
+            "CONCAT",
+            "SLICE",
+            "BROADCAST",
+            "ZEXT",
+            "SEXT",
+            "REPEAT",
+            "REVERSE",
+          ].includes(node.op ?? ""),
+      ),
+    ).toBe(true);
     const simulator = new Simulator(circuit);
     const outputs = simulator.setInputs({ a: "1", b: "1", c: "1" }).outputs;
     expect(outputs["full.sum"]?.binary).toBe("1");
@@ -171,146 +184,88 @@ END`);
   });
 });
 
-describe("buses and arithmetic", () => {
+describe("buses, structural wiring, and package selection", () => {
   const ADDER8 = `CIRCUIT Adder8
 INPUT a : BUS(8)
 INPUT b : BUS(8)
-sum = ADD(a, b)
+added = ADD8(a, b, 0)
+sum = added.sum
+carry_out = added.carry_out
 OUTPUT sum
+OUTPUT carry_out
 END
 TEST Adder8
 CASE "small"
   INPUT a = 00000001
   INPUT b = 00000010
   EXPECT sum = 00000011
+  EXPECT carry_out = 0
 END
 CASE "overflow wraps"
   INPUT a = 11111111
   INPUT b = 00000001
   EXPECT sum = 00000000
+  EXPECT carry_out = 1
 END
 END`;
 
-  it("performs documented modular 8-bit addition", () => {
+  it("uses fixed-width package adders", () => {
     const { result, circuit } = combinational(ADDER8);
     expect(circuit.inputs[0]?.width).toBe(8);
     expect(circuit.outputs[0]?.width).toBe(8);
     const simulator = new Simulator(circuit);
     const outputs = simulator.setInputs({ a: "11111111", b: "00000001" }).outputs;
     expect(outputs.sum?.binary).toBe("00000000");
+    expect(outputs.carry_out?.binary).toBe("1");
     expect(runTests(result).ok).toBe(true);
   });
 
-  it("supports slicing, concatenation, shifts, mux and comparisons", () => {
+  it("supports structural wiring and package MUX", () => {
     const { circuit } = combinational(`CIRCUIT BusOps
 INPUT data : BUS(8)
+INPUT small : BUS(4)
 INPUT pick
 upper = data[7:4]
 lower = data[3:0]
 low_bit = data[0]
 joined = CONCAT(upper, lower)
-moved = SHIFT_LEFT(data, 2)
-right = SHIFT_RIGHT(data, 1)
 chosen = MUX(lower, upper, pick)
-is_zero = EQUAL(data, 0)
-is_less = LESS(data, 8)
 slice_fn = SLICE(data, 5, 2)
-decoded = DECODER(data[2:0])
-encoded = ENCODER(data)
+wide = ZEXT(small, 8)
+signed = SEXT(small, 8)
+twice = REPEAT(small, 2)
+flipped = REVERSE(data)
+spread = BROADCAST(pick, data)
 OUTPUT upper
 OUTPUT low_bit
 OUTPUT joined
-OUTPUT moved
-OUTPUT right
 OUTPUT chosen
-OUTPUT is_zero
-OUTPUT is_less
 OUTPUT slice_fn
-OUTPUT decoded
-OUTPUT encoded
+OUTPUT wide
+OUTPUT signed
+OUTPUT twice
+OUTPUT flipped
+OUTPUT spread
 END`);
     const simulator = new Simulator(circuit);
-    let outputs = simulator.setInputs({ data: "10101100", pick: "0" }).outputs;
+    let outputs = simulator.setInputs({
+      data: "10101100",
+      small: "1010",
+      pick: "0",
+    }).outputs;
     expect(outputs.upper?.binary).toBe("1010");
     expect(outputs.low_bit?.binary).toBe("0");
     expect(outputs.joined?.binary).toBe("10101100");
-    expect(outputs.moved?.binary).toBe("10110000");
-    expect(outputs.right?.binary).toBe("01010110");
     expect(outputs.chosen?.binary).toBe("1100");
-    expect(outputs.is_zero?.binary).toBe("0");
-    expect(outputs.is_less?.binary).toBe("0");
     expect(outputs.slice_fn?.binary).toBe("1011");
-    expect(outputs.decoded?.binary).toBe("00010000");
-    expect(outputs.encoded?.binary).toBe("111");
-    outputs = simulator.setInputs({ pick: "1" }).outputs;
-    expect(outputs.chosen?.binary).toBe("1010");
-  });
-
-  it("wraps subtraction and raises on division by zero", () => {
-    const { circuit } = combinational(`CIRCUIT Arithmetic
-INPUT a : BUS(4)
-INPUT b : BUS(4)
-difference = SUBTRACT(a, b)
-quotient = DIVIDE(a, b)
-OUTPUT difference
-OUTPUT quotient
-END`);
-    const simulator = new Simulator(circuit);
-    expect(simulator.runtimeError?.code).toBe("R500");
-    expect(simulator.snapshot().runtimeError?.code).toBe("R500");
-    let snapshot = simulator.setInputs({ a: "0000", b: "0001" });
-    expect(simulator.runtimeError).toBeNull();
-    expect(snapshot.outputs.difference?.binary).toBe("1111");
-    expect(snapshot.outputs.quotient?.binary).toBe("0000");
-    snapshot = simulator.setInputs({ a: "1111", b: "0010" });
-    expect(snapshot.outputs.quotient?.binary).toBe("0111");
-    expect(() => simulator.setInput("b", "0000")).toThrowError(/divide by zero/i);
-    expect(() => simulator.setInput("b", "0000")).toThrowError(
-      expect.objectContaining({ code: "R500" }),
-    );
-  });
-
-  it("rejects division by a constant zero at compile time", () => {
-    const result = compile(`CIRCUIT ZeroDivide
-INPUT a : BUS(4)
-quotient = DIVIDE(a, 0)
-OUTPUT quotient
-END`);
-    expect(result.ok).toBe(false);
-    expect(result.diagnostics.some((entry) => entry.code === "E309")).toBe(true);
-  });
-
-  it("supports the bus helper operations", () => {
-    const { circuit } = combinational(`CIRCUIT Helpers
-INPUT x : BUS(8)
-INPUT small : BUS(4)
-wide = ZEXT(small, 8)
-signed = SEXT(small, 8)
-count = POPCOUNT(x)
-all = REDUCE_AND(x)
-any = REDUCE_OR(x)
-parity = REDUCE_XOR(x)
-twice = REPEAT(small, 2)
-flipped = REVERSE(x)
-OUTPUT wide
-OUTPUT signed
-OUTPUT count
-OUTPUT all
-OUTPUT any
-OUTPUT parity
-OUTPUT twice
-OUTPUT flipped
-END`);
-    const simulator = new Simulator(circuit);
-    const outputs = simulator.setInputs({ x: "00001111", small: "1010" }).outputs;
     expect(outputs.wide?.binary).toBe("00001010");
     expect(outputs.signed?.binary).toBe("11111010");
-    expect(outputs.count?.binary).toBe("0100");
-    expect(outputs.all?.binary).toBe("0");
-    expect(outputs.any?.binary).toBe("1");
-    expect(outputs.parity?.binary).toBe("0");
     expect(outputs.twice?.binary).toBe("10101010");
-    expect(outputs.flipped?.binary).toBe("11110000");
+    expect(outputs.flipped?.binary).toBe("00110101");
+    expect(outputs.spread?.binary).toBe("00000000");
+    outputs = simulator.setInputs({ pick: "1" }).outputs;
+    expect(outputs.chosen?.binary).toBe("1010");
+    expect(outputs.spread?.binary).toBe("11111111");
   });
 
   it("rejects a narrowing extension", () => {
@@ -321,19 +276,6 @@ OUTPUT small
 END`);
     expect(result.ok).toBe(false);
     expect(result.diagnostics.some((entry) => entry.code === "E332")).toBe(true);
-  });
-
-  it("expands multiplication width instead of truncating", () => {
-    const { circuit } = combinational(`CIRCUIT Mul
-INPUT a : BUS(8)
-INPUT b : BUS(8)
-product = MULTIPLY(a, b)
-OUTPUT product
-END`);
-    expect(circuit.outputs[0]?.width).toBe(16);
-    const simulator = new Simulator(circuit);
-    const outputs = simulator.setInputs({ a: "00001111", b: "00010000" }).outputs;
-    expect(outputs.product?.binary).toBe("0000000011110000");
   });
 
   it("generates exhaustive truth tables", () => {
@@ -359,10 +301,9 @@ INPUT data : BUS(8)
 INPUT clock
 INPUT enable
 STATE stored : BUS(8) = 0
+next = MUX(stored, data, enable)
 ON RISING_EDGE(clock):
-  IF enable:
-    stored = data
-  END
+  stored = next
 END
 OUTPUT stored
 END`);
@@ -409,9 +350,9 @@ END`);
     const { circuit } = combinational(`CIRCUIT Counter4
 INPUT clock
 STATE count : BUS(4) = 0000
-next = ADD(count, 1)
+incremented = ADD4(count, 0, 1)
 ON RISING_EDGE(clock):
-  count = next
+  count = incremented.sum
 END
 OUTPUT count
 END`);
@@ -426,18 +367,15 @@ END`);
     expect(simulator.snapshot().outputs.count?.binary).toBe("0000");
   });
 
-  it("runs clocked suites with CYCLE", () => {
+  it("runs clocked suites with CYCLE and MUX reset logic", () => {
     const result = compile(`CIRCUIT Counter4
 INPUT clock
 INPUT reset
 STATE count : BUS(4) = 0000
-next = ADD(count, 1)
+incremented = ADD4(count, 0, 1)
+next = MUX(incremented.sum, 0, reset)
 ON RISING_EDGE(clock):
-  IF reset:
-    count = 0
-  ELSE:
-    count = next
-  END
+  count = next
 END
 OUTPUT count
 END
@@ -472,10 +410,9 @@ INPUT data : BUS(8)
 INPUT clock
 INPUT enable
 STATE stored : BUS(8) = 0
+next = MUX(stored, data, enable)
 ON RISING_EDGE(clock):
-  IF enable:
-    stored = data
-  END
+  stored = next
 END
 OUTPUT stored
 END
@@ -506,9 +443,9 @@ END`);
     const result = compile(`CIRCUIT Shift
 INPUT clock
 STATE q : BUS(4) = 0000
-next = ADD(q, 1)
+incremented = ADD4(q, 0, 1)
 ON RISING_EDGE(clock):
-  q = next
+  q = incremented.sum
 END
 OUTPUT q
 END
@@ -528,9 +465,9 @@ END`);
     const result = compile(`CIRCUIT Shift
 INPUT clock
 STATE q : BUS(4) = 0000
-next = ADD(q, 1)
+incremented = ADD4(q, 0, 1)
 ON RISING_EDGE(clock):
-  q = next
+  q = incremented.sum
 END
 OUTPUT q
 END
@@ -590,8 +527,9 @@ END`);
     const { circuit } = combinational(`CIRCUIT Reg
 INPUT clock
 STATE q : BUS(4) = 0000
+incremented = ADD4(q, 0, 1)
 ON RISING_EDGE(clock):
-  q = ADD(q, 1)
+  q = incremented.sum
 END
 OUTPUT q
 END`);
@@ -639,18 +577,6 @@ END`);
     const diagnostic = result.diagnostics.find((entry) => entry.code === "E301");
     expect(diagnostic?.message).toContain("8 bits");
     expect(diagnostic?.message).toContain("1 bit");
-  });
-
-  it("rejects multiplication wider than the configured maximum", () => {
-    const result = compile(`CIRCUIT WideMultiply
-INPUT a : BUS(2049)
-INPUT b : BUS(2049)
-product = MULTIPLY(a, b)
-OUTPUT product
-END`);
-    expect(result.ok).toBe(false);
-    expect(result.diagnostics.some((entry) => entry.code === "E320")).toBe(true);
-    expect(result.ir).toBeNull();
   });
 
   it("detects combinational feedback", () => {
@@ -722,175 +648,68 @@ END`);
   });
 });
 
-describe("constants and loops", () => {
-  it("unrolls a loop into instances", () => {
+describe("removed language features", () => {
+  it("reports CONST with a migration hint", () => {
     const result = compile(`CONST W = 4
+CIRCUIT Width
+INPUT a : BUS(4)
+OUTPUT a
+END`);
+    expect(result.ok).toBe(false);
+    const diagnostic = result.diagnostics.find((entry) => entry.code === "E100");
+    expect(diagnostic?.message).toContain("CONST");
+    expect(diagnostic?.hint).toContain("numeric literal");
+  });
 
-CIRCUIT Cell
-  INPUT a
-  OUTPUT doubled
-  doubled = AND(a, a)
+  it("reports FOR with a migration hint", () => {
+    const result = compile(`CIRCUIT Loop
+INPUT a
+FOR i IN 0..3
+  x = a
 END
-
-CIRCUIT Grid
-  INPUT data : BUS(W)
-  FOR i IN 0..W-1
-    cell[i] = Cell(data[i])
-  END
-  OUTPUT cell[0].doubled
-  OUTPUT cell[1].doubled
-END`);
-    expect(result.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
-    const grid = result.circuits.find((entry) => entry.name === "Grid")!;
-    expect(grid.outputs.map((output) => output.name)).toEqual(["cell_0.doubled", "cell_1.doubled"]);
-    expect(grid.stats.nodes).toBeGreaterThan(4);
-  });
-
-  it("unrolls a loop into signals and reads them back", () => {
-    const result = compile(`CIRCUIT Bits
-  INPUT data : BUS(4)
-  FOR i IN 0..3
-    bit[i] = data[i]
-  END
-  OUTPUT bit[0]
-  OUTPUT bit[3]
-END`);
-    expect(result.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
-    const circuit = result.circuits[0]!;
-    expect(circuit.outputs.map((output) => output.name)).toEqual(["bit_0", "bit_3"]);
-    const simulator = new Simulator(circuit);
-    const outputs = simulator.setInputs({ data: "1010" }).outputs;
-    expect(outputs.bit_0?.binary).toBe("0");
-    expect(outputs.bit_3?.binary).toBe("1");
-  });
-
-  it("uses constants in widths and expressions", () => {
-    const result = compile(`CONST W = 4
-CONST H = W + 1
-
-CIRCUIT Sized
-  INPUT data : BUS(W * 2)
-  OUTPUT value
-  value = data[H - 1]
-END`);
-    expect(result.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
-    const circuit = result.circuits[0]!;
-    expect(circuit.inputs[0]?.width).toBe(8);
-    const simulator = new Simulator(circuit);
-    const outputs = simulator.setInputs({ data: "00010000" }).outputs;
-    expect(outputs.value?.binary).toBe("1");
-  });
-
-  it("skips a reversed range with a warning", () => {
-    const result = compile(`CIRCUIT Empty
-  INPUT a
-  FOR i IN 3..1
-    x[i] = a
-  END
-  OUTPUT a
-END`);
-    expect(result.diagnostics.some((item) => item.code === "W401")).toBe(true);
-    expect(result.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
-  });
-
-  it("reports an unknown constant", () => {
-    const result = compile(`CIRCUIT Unknown
-  INPUT a : BUS(MISSING)
-  OUTPUT a
+OUTPUT a
 END`);
     expect(result.ok).toBe(false);
-    expect(result.diagnostics.some((item) => item.code === "E401")).toBe(true);
+    const diagnostic = result.diagnostics.find((entry) => entry.code === "E102");
+    expect(diagnostic?.message).toContain("FOR");
   });
 
-  it("requires an index for assignments inside a loop", () => {
-    const result = compile(`CIRCUIT Collide
-  INPUT a
-  FOR i IN 0..3
-    value = a
+  it("reports IF in a clocked block", () => {
+    const result = compile(`CIRCUIT Conditional
+INPUT clock
+INPUT enable
+STATE q = 0
+ON RISING_EDGE(clock):
+  IF enable:
+    q = 1
   END
-  OUTPUT a
+END
+OUTPUT q
 END`);
     expect(result.ok).toBe(false);
-    expect(result.diagnostics.some((item) => item.code === "E406")).toBe(true);
+    const diagnostic = result.diagnostics.find((entry) => entry.code === "E106");
+    expect(diagnostic?.message).toContain("IF");
+    expect(diagnostic?.hint).toContain("MUX");
   });
 
-  it("rejects a loop that is nested too deeply", () => {
-    const result = compile(`CIRCUIT Deep
-  INPUT a
-  FOR i IN 0..1
-    FOR j IN 0..1
-      FOR k IN 0..1
-        FOR l IN 0..1
-          FOR m IN 0..1
-            x[i] = a
-          END
-        END
-      END
-    END
-  END
-  OUTPUT a
-END`, { maxLoopDepth: 2 });
-    expect(result.ok).toBe(false);
-    expect(result.diagnostics.some((item) => item.code === "E404")).toBe(true);
-  });
-});
-
-describe("parameterized circuits", () => {
-  it("elaborates one copy per parameter set", () => {
+  it("reports circuit parameters", () => {
     const result = compile(`CIRCUIT Register(N = 8)
-  INPUT data : BUS(N)
-  INPUT clock
-  STATE q : BUS(N) = 0
-  ON RISING_EDGE(clock):
-    q = data
-  END
-  OUTPUT q
-END
-
-CIRCUIT Main
-  INPUT wide : BUS(16)
-  INPUT clock
-  small = Register(data = wide[7:0], clock = clock)
-  big = Register<16>(data = wide, clock = clock)
-  OUTPUT small.q
-  OUTPUT big.q
-END`);
-    expect(result.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
-    const main = result.circuits.find((entry) => entry.name === "Main")!;
-    const small = result.circuits.find((entry) => entry.name === "Register<N=8>")!;
-    const big = result.circuits.find((entry) => entry.name === "Register<N=16>")!;
-    expect(small).toBeDefined();
-    expect(big).toBeDefined();
-    expect(small.inputs[0]?.width).toBe(8);
-    expect(big.inputs[0]?.width).toBe(16);
-    expect(main.outputs).toHaveLength(2);
-  });
-
-  it("uses the defaults when no value is given", () => {
-    const result = compile(`CIRCUIT Register(N = 4)
-  INPUT data : BUS(N)
-  OUTPUT q
-  q = data
-END`);
-    expect(result.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
-    const circuit = result.circuits[0]!;
-    expect(circuit.inputs[0]?.width).toBe(4);
-  });
-
-  it("reports a parameter that does not exist", () => {
-    const result = compile(`CIRCUIT Register(N = 8)
-  INPUT data : BUS(N)
-  OUTPUT q
-  q = data
-END
-
-CIRCUIT Main
-  INPUT data : BUS(8)
-  r = Register<M = 8>(data = data)
-  OUTPUT r.q
+INPUT data : BUS(8)
+OUTPUT data
 END`);
     expect(result.ok).toBe(false);
-    expect(result.diagnostics.some((item) => item.code === "E408")).toBe(true);
+    expect(result.diagnostics.some((entry) => entry.code === "E121")).toBe(true);
+  });
+
+  it("does not keep word-level operations in the kernel", () => {
+    const result = compile(`CIRCUIT Old
+INPUT a : BUS(4)
+INPUT b : BUS(4)
+sum = ADD(a, b)
+OUTPUT sum
+END`);
+    expect(result.ok).toBe(false);
+    expect(result.diagnostics.some((entry) => entry.code === "E210")).toBe(true);
   });
 });
 
@@ -898,7 +717,7 @@ describe("literal clarity", () => {
   it("warns when a bare number could be read two ways", () => {
     const result = compile(`CIRCUIT Ambiguous
 INPUT a : BUS(4)
-value = ADD(a, 10)
+value = AND(a, 10)
 OUTPUT value
 END`);
     const warning = result.diagnostics.find((entry) => entry.code === "W402");
@@ -926,7 +745,7 @@ END`);
   it("does not warn when both readings agree", () => {
     const result = compile(`CIRCUIT Clear
 INPUT a : BUS(4)
-value = ADD(a, 0010)
+value = AND(a, 0010)
 OUTPUT value
 END`);
     expect(result.diagnostics.some((entry) => entry.code === "W402")).toBe(false);
@@ -952,6 +771,21 @@ END`);
     expect(verilog).toContain("endmodule");
   });
 
+  it("gives each literal constant a unique Verilog localparam", () => {
+    const result = compile(`CIRCUIT Masks
+INPUT a : BUS(4)
+high = AND(a, 0b1100)
+low = AND(a, 0b0011)
+OUTPUT high
+OUTPUT low
+END`);
+    const { verilog } = exportVerilog(result.ir!);
+    expect(verilog).toContain("= 4'b1100;");
+    expect(verilog).toContain("= 4'b0011;");
+    expect(verilog.match(/localparam/g)).toHaveLength(2);
+    expect(verilog).not.toContain("unused");
+  });
+
   it("writes clocked state as an edge block with non-blocking assignments", () => {
     const result = compile(`CIRCUIT Register8
 INPUT data : BUS(8)
@@ -967,18 +801,6 @@ END`);
     expect(verilog).toContain("always @(posedge clock) begin");
     expect(verilog).toContain("stored_reg <= data;");
     expect(verilog).toContain("initial begin");
-  });
-
-  it("guards a division and warns about it", () => {
-    const result = compile(`CIRCUIT Divider
-INPUT a : BUS(8)
-INPUT b : BUS(8)
-q = DIVIDE(a, b)
-OUTPUT q
-END`);
-    const { verilog, warnings } = exportVerilog(result.ir!);
-    expect(verilog).toContain("!= 0");
-    expect(warnings.length).toBeGreaterThan(0);
   });
 
   it("can generate a testbench", () => {
@@ -1003,7 +825,19 @@ END`);
 });
 
 describe("language metadata", () => {
-  it("documents every built-in with a signature, width rule, and tip", () => {
+  it("keeps only structural operations in the kernel", () => {
+    expect(BUILTINS.map((spec) => spec.name).sort()).toEqual(
+      [
+        "BROADCAST",
+        "CONCAT",
+        "NAND",
+        "REPEAT",
+        "REVERSE",
+        "SEXT",
+        "SLICE",
+        "ZEXT",
+      ].sort(),
+    );
     for (const spec of BUILTINS) {
       expect(spec.signature, spec.name).toContain(spec.name);
       expect(spec.widthRule.length, spec.name).toBeGreaterThan(4);
@@ -1011,8 +845,8 @@ describe("language metadata", () => {
     }
   });
 
-  it("keeps the snippet library consistent", () => {
-    expect(LANGUAGE_SNIPPETS.length).toBeGreaterThan(10);
+  it("keeps the snippet library consistent and free of removed syntax", () => {
+    expect(LANGUAGE_SNIPPETS.length).toBeGreaterThan(8);
     const ids = new Set<string>();
     for (const snippet of LANGUAGE_SNIPPETS) {
       expect(ids.has(snippet.id), snippet.id).toBe(false);
@@ -1020,6 +854,8 @@ describe("language metadata", () => {
       expect(snippet.title.length, snippet.id).toBeGreaterThan(2);
       expect(snippet.template.length, snippet.id).toBeGreaterThan(4);
       expect(snippet.preview.length, snippet.id).toBeGreaterThan(4);
+      expect(snippet.template, snippet.id).not.toMatch(/\b(IF|ELSE|FOR|CONST)\b/);
+      expect(snippet.preview, snippet.id).not.toMatch(/\b(IF|ELSE|FOR|CONST)\b/);
       // Placeholders must be closed, or editors would insert broken text.
       const opens = (snippet.template.match(/\$\{/g) ?? []).length;
       const closes = (snippet.template.match(/\}/g) ?? []).length;
@@ -1122,15 +958,6 @@ CASE "a // b"
   INPUT a = 1
   EXPECT a = 1
 END
-END`);
-    expect(result.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
-  });
-
-  it("still divides with a single slash", () => {
-    const result = compile(`CONST half = 8 / 2
-CIRCUIT Quotient
-INPUT a
-OUTPUT a
 END`);
     expect(result.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
   });

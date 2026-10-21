@@ -30,7 +30,7 @@ const KEYWORDS: KeywordSpec[] = [
   {
     name: "END",
     detail: "block",
-    note: "Closes a CIRCUIT, TEST, CASE, IF, or ON block.",
+    note: "Closes a CIRCUIT, TEST, CASE, or ON block.",
     apply: "END",
   },
   {
@@ -70,18 +70,6 @@ const KEYWORDS: KeywordSpec[] = [
     apply: "FALLING_EDGE",
   },
   {
-    name: "IF",
-    detail: "sequential",
-    note: "Conditional update inside a clocked block. Closes with END.",
-    apply: "IF ",
-  },
-  {
-    name: "ELSE",
-    detail: "sequential",
-    note: "Optional alternative branch of an IF block.",
-    apply: "ELSE:",
-  },
-  {
     name: "TEST",
     detail: "block",
     note: "Starts a test suite for a circuit of the same name.",
@@ -106,31 +94,40 @@ const KEYWORDS: KeywordSpec[] = [
     apply: "BUS",
   },
   {
-    name: "CONST",
-    detail: "compile time",
-    note: "Declares a compile-time constant: CONST W = 4",
-    apply: "CONST ",
+    name: "IMPORT",
+    detail: "package",
+    note: "Imports a package: IMPORT \"@scope/package\" AS Alias",
+    apply: "IMPORT ",
   },
   {
-    name: "FOR",
-    detail: "compile time",
-    note: "Repeats a block once per value. FOR i IN 0..7 ... END",
-    apply: "FOR ",
+    name: "AS",
+    detail: "package",
+    note: "Names an imported package for qualified access.",
+    apply: "AS ",
   },
   {
-    name: "IN",
-    detail: "loop",
-    note: "Introduces the range of a FOR loop.",
-    apply: "IN ",
+    name: "LOAD",
+    detail: "test",
+    note: "Loads a state value before a test case runs.",
+    apply: "LOAD ",
+  },
+  {
+    name: "STEP",
+    detail: "test",
+    note: "Groups test input changes so they apply together.",
+    apply: "STEP",
+  },
+  {
+    name: "CYCLE",
+    detail: "test",
+    note: "Ticks a clock a number of times inside a test case.",
+    apply: "CYCLE ",
   },
 ];
 
 const CATEGORY_LABEL: Record<string, string> = {
   gate: "gate",
-  arithmetic: "arithmetic",
-  compare: "comparison",
   bus: "bus",
-  selection: "selection",
 };
 
 function packageMacroCompletions(): Completion[] {
@@ -280,7 +277,7 @@ export function logicFlowCompletions(context: CompletionContext): CompletionResu
   if (/^(INPUT|OUTPUT|STATE|EXPECT)\b/i.test(trimmed)) {
     // After a declaration keyword only existing signals make sense.
     options.push(...signalOptions);
-  } else if (/^(CIRCUIT|TEST|ON|IF|ELSE|CASE)\b/i.test(trimmed)) {
+  } else if (/^(CIRCUIT|TEST|ON|CASE|IMPORT)\b/i.test(trimmed)) {
     options.push(...keywordCompletions(), ...snippetCompletions());
   } else {
     options.push(

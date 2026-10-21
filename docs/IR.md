@@ -223,12 +223,12 @@ State nodes are leaves during combinational evaluation.
 
 Operation nodes consume `operands` in a fixed order and produce one value of
 `width` bits. `params` carries compile-time constants (slice bounds, arity,
-common input width) that the operation needs in addition to its operand
-values.
+repetition count) that the operation needs in addition to its operand values.
 
-Operations are **not** required to be NAND primitives. They are the semantic
-primitives of LogicFlow. Backends that target a smaller gate set must lower
-them explicitly.
+The kernel operation set is intentionally structural. Package macros expand to
+`NAND` and structural operations before the IR is produced, and package
+circuits are flattened into the same graph. A backend therefore never needs to
+implement `AND`, `ADD`, `MUX`, or other package-level operations.
 
 ---
 
@@ -237,56 +237,28 @@ them explicitly.
 Let `w = node.width`, `mask(w) = 2^w - 1`, and `uint(bits)` be the unsigned
 integer represented by an operand's zero-padded binary string.
 
-All results are normalized to `w` bits. All arithmetic is unsigned.
+All results are normalized to `w` bits. All values are unsigned bit vectors.
 
 | `op` | Operands | `params` | Contract |
 | --- | --- | --- | --- |
-| `AND` | ≥ 2 | `arity` | Bitwise AND of all operands |
-| `OR` | ≥ 2 | `arity` | Bitwise OR of all operands |
-| `XOR` | ≥ 2 | `arity` | Bitwise XOR of all operands |
 | `NAND` | ≥ 2 | `arity` | `NOT(AND(...))` at width w |
-| `NOR` | ≥ 2 | `arity` | `NOT(OR(...))` at width w |
-| `XNOR` | ≥ 2 | `arity` | `NOT(XOR(...))` at width w |
-| `NOT` | 1 | `arity: 1` | `(~a) & mask(w)` |
-| `BUFFER` | 1 | `arity: 1` | `a` |
-| `ADD` | 2 | `inputWidth` | `(a + b) & mask(w)`; w = inputWidth |
-| `SUBTRACT` | 2 | `inputWidth` | `(a - b) & mask(w)`; w = inputWidth |
-| `MULTIPLY` | 2 | `inputWidth` | `a * b`; w = 2 × inputWidth, so the full product fits (the mask is a no-op) |
-| `DIVIDE` | 2 | `inputWidth` | `(a / b) & mask(w)` unsigned floor; `b = 0` raises `R500` |
-| `EQUAL` | 2 | `inputWidth` | `1` if `a == b`, else `0`; w = 1 |
-| `LESS` | 2 | `inputWidth` | `1` if `a < b`, else `0`; w = 1 |
-| `GREATER` | 2 | `inputWidth` | `1` if `a > b`, else `0`; w = 1 |
-| `COMPARE` | 2 | `inputWidth` | `0` equal, `1` less, `2` greater; w = 2 |
-| `MUX` | 3: `a`, `b`, `select` | `selectZero: "a"`, `selectOne: "b"` | `select == 0 ? a : b`; select is 1 bit |
 | `CONCAT` | ≥ 1 | `parts` | Operands are joined **most-significant first**; result width is the sum of operand widths |
+| `BROADCAST` | 1: `bit` | — | Repeats the one-bit operand to the node's width; w is the width of the value being broadcast across |
 | `SLICE` | 1 | `hi`, `lo` | `(a >> lo) & mask(hi - lo + 1)`; inclusive bounds; w = hi − lo + 1 |
-| `SHIFT_LEFT` | 2: `value`, `amount` | — | `(value << amount) & mask(w)`; amount ≥ w gives 0; w = value width |
-| `SHIFT_RIGHT` | 2: `value`, `amount` | — | `value >> amount`; amount ≥ w gives 0; w = value width |
-| `DECODER` | 1: `select` | `selectWidth` | One bit set at index `select`; w = 2^selectWidth |
-| `ENCODER` | 1 | `inputWidth` | Index of highest set bit; 0 gives 0; w = max(1, ceil(log2(inputWidth))) |
 | `ZEXT` | 1 | `sourceWidth` | The value, widened to w bits with zeroes; w must not be smaller than the source |
 | `SEXT` | 1 | `sourceWidth` | The value, widened to w bits by repeating the top bit |
-| `POPCOUNT` | 1 | `sourceWidth` | Number of set bits; w = max(1, ceil(log2(sourceWidth + 1))) |
-| `REDUCE_AND` | 1 | `sourceWidth` | 1 when every source bit is 1 |
-| `REDUCE_OR` | 1 | `sourceWidth` | 1 when any source bit is 1 |
-| `REDUCE_XOR` | 1 | `sourceWidth` | Parity of the source bits |
 | `REPEAT` | 1 | `count`, `sourceWidth` | The value repeated `count` times; w = count x source width |
 | `REVERSE` | 1 | `sourceWidth` | The value with its bit order reversed; w = source width |
 
 Notes:
 
-- `MUX` is defined for any 1-bit select. In well-formed IR only 0 or 1
-  occurs, and any value other than 0 selects `b` in the reference
-  implementation.
 - `CONCAT` operand **widths** are read from the operand nodes, not from
   `params`. `params.parts` is only a count for inspection.
 - `SLICE` uses constant bounds from `params`; its operand can be any width.
-- Shift amounts are read as unsigned integers. Amounts wider than 32 bits are
-  rejected at compile time, but the IR schema itself does not impose a width
-  beyond the global limit.
-- `DECODER` and `ENCODER` are included as operations because source-level
-  `DECODER`/`ENCODER` calls are primitive language operations. A backend may
-  lower them to shifts and priority logic.
+- `BROADCAST`'s width is chosen by the context of the call. Package `MUX`
+  uses it to repeat a one-bit select across the selected values.
+- Package macros and package circuits do not appear as operations in the IR.
+  Their internals are expanded before node emission.
 - Unknown `op` values must be rejected (`R406` in the reference simulator),
   never guessed.
 
@@ -625,35 +597,21 @@ design produce the same modules.
 | `clock` event | An `always @(posedge clk)` or `always @(negedge clk)` block |
 | state update | A non-blocking assignment, `<=` |
 
-Bus widths are kept, and arithmetic wraps at the declared width because Verilog
-arithmetic does too. A `DIVIDE` node is emitted with a zero guard and a
-warning, because division by zero has no hardware meaning.
+Bus widths are kept. Package arithmetic is already lowered to structural
+expressions, so the exporter does not need package-specific rules.
 
 ---
 
-## 8. Full JSON example
+## 8. Example IR
 
 Source:
 
 ```logicflow
-CIRCUIT Adder8
-  INPUT a : BUS(8)
-  INPUT b : BUS(8)
-
-  sum = ADD(a, b)
-  is_zero = EQUAL(sum, 0)
-
-  OUTPUT sum
-  OUTPUT is_zero
-END
-
-TEST Adder8
-  CASE "1 + 2"
-    INPUT a = 00000001
-    INPUT b = 00000010
-    EXPECT sum = 00000011
-    EXPECT is_zero = 0
-  END
+CIRCUIT NandDemo
+  INPUT a
+  INPUT b
+  out = NAND(a, b)
+  OUTPUT out
 END
 ```
 
@@ -665,169 +623,78 @@ Compiled IR:
   "language": "logicflow/0.2",
   "circuits": [
     {
-      "name": "Adder8",
+      "name": "NandDemo",
       "line": 1,
       "inputs": [
-        { "name": "a", "width": 8, "line": 2, "column": 1 },
-        { "name": "b", "width": 8, "line": 3, "column": 1 }
+        { "name": "a", "width": 1, "line": 2, "column": 3 },
+        { "name": "b", "width": 1, "line": 3, "column": 3 }
       ],
       "outputs": [
         {
-          "name": "sum",
-          "portName": "sum",
-          "node": "Adder8/op:1",
-          "width": 8,
-          "line": 6,
-          "column": 1
-        },
-        {
-          "name": "is_zero",
-          "portName": "is_zero",
-          "node": "Adder8/op:2",
+          "name": "out",
+          "portName": "out",
+          "node": "NandDemo/op:1",
           "width": 1,
-          "line": 7,
-          "column": 1
+          "line": 5,
+          "column": 3
         }
       ],
       "states": [],
       "nodes": [
         {
-          "id": "Adder8/in:a",
+          "id": "NandDemo/in:a",
           "kind": "input",
-          "width": 8,
+          "width": 1,
           "label": "a",
           "scope": [],
           "operands": [],
           "inputName": "a",
           "line": 2,
-          "column": 1
+          "column": 3
         },
         {
-          "id": "Adder8/in:b",
+          "id": "NandDemo/in:b",
           "kind": "input",
-          "width": 8,
+          "width": 1,
           "label": "b",
           "scope": [],
           "operands": [],
           "inputName": "b",
           "line": 3,
-          "column": 1
+          "column": 3
         },
         {
-          "id": "Adder8/op:1",
+          "id": "NandDemo/op:1",
           "kind": "operation",
-          "op": "ADD",
-          "width": 8,
-          "label": "sum",
+          "op": "NAND",
+          "width": 1,
+          "label": "out",
           "scope": [],
-          "operands": ["Adder8/in:a", "Adder8/in:b"],
-          "params": { "inputWidth": 8 },
+          "operands": ["NandDemo/in:a", "NandDemo/in:b"],
+          "params": { "arity": 2 },
           "line": 4,
-          "column": 7
-        },
-        {
-          "id": "Adder8/const:1",
-          "kind": "constant",
-          "width": 1,
-          "label": "0",
-          "scope": [],
-          "operands": [],
-          "value": "0",
-          "line": 5,
-          "column": 22
-        },
-        {
-          "id": "Adder8/const:2",
-          "kind": "constant",
-          "width": 8,
-          "label": "0",
-          "scope": [],
-          "operands": [],
-          "value": "00000000",
-          "line": 5,
-          "column": 11
-        },
-        {
-          "id": "Adder8/op:2",
-          "kind": "operation",
-          "op": "EQUAL",
-          "width": 1,
-          "label": "is_zero",
-          "scope": [],
-          "operands": ["Adder8/op:1", "Adder8/const:2"],
-          "params": { "inputWidth": 8 },
-          "line": 5,
-          "column": 11
+          "column": 9
         }
       ],
       "events": [],
       "sequential": false,
       "stats": {
-        "nodes": 6,
+        "nodes": 3,
         "states": 0,
         "events": 0,
-        "maxDepth": 2,
-        "maxWidth": 8
+        "maxDepth": 1,
+        "maxWidth": 1
       }
     }
   ],
-  "tests": [
-    {
-      "name": "Adder8",
-      "circuit": "Adder8",
-      "line": 10,
-      "cases": [
-        {
-          "label": "1 + 2",
-          "line": 11,
-          "inputs": [
-            {
-              "name": "a",
-              "width": 8,
-              "value": "00000001",
-              "line": 12,
-              "column": 3
-            },
-            {
-              "name": "b",
-              "width": 8,
-              "value": "00000010",
-              "line": 13,
-              "column": 3
-            }
-          ],
-          "expectations": [
-            {
-              "name": "sum",
-              "actualName": "sum",
-              "width": 8,
-              "value": "00000011",
-              "line": 14,
-              "column": 3
-            },
-            {
-              "name": "is_zero",
-              "actualName": "is_zero",
-              "width": 1,
-              "value": "0",
-              "line": 15,
-              "column": 3
-            }
-          ]
-        }
-      ],
-      "runnable": true
-    }
-  ]
+  "tests": []
 }
 ```
 
-Note the two zero constants. `Adder8/const:1` is the literal `0` as first
-resolved, at its natural width of one bit. `EQUAL` then needs an eight-bit
-operand, so the analyzer creates `Adder8/const:2` at width 8. The original
-one-bit constant remains in `nodes` as an unconsumed leaf; the compiler does
-not prune coercion artifacts. Consumers must follow `operands` from outputs
-rather than assuming every node is live. Widths are explicit throughout.
+Every operand points at a node in the same circuit. Consumers must follow
+`operands` from outputs rather than assuming every node is live. Package
+circuits, macros, and their internal nodes are flattened into this graph, so a
+larger design has more nodes but the same schema.
 
 ---
 
@@ -840,7 +707,8 @@ A minimal independent runtime should:
 3. **Build the node map** and reject duplicate IDs.
 4. **Topologically order** the graph; reject cycles and missing operands.
 5. **Implement every operation** with exact unsigned semantics and masking.
-   Wrap arithmetic only as specified; raise on divide-by-zero.
+   The kernel operations are structural; package arithmetic is already lowered
+   before this step.
 6. **Initialize state** from `CircuitState.init` and capture clock baselines.
 7. **Apply transitions**: evaluate, detect 0→1 / 1→0 clock edges, evaluate
    update expressions against old state, commit simultaneously, detect

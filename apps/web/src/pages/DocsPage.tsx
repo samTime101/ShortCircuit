@@ -8,7 +8,7 @@ import {
   LANGUAGE_VERSION,
   IR_SCHEMA,
 } from "@shortcircuit/engine";
-import { ArrowUpRight, Check, Code, Copy, Cpu, Layers, Table } from "../components/Icons";
+import { ArrowUpRight, Check, Code, Copy, Layers } from "../components/Icons";
 import { highlightLogicFlow } from "../editor/logicFlowHighlight";
 import "./docs.css";
 
@@ -34,8 +34,8 @@ const SECTIONS: SectionDef[] = [
   { id: "operations", label: "Built-in operations", group: "Language" },
   { id: "reference", label: "Function reference", group: "Language" },
   { id: "widths", label: "Width policy", group: "Language" },
-  { id: "constants", label: "Constants and loops", group: "Language" },
-  { id: "parameters", label: "Parameterized circuits", group: "Language" },
+  { id: "packages", label: "Imports and packages", group: "Language" },
+  { id: "libraries", label: "Fixed-width library", group: "Language" },
   { id: "composition", label: "Composition", group: "Language" },
   { id: "clocking", label: "State and clocks", group: "Language" },
   { id: "testing", label: "Tests and truth tables", group: "Language" },
@@ -49,10 +49,7 @@ const SECTIONS: SectionDef[] = [
 
 const CATEGORY_LABEL: Record<string, string> = {
   gate: "gate",
-  arithmetic: "arithmetic",
-  compare: "comparison",
   bus: "bus",
-  selection: "selection",
 };
 
 
@@ -362,7 +359,9 @@ END`}
               <div>
                 <h4>Program structure</h4>
                 <CodeBlock
-                  code={`program      := (circuit | test)*
+                  code={`program      := import* (circuit | test)*
+
+import       := "IMPORT" string ("AS" name)? NEWLINE
 
 circuit      := "CIRCUIT" name NEWLINE
                 circuitItem* "END" NEWLINE
@@ -399,8 +398,9 @@ width        := number | "BUS" "(" number ")"`}
                   </li>
                   <li>
                     <strong>Reserved words</strong> cannot be used as names: CIRCUIT, END, INPUT,
-                    OUTPUT, STATE, ON, RISING_EDGE, FALLING_EDGE, IF, ELSE, TEST, CASE, EXPECT, BUS,
-                    plus every built-in name.
+                    OUTPUT, STATE, ON, RISING_EDGE, FALLING_EDGE, TEST, CASE, EXPECT, LOAD, STEP,
+                    CYCLE, IMPORT, AS, BUS, plus every built-in name. <code>CONST</code>,{" "}
+                    <code>FOR</code>, and <code>IF</code> are rejected with a migration hint.
                   </li>
                 </ul>
               </div>
@@ -433,8 +433,8 @@ OUTPUT a`}
                     Block comments do not nest: the first <code>*/</code> closes them.
                   </li>
                   <li>
-                    <code>/</code> on its own is still division, so write <code>a / b</code> with
-                    spaces if you mean to divide.
+                    <code>#</code> is not a comment marker; the compiler suggests{" "}
+                    <code>//</code> when it sees one.
                   </li>
                 </ul>
               </div>
@@ -601,7 +601,7 @@ STATE armed = 1`}
               <div className="docs-op-group">
                 <h4>
                   <Layers size={14} />
-                  package gates
+                  package macros
                 </h4>
                 <table className="docs-table">
                   <thead>
@@ -629,13 +629,10 @@ STATE armed = 1`}
               </div>
             ) : null}
 
-            {(["gate", "arithmetic", "compare", "bus", "selection"] as const).map((category) => (
+            {(["gate", "bus"] as const).map((category) => (
               <div className="docs-op-group" key={category}>
                 <h4>
                   {category === "gate" ? <Layers size={14} /> : null}
-                  {category === "arithmetic" ? <Code size={14} /> : null}
-                  {category === "compare" ? <Table size={14} /> : null}
-                  {category === "selection" ? <Cpu size={14} /> : null}
                   {CATEGORY_LABEL[category]}
                 </h4>
                 <table className="docs-table">
@@ -873,141 +870,130 @@ STATE armed = 1`}
                   <td>Literal wider than the context</td>
                   <td>Compile error (E305). Literals are fitted, never truncated.</td>
                 </tr>
-                  <tr>
-                  <td>ADD, SUBTRACT</td>
-                  <td>Result width = common input width, wrapping modulo 2^w. Carry and borrow are dropped.</td>
+                <tr>
+                  <td>NAND, package gates, package circuits</td>
+                  <td>Package macros use the common input width. Package circuits declare fixed port widths.</td>
                 </tr>
                 <tr>
-                  <td>MULTIPLY</td>
-                  <td>Result width = 2 x common input width. The full product is kept.</td>
-                </tr>
-                <tr>
-                  <td>Comparisons</td>
-                  <td>1-bit result (2 bits for COMPARE), comparing unsigned values.</td>
-                </tr>
-                <tr>
-                  <td>SLICE and CONCAT</td>
+                  <td>SLICE, CONCAT, BROADCAST</td>
                   <td>Result width follows the bits involved, never more than the width limit.</td>
+                </tr>
+                <tr>
+                  <td>ZEXT, SEXT, REPEAT, REVERSE</td>
+                  <td>Extension and reshaping are explicit; there is no implicit widening or narrowing.</td>
                 </tr>
               </tbody>
             </table>
-            <Note kind="warn">
-              <strong>Division by zero is an error, not a value.</strong> A constant zero divisor is
-              rejected at compile time (E309). A divisor that becomes zero at runtime raises R500 and
-              the studio stops showing outputs until it is fixed.
+            <Note>
+              <strong>No word-level operators in the kernel.</strong> Addition, comparison, shifts,
+              and selection are package circuits or structural wiring. Use <code>ADD4</code>,{" "}
+              <code>ADD8</code>, or <code>MUX</code> instead of an implicit operator.
             </Note>
           </Section>
 
           <Section
-            id="constants"
+            id="packages"
             index="08"
             eyebrow="Language"
-            title="Constants and loops"
-            lead="Name a compile-time value, or repeat a block once per value. Both are resolved before the design is analysed."
+            title="Imports and packages"
+            lead="Gates and reusable circuits are packages, not hard-coded language operators. Recommended packages load automatically; explicit imports control everything else."
           >
             <div className="docs-columns">
               <div>
-                <h4>Constants</h4>
+                <h4>Use the defaults</h4>
                 <CodeBlock
-                  code={`CONST W = 4
-CONST H = W + 1
+                  code={`// @shortcircuit/gates, @shortcircuit/selection,
+// and @shortcircuit/arithmetic load automatically.
+CIRCUIT Blink
+  INPUT a
+  INPUT b
+  INPUT pick
 
-CIRCUIT Sized
-  INPUT data : BUS(W * 2)
-
-  OUTPUT value
-  value = data[H - 1]
+  chosen = MUX(a, b, pick)
+  OUTPUT chosen
 END`}
                 />
                 <ul className="docs-list">
-                  <li>Constants are whole numbers, declared before the circuits.</li>
-                  <li>Compile-time arithmetic supports + - * / %.</li>
-                  <li>They work in widths, bit indexes, slice bounds, and loop bounds.</li>
+                  <li>Default packages are still package-provided and can be toggled off.</li>
+                  <li>
+                    Each package implements its circuits in real <code>.lf</code> source.
+                  </li>
+                  <li>Package internals are compiled with your design but not exported as top-level circuits.</li>
                 </ul>
               </div>
               <div>
-                <h4>Loops</h4>
+                <h4>Import explicitly</h4>
                 <CodeBlock
-                  code={`CIRCUIT Bits
-  INPUT data : BUS(4)
+                  code={`IMPORT "@acme/display" AS display
 
-  FOR i IN 0..3
-    bit[i] = data[i]
-  END
+CIRCUIT Panel
+  INPUT value : BUS(4)
 
-  OUTPUT bit[0]
-  OUTPUT bit[3]
+  segments = display.SEVEN_SEGMENT(value)
+
+  OUTPUT segments.a
+  OUTPUT segments.g
 END`}
                 />
                 <ul className="docs-list">
-                  <li>The range includes both ends.</li>
                   <li>
-                    An assignment in a loop needs an index, such as <code>bit[i]</code>.
+                    <code>AS</code> adds qualified access: <code>display.SEVEN_SEGMENT</code>.
                   </li>
+                  <li>An explicit import without an alias is available unqualified.</li>
                   <li>
-                    Indexed names become plain ones: <code>bit[0]</code> is written{" "}
-                    <code>bit_0</code>.
+                    Use the <strong>Packages</strong> button in the studio header to enable or
+                    disable installed packages. Hosts can pass the same choices through the{" "}
+                    <code>enabledPackages</code> and <code>disabledPackages</code> compile options.
                   </li>
+                  <li>Imports are resolved before analysis, so missing packages fail early.</li>
                 </ul>
               </div>
             </div>
           </Section>
 
           <Section
-            id="parameters"
+            id="libraries"
             index="09"
             eyebrow="Language"
-            title="Parameterized circuits"
-            lead="One definition, many sizes. A parameter is a compile-time whole number that a circuit can use anywhere a constant can."
+            title="Fixed-width library"
+            lead="Arithmetic and selection are package circuits with declared widths. Nothing widens or narrows implicitly."
           >
             <CodeBlock
-              code={`CIRCUIT Register(N = 8)
-  INPUT data : BUS(N)
-  INPUT clock
+              code={`CIRCUIT AddAndSelect
+  INPUT a : BUS(8)
+  INPUT b : BUS(8)
+  INPUT choose_b
 
-  STATE q : BUS(N) = 0
+  added = ADD8(a, b, 0)
+  result = MUX(a, added.sum, choose_b)
 
-  ON RISING_EDGE(clock):
-    q = data
-  END
-
-  OUTPUT q
-END
-
-CIRCUIT Main
-  INPUT wide : BUS(16)
-  INPUT clock
-
-  small = Register(data = wide[7:0], clock = clock)
-  big = Register<16>(data = wide, clock = clock)
-
-  OUTPUT small.q
-  OUTPUT big.q
+  OUTPUT result
+  OUTPUT added.carry_out
 END`}
             />
             <ul className="docs-list">
               <li>
-                Parameters are declared with the circuit and may have a default, such as{" "}
-                <code>CIRCUIT Register(N = 8)</code>.
+                <code>ADD4</code> and <code>ADD8</code> expose <code>sum</code> and{" "}
+                <code>carry_out</code>; chain them for wider math.
               </li>
               <li>
-                A parameter works like a constant inside the circuit: in widths, indexes,
-                and slice bounds.
+                <code>MUX(zero, one, select)</code> is a package circuit built from NAND, OR, and{" "}
+                <code>BROADCAST</code>.
               </li>
               <li>
-                An instance gives values with <code>Name&lt;16&gt;(...)</code> or by
-                name.
+                <code>HALF_ADDER</code> and <code>FULL_ADDER</code> are reusable one-bit building
+                blocks.
               </li>
               <li>
-                Each parameter set becomes its own copy, so two widths can live side by
-                side.
+                There are no generic <code>+</code>, comparison, shift, decoder, or reduction
+                operators. Add a package circuit for the width you need.
               </li>
             </ul>
           </Section>
 
           <Section
             id="composition"
-            index="08"
+            index="10"
             eyebrow="Language"
             title="Composition"
             lead="Circuits are reusable. Instances are named, their outputs are read with dotted paths, and the design is flattened into one graph."
@@ -1068,7 +1054,7 @@ END`}
 
           <Section
             id="clocking"
-            index="09"
+            index="11"
             eyebrow="Language"
             title="State and clocks"
             lead="Sequential logic is explicit. An edge triggers a block, the block computes next-state values, and every update commits together."
@@ -1082,10 +1068,10 @@ END`}
 
   STATE stored : BUS(8) = 0
 
+  next = MUX(stored, data, enable)
+
   ON RISING_EDGE(clock):
-    IF enable:
-      stored = data
-    END
+    stored = next
   END
 
   OUTPUT stored
@@ -1104,14 +1090,15 @@ END`}
               <li>All state updates commit at once, and the graph is evaluated again.</li>
             </ol>
             <Note>
-              A state that is not assigned along a path <strong>holds</strong> its value. That is why
-              the register above keeps <code>stored</code> when <code>enable</code> is 0.
+              State only changes when an edge block assigns it. The register above feeds{" "}
+              <code>stored</code> back through <code>MUX</code>, so <code>enable = 0</code> keeps
+              the old value.
             </Note>
           </Section>
 
           <Section
             id="testing"
-            index="10"
+            index="12"
             eyebrow="Language"
             title="Tests and truth tables"
             lead="Verification lives in the source. The runner uses the same compiled graph the simulator does."
@@ -1225,23 +1212,30 @@ END`}
                 <tr>
                   <td>Widths and clocking</td>
                   <td>
-                    <code>E301</code>–<code>E324</code>
+                    <code>E301</code>–<code>E332</code>
                   </td>
-                  <td>Incompatible widths, arity, feedback, clock conflicts, expansion limits, recursion.</td>
+                  <td>Incompatible widths, arity, feedback, clock conflicts, expansion limits, recursion, extension and slice bounds.</td>
+                </tr>
+                <tr>
+                  <td>Packages</td>
+                  <td>
+                    <code>E601</code>–<code>E603</code>
+                  </td>
+                  <td>Invalid package source, missing or disabled imports, and duplicate aliases.</td>
                 </tr>
                 <tr>
                   <td>Warnings</td>
                   <td>
-                    <code>W301</code>–<code>W303</code>
+                    <code>W301</code>–<code>W402</code>
                   </td>
-                  <td>Constant clock, empty clocked block, repeated state assignment.</td>
+                  <td>Constant clock, empty clocked block, repeated state assignment, ambiguous bare literals.</td>
                 </tr>
                 <tr>
                   <td>Runtime</td>
                   <td>
                     <code>R400</code>–<code>R500</code>
                   </td>
-                  <td>Bad input value, conflicting clock commit, unsupported operation, divide by zero.</td>
+                  <td>Bad input value, conflicting clock commit, unsupported operation, or an unevaluable graph.</td>
                 </tr>
               </tbody>
             </table>

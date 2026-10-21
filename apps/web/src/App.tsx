@@ -1,4 +1,5 @@
 import {
+  DEFAULT_PACKAGE_BUNDLE,
   ENGINE_VERSION,
   IR_SCHEMA,
   LANGUAGE_VERSION,
@@ -69,8 +70,10 @@ import {
   MAX_EDITOR_FONT_SIZE,
   MIN_EDITOR_FONT_SIZE,
   clampEditorFontSize,
+  readDisabledPackages,
   readEditorFontSize,
   readMode,
+  writeDisabledPackages,
   writeEditorFontSize,
   writeMode,
   type StudioMode,
@@ -165,6 +168,8 @@ function Studio({
   const [truthTable, setTruthTable] = useState<TruthTable | null>(null);
   const [testResult, setTestResult] = useState<TestRunResult | null>(null);
   const [examplesOpen, setExamplesOpen] = useState(false);
+  const [packagesOpen, setPackagesOpen] = useState(false);
+  const [disabledPackages, setDisabledPackages] = useState<string[]>(readDisabledPackages);
   const [toast, setToast] = useState<{ id: number; message: string } | null>(null);
   const [editorMaximized, setEditorMaximized] = useState(false);
   const [editorFontSize, setEditorFontSize] = useState(readEditorFontSize);
@@ -245,7 +250,11 @@ function Studio({
   }, []);
 
   const compileNow = useCallback(
-    (nextSource: string, preferredCircuit?: string) => {
+    (
+      nextSource: string,
+      preferredCircuit?: string,
+      disabledPackageOverride?: string[],
+    ) => {
       if (debounceTimer.current !== null) {
         window.clearTimeout(debounceTimer.current);
         debounceTimer.current = null;
@@ -253,11 +262,13 @@ function Studio({
       lastCompiledSource.current = nextSource;
       const sequence = ++compileSeq.current;
       setCompiling(true);
+      const disabled = disabledPackageOverride ?? disabledPackages;
+      const options = disabled.length > 0 ? { disabledPackages: disabled } : undefined;
 
       // The compiler runs in a worker, so a large design never blocks typing.
       // A result that is older than the newest request is dropped.
       void compiler
-        .compile(nextSource)
+        .compile(nextSource, options)
         .then((next) => {
           if (sequence !== compileSeq.current) return;
 
@@ -296,7 +307,20 @@ function Studio({
           setCompiling(false);
         });
     },
-    [activateCircuit, compiler],
+    [activateCircuit, compiler, disabledPackages],
+  );
+
+  const togglePackage = useCallback(
+    (name: string, enabled: boolean) => {
+      const next = enabled
+        ? disabledPackages.filter((entry) => entry !== name)
+        : [...disabledPackages, name];
+      setDisabledPackages(next);
+      writeDisabledPackages(next);
+      notify(enabled ? `${name} enabled` : `${name} disabled`);
+      compileNow(source, activeCircuitRef.current, next);
+    },
+    [compileNow, disabledPackages, notify, source],
   );
 
   // Compile immediately on mount, then debounce edits.
@@ -665,6 +689,14 @@ function Studio({
             <span className="button-label">Examples</span>
           </button>
           <button
+            className="ghost-button"
+            onClick={() => setPackagesOpen(true)}
+            title="Enable or disable installed packages"
+          >
+            <Cpu size={14} />
+            <span className="button-label">Packages</span>
+          </button>
+          <button
             className={`ghost-button ${mode === "beginner" ? "is-active" : ""}`}
             onClick={() => {
               const next: StudioMode = mode === "beginner" ? "advanced" : "beginner";
@@ -1009,6 +1041,50 @@ function Studio({
               </button>
             </div>
           </div>
+        </Modal>
+      ) : null}
+
+      {packagesOpen ? (
+        <Modal
+          eyebrow="Package manager"
+          title="Installed packages"
+          subtitle="Recommended packages load automatically. Switch one off to remove its exports from compilation; existing imports will report a package diagnostic."
+          onClose={() => setPackagesOpen(false)}
+        >
+          <div className="package-list">
+            {DEFAULT_PACKAGE_BUNDLE.packages.map((entry) => {
+              const enabled = !disabledPackages.includes(entry.name);
+              return (
+                <label className="package-row" key={entry.name}>
+                  <input
+                    type="checkbox"
+                    aria-label={entry.name}
+                    checked={enabled}
+                    onChange={(event) => togglePackage(entry.name, event.target.checked)}
+                  />
+                  <span className="package-row-text">
+                    <span className="package-row-title">
+                      <strong>{entry.name}</strong>
+                      <span className="package-version">v{entry.version}</span>
+                    </span>
+                    <span className="package-description">
+                      {entry.description ?? "LogicFlow package"}
+                    </span>
+                    <span className="package-exports">
+                      {entry.exports.length} export{entry.exports.length === 1 ? "" : "s"}
+                      {entry.dependencies && Object.keys(entry.dependencies).length > 0
+                        ? ` · depends on ${Object.keys(entry.dependencies).join(", ")}`
+                        : ""}
+                    </span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+          <p className="package-note">
+            Disabling a package can make the current source fail with a package or unknown-name
+            diagnostic. Re-enable it here, or import a different package explicitly.
+          </p>
         </Modal>
       ) : null}
 

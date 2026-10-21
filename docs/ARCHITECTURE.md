@@ -97,7 +97,8 @@ Design points:
   and parentheses. Calls allow newlines after `(` and between arguments.
 - **Line and column spans** are preserved through elaboration for diagnostics
   and graph inspection.
-- **Nesting guard.** Clocked `IF` blocks are capped at 64 levels (E107).
+- **Nesting guard.** Circuit instantiation depth is capped (E320) and package
+  macros are expanded with their own arity checks.
 
 Parser diagnostics are passed into the analyzer rather than thrown away, so a
 compile result always contains lexical, syntactic, and semantic errors in one
@@ -154,10 +155,11 @@ opaque identities rather than semantic names.
 - constants are re-created at the target width if they fit (E305 otherwise);
 - the operand list is returned with explicitly sized constants.
 
-`coerce` handles instance ports, state updates, MUX selects, and IF conditions.
-It never mutates a signal node's width; width mismatches are diagnostics, not
-implicit casts. `MULTIPLY` doubles the common width and relies on the global
-width check (E320) rather than silently narrowing.
+`coerce` handles instance ports, state updates, and structural operation
+contexts. It never mutates a signal node's width; width mismatches are
+diagnostics, not implicit casts. Package circuits such as `ADD4` and `ADD8`
+declare their port widths, and package macros use the same common-width rule as
+the kernel.
 
 #### Clocked blocks
 
@@ -166,10 +168,9 @@ lowers the block body:
 
 - sequential assignments resolve against the current graph and target only
   state node IDs;
-- `IF`/`ELSE` compiles both branches from a copy of the pending update map,
-  then emits a `MUX(else/hold, then/update, condition)` for every state the
-  branches disagree on;
-- a state untouched by both branches is omitted and therefore holds;
+- each state receives exactly one next-state value per edge; use package `MUX`
+  to choose between a computed value and the old value when a conditional
+  update is needed;
 - events are emitted with ordered `updates` entries.
 
 This lowering is why every next-state expression samples pre-edge state: the
@@ -181,7 +182,7 @@ blocks (W302), and duplicate assignments along one path (W303).
 
 #### Limits and failure
 
-Expansion is bounded by `maxNodes`, `maxDepth`, `maxInstances`, `maxWidth`, and
+Elaboration is bounded by `maxNodes`, `maxDepth`, `maxInstances`, `maxWidth`, and
 `maxDiagnostics`. When a limit is reached, the analyzer reports one E320 (or
 E322) instead of allowing unbounded work, and compilation fails.
 
@@ -189,12 +190,19 @@ If the whole compile throws unexpectedly, `compile()` catches it and returns a
 single `E999` diagnostic with `ok: false` and `ir: null`. It never returns a
 partial IR as if it were valid.
 
-### 2.5 Packages
+### 2.4 Packages
 
 `compile()` resolves the bundled package snapshot plus any host-provided
 packages. Macro exports point at real `.lf` files; `packages.ts` parses their
 `MACRO` declarations, validates the exported name, and registers the resolved
 body/fold. A macro body is never stored in JSON.
+
+`resolvePackageImports` applies source-level `IMPORT` declarations to the
+enabled catalog. Recommended packages are unqualified by default; an explicit
+alias adds qualified access, and an explicit import without an alias adds
+unqualified access. Hosts can remove packages with `disabledPackages` or
+restrict the catalog with `enabledPackages`; missing and duplicate-alias cases
+are `E602` and `E603`.
 
 Package circuits are parsed from their `.lf` sources and registered as internal
 structures. They can be instantiated by user circuits and by other package
@@ -203,7 +211,7 @@ are built. That keeps package internals out of the user's project while still
 elaborating them into the same flat IR.
 
 
-### 2.4 Result contract
+### 2.5 Result contract
 
 `CompileResult` contains:
 
@@ -318,12 +326,10 @@ is performed before any input is applied, and a thrown transition never
 returns a snapshot; hosts must not present the prior snapshot as the result of
 the failed transition.
 
-Construction is a special case. Inputs start at zero, which can make a
-`DIVIDE` node divide by zero before the user has touched anything. The
-constructor evaluates in a tolerant mode: the divide node produces zero,
-`Simulator.runtimeError` (and `snapshot().runtimeError`) records R500, and the
-host opens the circuit without a valid snapshot. Input controls remain usable;
-the first transition that evaluates cleanly clears the initial error.
+Construction evaluates the all-zero input state immediately so the studio can
+display outputs before the user touches anything. A malformed IR throws a
+`SimulationError`; the app catches it, clears the simulator, and shows the
+error instead of presenting stale values.
 
 ---
 
@@ -612,8 +618,8 @@ It should:
 
 - reject unknown schema or language versions;
 - respect node widths and operation contracts;
-- lower `CONCAT`, `SLICE`, `DECODER`, and `ENCODER` explicitly rather than
-  assuming a host has them;
+- lower `NAND`, `CONCAT`, `BROADCAST`, `SLICE`, `ZEXT`, `SEXT`, `REPEAT`,
+  and `REVERSE` explicitly rather than assuming a host has them;
 - preserve clock event edges, update ordering, and atomic-commit semantics;
 - treat `ir === null` as non-executable input.
 

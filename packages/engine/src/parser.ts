@@ -2,15 +2,11 @@ import type {
   AssignmentAst,
   CallArgumentAst,
   CallAst,
-  CallParamAst,
-  CircuitParamAst,
   CircuitAst,
   CircuitItemAst,
-  ConstDeclAst,
   ConstExprAst,
   ExpressionAst,
-  ForAst,
-  IfAst,
+  ImportAst,
   InputDeclAst,
   LiteralAst,
   OnBlockAst,
@@ -45,15 +41,6 @@ function keyword(token: Token, name: string): boolean {
   return token.kind === "identifier" && token.value.toUpperCase() === name;
 }
 
-function mergeSpans(start: SourceSpan, end: SourceSpan): SourceSpan {
-  return {
-    line: start.line,
-    column: start.column,
-    offset: start.offset,
-    length: Math.max(1, end.offset + end.length - start.offset),
-  };
-}
-
 function mergeSpan(start: Token, end: Token): SourceSpan {
   return {
     line: start.line,
@@ -77,7 +64,6 @@ export class Parser {
   private readonly tokens: Token[];
   private readonly bag: DiagnosticBag;
   private index = 0;
-  private ifDepth = 0;
 
   constructor(
     source: string,
@@ -98,41 +84,96 @@ export class Parser {
   parse(): ProgramAst {
     const circuits: CircuitAst[] = [];
     const tests: TestAst[] = [];
-    const constants: ConstDeclAst[] = [];
+    const imports: ImportAst[] = [];
+    let sawBlock = false;
     this.skipNewlines();
 
     while (!this.atEnd()) {
       const token = this.peek();
-      if (keyword(token, "CIRCUIT")) {
+      if (keyword(token, "IMPORT")) {
+        if (sawBlock) {
+          this.error(
+            "E125",
+            "IMPORT must appear before circuits and tests.",
+            token,
+            "Move the import to the top of the file, after any other IMPORT lines.",
+          );
+        }
+        imports.push(this.parseImport());
+      } else if (keyword(token, "CIRCUIT")) {
+        sawBlock = true;
         circuits.push(this.parseCircuit());
       } else if (keyword(token, "TEST")) {
+        sawBlock = true;
         tests.push(this.parseTest());
       } else if (keyword(token, "CONST")) {
-        constants.push(this.parseConstDecl());
+        this.error(
+          "E100",
+          "CONST has been removed from LogicFlow.",
+          token,
+          "Use a numeric literal at the width or index where the value is needed.",
+        );
+        this.recoverToLineEnd();
       } else {
         this.error(
           "E100",
-          `Expected CIRCUIT or TEST, found "${token.raw || "end of file"}".`,
+          `Expected IMPORT, CIRCUIT, or TEST, found "${token.raw || "end of file"}".`,
           token,
-          "Every top-level block starts with CIRCUIT or TEST.",
+          "Every top-level block starts with IMPORT, CIRCUIT, or TEST.",
         );
         this.recoverToTopLevel();
       }
       this.skipNewlines();
     }
 
-    return { kind: "Program", constants, circuits, tests };
+    return { kind: "Program", imports, circuits, tests };
+  }
+
+  private parseImport(): ImportAst {
+    const start = this.expectKeyword("IMPORT");
+    const packageToken = this.peek();
+    if (packageToken.kind !== "string") {
+      this.error(
+        "E124",
+        `IMPORT needs a quoted package name, found "${packageToken.raw || "end of file"}".`,
+        packageToken,
+        'Write IMPORT "@scope/package" or IMPORT "@scope/package" AS Alias.',
+      );
+      this.recoverToLineEnd();
+      return {
+        kind: "Import",
+        packageName: "",
+        alias: null,
+        span: mergeSpan(start, this.previous()),
+      };
+    }
+    this.advance();
+    let alias: string | null = null;
+    if (keyword(this.peek(), "AS")) {
+      this.advance();
+      alias = this.expectIdentifier("an import alias").value;
+    }
+    this.finishStatement();
+    return {
+      kind: "Import",
+      packageName: packageToken.value,
+      alias,
+      span: mergeSpan(start, this.previous()),
+    };
   }
 
   private parseCircuit(): CircuitAst {
     const start = this.expectKeyword("CIRCUIT");
     const name = this.expectIdentifier("a circuit name");
-    const rawParams = this.parseParamList("(");
-    const params: CircuitParamAst[] = rawParams.map((param) => ({
-      name: param.name ?? "",
-      default: param.value,
-      span: param.span,
-    }));
+    if (this.checkSymbol("(")) {
+      this.error(
+        "E121",
+        "Circuit parameters have been removed from LogicFlow.",
+        this.peek(),
+        "Use a fixed-width circuit or a package circuit instead.",
+      );
+      this.recoverToLineEnd();
+    }
     this.finishStatement();
     const body: CircuitItemAst[] = [];
     let closed = false;
@@ -172,7 +213,6 @@ export class Parser {
     return {
       kind: "Circuit",
       name: name.value,
-      params,
       span: mergeSpan(start, this.previous()),
       body,
     };
@@ -184,12 +224,24 @@ export class Parser {
     if (keyword(token, "OUTPUT")) return this.parseOutputDecl();
     if (keyword(token, "STATE")) return this.parseStateDecl();
     if (keyword(token, "ON")) return this.parseOnBlock();
-    if (keyword(token, "FOR")) return this.parseForBlock();
+    if (keyword(token, "FOR")) {
+      this.error(
+        "E102",
+        "FOR has been removed from LogicFlow.",
+        token,
+        "Write the repeated structure explicitly, or use a package circuit.",
+      );
+      this.recoverToLineEnd();
+      return null;
+    }
     if (isIdentifier(token)) {
       if (
         keyword(token, "END") ||
         keyword(token, "IF") ||
         keyword(token, "ELSE") ||
+        keyword(token, "FOR") ||
+        keyword(token, "CONST") ||
+        keyword(token, "IMPORT") ||
         keyword(token, "CASE") ||
         keyword(token, "EXPECT")
       ) {
@@ -207,7 +259,7 @@ export class Parser {
 
     this.error(
       "E103",
-      `Expected INPUT, OUTPUT, STATE, ON, FOR, or an assignment, found "${token.raw || "end of file"}".`,
+      `Expected INPUT, OUTPUT, STATE, ON, or an assignment, found "${token.raw || "end of file"}".`,
       token,
       "A circuit line declares a signal or assigns one with name = expression.",
     );
@@ -317,57 +369,32 @@ export class Parser {
       if (token.kind === "identifier") {
         const upper = token.value.toUpperCase();
         if (terminators.has(upper) || upper === "ELSE") break;
+        if (upper === "IF") {
+          this.error(
+            "E106",
+            "IF has been removed from clocked blocks.",
+            token,
+            "Compute a next-state signal with MUX before the ON block, then assign it unconditionally.",
+          );
+          this.recoverToLineEnd();
+          this.skipNewlines();
+          continue;
+        }
       }
-      if (keyword(token, "IF")) {
-        body.push(this.parseIf());
-      } else if (isIdentifier(token)) {
+      if (isIdentifier(token)) {
         body.push(this.parseSequentialAssignment());
       } else {
         this.error(
           "E106",
-          `Expected IF or a state assignment, found "${token.raw || "end of file"}".`,
+          `Expected a state assignment, found "${token.raw || "end of file"}".`,
           token,
-          "Clocked blocks may contain IF ... END blocks and assignments to STATE signals.",
+          "Clocked blocks may contain assignments to STATE signals.",
         );
         this.recoverToLineEnd();
       }
       this.skipNewlines();
     }
     return body;
-  }
-
-  private parseIf(): IfAst {
-    const start = this.expectKeyword("IF");
-    if (this.ifDepth >= 64) {
-      this.error(
-        "E107",
-        "IF blocks are nested too deeply.",
-        start,
-        "Split the condition into named combinational signals or reduce the nesting.",
-      );
-    }
-    this.ifDepth += 1;
-    const condition = this.parseExpression();
-    this.expectSymbol(":");
-    this.finishStatement();
-    const thenBody = this.parseSequentialBody(new Set(["END", "ELSE"]));
-    let elseBody: SequentialStatementAst[] | null = null;
-    if (keyword(this.peek(), "ELSE")) {
-      this.advance();
-      this.expectSymbol(":");
-      this.finishStatement();
-      elseBody = this.parseSequentialBody(new Set(["END"]));
-    }
-    this.expectKeyword("END");
-    this.finishStatement();
-    this.ifDepth -= 1;
-    return {
-      kind: "If",
-      condition,
-      thenBody,
-      elseBody,
-      span: mergeSpan(start, this.previous()),
-    };
   }
 
   private parseSequentialAssignment(): SequentialStatementAst {
@@ -600,114 +627,8 @@ export class Parser {
     };
   }
 
-  private parseConstDecl(): ConstDeclAst {
-    const start = this.expectKeyword("CONST");
-    const nameToken = this.expectIdentifier("a constant name");
-    this.expectSymbol("=");
-    const value = this.parseConstExpr();
-    this.finishStatement();
-    return {
-      kind: "Const",
-      name: nameToken.value,
-      value,
-      span: mergeSpan(start, this.previous()),
-    };
-  }
-
-  private parseForBlock(): ForAst {
-    const start = this.expectKeyword("FOR");
-    const variable = this.expectIdentifier("a loop variable");
-    if (keyword(this.peek(), "IN")) {
-      this.advance();
-    } else {
-      this.error(
-        "E401",
-        "Expected IN after the loop variable.",
-        this.peek(),
-        "Write FOR i IN 0..7 to loop over eight values.",
-      );
-    }
-    const from = this.parseConstExpr();
-    this.expectSymbol(".");
-    this.expectSymbol(".");
-    const to = this.parseConstExpr();
-    this.finishStatement();
-
-    const body: CircuitItemAst[] = [];
-    let closed = false;
-    this.skipNewlines();
-
-    while (!this.atEnd()) {
-      const token = this.peek();
-      if (keyword(token, "END")) {
-        this.advance();
-        this.finishStatement();
-        closed = true;
-        break;
-      }
-      if (keyword(token, "CIRCUIT") || keyword(token, "TEST")) break;
-      const item = this.parseCircuitItem();
-      if (item) body.push(item);
-      this.skipNewlines();
-    }
-
-    if (!closed) {
-      this.error(
-        "E402",
-        "FOR is missing its END.",
-        start,
-        "Add END to close the loop.",
-      );
-    }
-
-    return {
-      kind: "For",
-      variable: variable.value,
-      from,
-      to,
-      body,
-      span: mergeSpan(start, this.previous()),
-    };
-  }
-
-  /** Parses a compile-time integer expression. */
+  /** Parses a numeric width, bit index, or slice bound. */
   private parseConstExpr(): ConstExprAst {
-    return this.parseConstSum();
-  }
-
-  private parseConstSum(): ConstExprAst {
-    let left = this.parseConstProduct();
-    while (this.checkSymbol("+") || this.checkSymbol("-")) {
-      const op = this.advance().value as "+" | "-";
-      const right = this.parseConstProduct();
-      left = {
-        kind: "ConstBinary",
-        op,
-        left,
-        right,
-        span: mergeSpans(left.span, right.span),
-      };
-    }
-    return left;
-  }
-
-  private parseConstProduct(): ConstExprAst {
-    let left = this.parseConstPrimary();
-    while (this.checkSymbol("*") || this.checkSymbol("/") || this.checkSymbol("%")) {
-      const op = this.advance().value as "*" | "/" | "%";
-      const right = this.parseConstPrimary();
-      left = {
-        kind: "ConstBinary",
-        op,
-        left,
-        right,
-        span: mergeSpans(left.span, right.span),
-      };
-    }
-    return left;
-  }
-
-  private parseConstPrimary(): ConstExprAst {
     const token = this.peek();
     if (token.kind === "number") {
       this.advance();
@@ -717,66 +638,19 @@ export class Parser {
           "E403",
           `"${token.raw}" is not a whole number.`,
           token,
-          "Compile-time values are whole numbers.",
+          "Widths and indexes are whole numbers.",
         );
       }
       return { kind: "ConstNumber", value, span: tokenSpan(token) };
     }
-    if (isIdentifier(token)) {
-      this.advance();
-      return { kind: "ConstName", name: token.value, span: tokenSpan(token) };
-    }
-    if (this.checkSymbol("(")) {
-      this.advance();
-      const inner = this.parseConstExpr();
-      this.expectSymbol(")");
-      return inner;
-    }
-    if (this.checkSymbol("-")) {
-      this.advance();
-      const operand = this.parseConstProduct();
-      return {
-        kind: "ConstUnary",
-        op: "-",
-        operand,
-        span: mergeSpans(tokenSpan(token), operand.span),
-      };
-    }
     this.error(
       "E403",
-      `Expected a compile-time value, found "${token.raw || "end of file"}".`,
+      `Expected a number, found "${token.raw || "end of file"}".`,
       token,
-      "Compile-time expressions use numbers, names, and + - * / %.",
+      "Widths and indexes are plain numeric literals.",
     );
+    if (!this.atEnd() && !this.checkNewline()) this.advance();
     return { kind: "ConstNumber", value: 0, span: tokenSpan(token) };
-  }
-
-  /**
-   * Reads a parameter list, as in (N = 8) for a circuit or <16> for a call.
-   * The same syntax covers positional and named values.
-   */
-  private parseParamList(
-    opening: "(" | "<",
-  ): Array<{ name: string | null; value: ConstExprAst; span: SourceSpan }> {
-    if (!this.checkSymbol(opening)) return [];
-    const closing = opening === "<" ? ">" : ")";
-    this.advance();
-    const params: Array<{ name: string | null; value: ConstExprAst; span: SourceSpan }> = [];
-
-    while (!this.atEnd() && !this.checkSymbol(closing)) {
-      let name: string | null = null;
-      if (isIdentifier(this.peek()) && this.peek(1)?.kind === "symbol" && this.peek(1)?.value === "=") {
-        name = this.advance().value;
-        this.advance();
-      }
-      const value = this.parseConstExpr();
-      params.push({ name, value, span: value.span });
-      if (this.matchSymbol(",")) continue;
-      break;
-    }
-
-    this.expectSymbol(closing);
-    return params;
   }
 
   private parseTestInput(): TestInputAst {
@@ -816,7 +690,7 @@ export class Parser {
       this.expectSymbol(")");
       return width;
     }
-    if (token.kind === "number" || isIdentifier(token) || this.checkSymbol("(")) {
+    if (token.kind === "number") {
       return this.parseConstExpr();
     }
 
@@ -837,7 +711,7 @@ export class Parser {
     if (token.kind === "number") {
       expression = this.parseLiteral();
     } else if (isIdentifier(token)) {
-      if (this.peek(1)?.value === "(" || this.peek(1)?.value === "<") {
+      if (this.callAhead()) {
         expression = this.parseCall();
       } else {
         expression = this.parseReference();
@@ -915,15 +789,29 @@ export class Parser {
     return expression;
   }
 
+  /** True for NAME(...) and Alias.NAME(...). */
+  private callAhead(): boolean {
+    let offset = 0;
+    if (!isIdentifier(this.peek(offset))) return false;
+    offset += 1;
+    while (this.peek(offset).kind === "symbol" && this.peek(offset).value === ".") {
+      offset += 1;
+      if (!isIdentifier(this.peek(offset))) return false;
+      offset += 1;
+    }
+    const next = this.peek(offset);
+    return next.kind === "symbol" && next.value === "(";
+  }
+
   private parseCall(): CallAst {
-    const name = this.advance();
-    const start = name;
-    const rawParams = this.parseParamList("<");
-    const params: CallParamAst[] = rawParams.map((param) => ({
-      name: param.name,
-      value: param.value,
-      span: param.span,
-    }));
+    const start = this.peek();
+    const name = this.expectIdentifier("a component name");
+    let qualifiedName = name.value;
+    while (this.checkSymbol(".")) {
+      this.advance();
+      const segment = this.expectIdentifier("a name after the dot");
+      qualifiedName += `.${segment.value}`;
+    }
     this.expectSymbol("(");
     this.skipNewlines();
     const args: CallArgumentAst[] = [];
@@ -978,9 +866,8 @@ export class Parser {
     this.expectSymbol(")");
     return {
       kind: "Call",
-      name: name.value,
+      name: qualifiedName,
       args,
-      params,
       span: mergeSpan(start, this.previous()),
     };
   }

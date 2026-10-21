@@ -4,7 +4,6 @@ import type {
   CircuitAst,
   ConstExprAst,
   ExpressionAst,
-  IfAst,
   InputDeclAst,
   LiteralAst,
   OnBlockAst,
@@ -19,6 +18,7 @@ import type {
   TestStatementAst,
 } from "./ast";
 import {
+  BUILTINS,
   isReservedName as isCoreReservedName,
   lookupBuiltin,
   type BuiltinSpec,
@@ -26,6 +26,7 @@ import {
 import {
   findPackageMacro,
   macroBodyForArity,
+  type ImportResolution,
   type PackageCatalog,
   type ResolvedPackageMacro,
 } from "./packages";
@@ -82,6 +83,8 @@ interface StateSpec {
 interface CircuitStructure {
   ast: CircuitAst;
   name: string;
+  /** Set when the circuit came from a package. */
+  packageName?: string;
   inputs: CircuitInput[];
   inputWidths: Map<string, number>;
   states: StateSpec[];
@@ -152,10 +155,18 @@ const DEFAULT_OPTIONS: Required<CompileOptions> = {
   maxInstances: 500,
   maxWidth: 4096,
   maxDiagnostics: 100,
-  maxLoopDepth: 4,
-  maxUnrolledItems: 20_000,
   packages: [],
   disableDefaultPackages: false,
+  enabledPackages: [],
+  disabledPackages: [],
+};
+
+const EMPTY_IMPORT_RESOLUTION: ImportResolution = {
+  aliases: new Map(),
+  unqualifiedPackages: new Set(),
+  importedPackages: new Set(),
+  imports: [],
+  diagnostics: [],
 };
 
 function spanLine(span: SourceSpan): number {
@@ -220,12 +231,14 @@ export class ProgramAnalyzer {
       circuits: [],
       diagnostics: [],
     },
+    private readonly importResolution: ImportResolution = EMPTY_IMPORT_RESOLUTION,
   ) {
     this.options = { ...DEFAULT_OPTIONS, ...options };
     this.bag = new DiagnosticBag(this.options.maxDiagnostics);
     this.internalCircuitNames = new Set(packageCatalog.circuits.map((entry) => entry.circuit.name));
     for (const diagnostic of parserDiagnostics) this.bag.add(diagnostic);
     for (const diagnostic of packageCatalog.diagnostics) this.bag.add(diagnostic);
+    for (const diagnostic of importResolution.diagnostics) this.bag.add(diagnostic);
   }
 
   analyze(): CompileResult {
@@ -287,16 +300,16 @@ export class ProgramAnalyzer {
         );
         continue;
       }
-      const structure = this.buildStructure(circuit);
+      const structure = this.buildStructure(circuit, circuit.packageName);
       this.structures.set(structure.name, structure);
       this.structuresInOrder.push(structure);
     }
   }
 
-  private buildStructure(ast: CircuitAst): CircuitStructure {
+  private buildStructure(ast: CircuitAst, packageName?: string): CircuitStructure {
     const line = ast.span.line;
     const column = ast.span.column;
-    if (this.isReservedName(ast.name)) {
+    if (this.isReservedName(ast.name, Boolean(packageName))) {
       this.bag.error(
         "E200",
         `"${ast.name}" is reserved and cannot be used as a circuit name.`,
@@ -317,7 +330,7 @@ export class ProgramAnalyzer {
     const ons: OnBlockAst[] = [];
 
     const declare = (decl: SignalDecl): boolean => {
-      if (this.isReservedName(decl.name)) {
+      if (this.isReservedName(decl.name, Boolean(packageName))) {
         this.bag.error(
           "E200",
           `"${decl.name}" is reserved and cannot be used as a signal name.`,
@@ -429,6 +442,7 @@ export class ProgramAnalyzer {
     return {
       ast,
       name: ast.name,
+      packageName,
       inputs,
       inputWidths,
       states,
@@ -492,6 +506,7 @@ export class ProgramAnalyzer {
     const builder = new ScopeBuilder(
       this,
       structure,
+      structure.packageName,
       structure.name,
       [],
       true,
@@ -1100,17 +1115,73 @@ export class ProgramAnalyzer {
     this.bag.warning(code, message, line, column, { hint });
   }
 
-  getStructure(name: string): CircuitStructure | undefined {
-    return this.structures.get(name);
+  getStructure(name: string, requesterPackage?: string): CircuitStructure | undefined {
+    const resolved = this.resolvePackageName(name);
+    if (!resolved) return undefined;
+    const structure = this.structures.get(resolved.exportName);
+    if (!structure) return undefined;
+    if (resolved.packageName) {
+      return structure.packageName === resolved.packageName ? structure : undefined;
+    }
+    if (!structure.packageName) return structure;
+    if (requesterPackage) return structure;
+    return this.importResolution.unqualifiedPackages.has(structure.packageName)
+      ? structure
+      : undefined;
   }
 
-  getPackageMacro(name: string): ResolvedPackageMacro | undefined {
-    return findPackageMacro(this.packageCatalog, name);
+  getPackageMacro(
+    name: string,
+    requesterPackage?: string,
+  ): ResolvedPackageMacro | undefined {
+    const resolved = this.resolvePackageName(name);
+    if (!resolved) return undefined;
+    const macro = findPackageMacro(this.packageCatalog, resolved.exportName);
+    if (!macro) return undefined;
+    if (resolved.packageName) {
+      return macro.packageName === resolved.packageName ? macro : undefined;
+    }
+    if (requesterPackage) return macro;
+    return this.importResolution.unqualifiedPackages.has(macro.packageName)
+      ? macro
+      : undefined;
   }
 
-  /** Keywords, core built-ins, and package macros all own their names. */
-  isReservedName(name: string): boolean {
-    return isCoreReservedName(name) || this.packageCatalog.macros.has(name.toUpperCase());
+  /**
+   * Normalize an optionally qualified name.
+   *
+   * `Pkg.AND` resolves through the import alias table; `AND` is left for the
+   * caller to check against the project's unqualified package set.
+   */
+  private resolvePackageName(
+    name: string,
+  ): { exportName: string; packageName?: string } | null {
+    if (!name.includes(".")) return { exportName: name };
+    const parts = name.split(".");
+    if (parts.length !== 2 || !parts[0] || !parts[1]) return null;
+    const [alias, exportName] = parts;
+    let packageName = this.importResolution.aliases.get(alias);
+    if (!packageName) {
+      for (const [candidate, candidatePackage] of this.importResolution.aliases) {
+        if (candidate.toUpperCase() === alias!.toUpperCase()) {
+          packageName = candidatePackage;
+          break;
+        }
+      }
+    }
+    return packageName ? { exportName, packageName } : null;
+  }
+
+  /**
+   * Keywords, core built-ins, package macros, and package circuits own their
+   * names. Package sources may use their own circuit names for declarations.
+   */
+  isReservedName(name: string, allowPackageNames = false): boolean {
+    return (
+      isCoreReservedName(name) ||
+      this.packageCatalog.macros.has(name.toUpperCase()) ||
+      (!allowPackageNames && this.internalCircuitNames.has(name))
+    );
   }
 
   getPackageMacros(): Iterable<ResolvedPackageMacro> {
@@ -1173,22 +1244,10 @@ export class ProgramAnalyzer {
     }
   }
 
-  /**
-   * Reads a compile-time value. After expansion every constant expression is
-   * already a number, so anything else is a constant that could not be
-   * resolved.
-   */
+  /** Reads a numeric width or index. */
   constNumber(expression: ConstExprAst | null, context: string): number | null {
     if (!expression) return null;
-    if (expression.kind === "ConstNumber") return expression.value;
-    this.bag.error(
-      "E403",
-      `${context} must be a compile-time constant.`,
-      expression.span.line,
-      expression.span.column,
-      { hint: "Use a number, a CONST, or a loop variable." },
-    );
-    return null;
+    return expression.value;
   }
 
   /**
@@ -1269,6 +1328,7 @@ class ScopeBuilder {
   constructor(
     private readonly analyzer: ProgramAnalyzer,
     private readonly structure: CircuitStructure,
+    private readonly packageName: string | undefined,
     private readonly prefix: string,
     private readonly scope: string[],
     private readonly topLevel: boolean,
@@ -1416,7 +1476,7 @@ class ScopeBuilder {
   }
 
   private isBundleCall(name: string): boolean {
-    return Boolean(this.analyzer.getStructure(name));
+    return Boolean(this.analyzer.getStructure(name, this.packageName));
   }
 
   private resolveReference(
@@ -1607,7 +1667,7 @@ class ScopeBuilder {
     preferredLabel?: string,
     macroBindings?: Map<string, ValueRef>,
   ): ValueRef {
-    const packageMacro = this.analyzer.getPackageMacro(call.name);
+    const packageMacro = this.analyzer.getPackageMacro(call.name, this.packageName);
     if (packageMacro) {
       return this.compileMacroCall(call, packageMacro, preferredLabel, macroBindings);
     }
@@ -1676,72 +1736,6 @@ class ScopeBuilder {
           arity: call.args.length,
         });
       }
-      case "MUX": {
-        const width = this.commonWidth(refs.slice(0, 2), argExprs.slice(0, 2), "MUX data inputs", call.span);
-        const selectIsWide = this.isNonConstantWidth(refs[2]!, 1);
-        const select = selectIsWide
-          ? refs[2]!
-          : this.coerce(refs[2]!, 1, argExprs[2]!, "MUX select", call.span);
-        if (selectIsWide) {
-          this.analyzer.error(
-            "E303",
-            `MUX select must be 1 bit, but got ${refs[2]!.width} bits.`,
-            call.span.line,
-            call.span.column,
-            "Use a comparison such as EQUAL(a, b) or one bit of a bus.",
-          );
-        }
-        return this.addOperation(
-          "MUX",
-          width,
-          preferredLabel ?? "MUX",
-          [refs[0]!.node, refs[1]!.node, select.node],
-          call.span,
-          { selectZero: "a", selectOne: "b" },
-        );
-      }
-      case "ADD":
-      case "SUBTRACT":
-      case "MULTIPLY":
-      case "DIVIDE": {
-        const width = this.commonWidth(refs, argExprs, spec.name, call.span);
-        if (spec.name === "DIVIDE") {
-          const divisor = this.analyzer.getNode(refs[1]!.node);
-          if (divisor?.kind === "constant" && BigInt(`0b${divisor.value ?? "0"}`) === 0n) {
-            this.analyzer.error(
-              "E309",
-              "DIVIDE by the constant zero has no defined result.",
-              call.span.line,
-              call.span.column,
-              "Guard the divisor or use MUX to select a safe value when it is zero.",
-            );
-          }
-        }
-        const outputWidth = spec.name === "MULTIPLY" ? width * 2 : width;
-        return this.addOperation(
-          spec.name,
-          outputWidth,
-          preferredLabel ?? spec.name,
-          refs.map((ref) => ref.node),
-          call.span,
-          { inputWidth: width },
-        );
-      }
-      case "EQUAL":
-      case "LESS":
-      case "GREATER":
-      case "COMPARE": {
-        const width = this.commonWidth(refs, argExprs, spec.name, call.span);
-        const outputWidth = spec.name === "COMPARE" ? 2 : 1;
-        return this.addOperation(
-          spec.name,
-          outputWidth,
-          preferredLabel ?? spec.name,
-          refs.map((ref) => ref.node),
-          call.span,
-          { inputWidth: width },
-        );
-      }
       case "CONCAT": {
         const width = refs.reduce((total, ref) => total + ref.width, 0);
         if (width <= 0 || width > this.analyzer.widthLimit) {
@@ -1794,24 +1788,24 @@ class ScopeBuilder {
           { hi: high, lo: low },
         );
       }
-      case "SHIFT_LEFT":
-      case "SHIFT_RIGHT": {
-        const amount = refs[1]!;
-        if (amount.width > 32) {
-          this.analyzer.error(
-            "E303",
-            `${spec.name} shift amount must be at most 32 bits.`,
-            call.span.line,
-            call.span.column,
-          );
-        }
-        return this.addOperation(
-          spec.name,
-          refs[0]!.width,
-          preferredLabel ?? spec.name,
-          [refs[0]!.node, amount.node],
+      case "BROADCAST": {
+        const valueRef = refs[1];
+        if (!valueRef) return this.fallbackRef(call.span.line, call.span.column);
+        const select = this.coerce(
+          refs[0]!,
+          1,
+          argExprs[0]!,
+          "BROADCAST select",
           call.span,
-          {},
+        );
+        if (select.width !== 1) return this.fallbackRef(call.span.line, call.span.column);
+        return this.addOperation(
+          "BROADCAST",
+          valueRef.width,
+          preferredLabel ?? "BROADCAST",
+          [select.node],
+          call.span,
+          { sourceWidth: valueRef.width },
         );
       }
       case "ZEXT":
@@ -1841,30 +1835,6 @@ class ScopeBuilder {
         return this.addOperation(
           spec.name,
           target,
-          preferredLabel ?? spec.name,
-          [refs[0]!.node],
-          call.span,
-          { sourceWidth: refs[0]!.width },
-        );
-      }
-      case "POPCOUNT": {
-        const sourceWidth = refs[0]!.width;
-        const width = Math.max(1, Math.ceil(Math.log2(sourceWidth + 1)));
-        return this.addOperation(
-          "POPCOUNT",
-          width,
-          preferredLabel ?? spec.name,
-          [refs[0]!.node],
-          call.span,
-          { sourceWidth },
-        );
-      }
-      case "REDUCE_AND":
-      case "REDUCE_OR":
-      case "REDUCE_XOR": {
-        return this.addOperation(
-          spec.name,
-          1,
           preferredLabel ?? spec.name,
           [refs[0]!.node],
           call.span,
@@ -1912,38 +1882,6 @@ class ScopeBuilder {
           [refs[0]!.node],
           call.span,
           { sourceWidth: refs[0]!.width },
-        );
-      }
-      case "DECODER": {
-        const selectWidth = refs[0]!.width;
-        const outputWidthBig = 1n << BigInt(selectWidth);
-        if (outputWidthBig > BigInt(this.analyzer.widthLimit)) {
-          this.analyzer.error(
-            "E320",
-            `A ${selectWidth}-bit DECODER needs ${outputWidthBig} output bits, above the supported width.`,
-            call.span.line,
-            call.span.column,
-          );
-          return this.fallbackRef(call.span.line, call.span.column);
-        }
-        return this.addOperation(
-          "DECODER",
-          Number(outputWidthBig),
-          preferredLabel ?? "DECODER",
-          [refs[0]!.node],
-          call.span,
-          { selectWidth },
-        );
-      }
-      case "ENCODER": {
-        const width = Math.max(1, Math.ceil(Math.log2(Math.max(1, refs[0]!.width))));
-        return this.addOperation(
-          "ENCODER",
-          width,
-          preferredLabel ?? "ENCODER",
-          [refs[0]!.node],
-          call.span,
-          { inputWidth: refs[0]!.width },
         );
       }
       default:
@@ -1999,7 +1937,7 @@ class ScopeBuilder {
     }
 
     if (macro.fold) {
-      const foldMacro = this.analyzer.getPackageMacro(macro.fold);
+      const foldMacro = this.analyzer.getPackageMacro(macro.fold, this.packageName);
       if (!foldMacro) {
         this.analyzer.error(
           "E999",
@@ -2070,8 +2008,6 @@ class ScopeBuilder {
 
   private arityHint(spec: BuiltinSpec): string {
     switch (spec.name) {
-      case "MUX":
-        return "MUX(value_a, value_b, select) selects value_a when select is 0 and value_b when select is 1.";
       case "SLICE":
         return "SLICE(value, hi, lo) uses inclusive, constant bit indexes.";
       default:
@@ -2153,10 +2089,6 @@ class ScopeBuilder {
 
   private isConstant(ref: ValueRef): boolean {
     return this.analyzer.getNode(ref.node)?.kind === "constant";
-  }
-
-  private isNonConstantWidth(ref: ValueRef, expected: number): boolean {
-    return !this.isConstant(ref) && ref.width !== expected;
   }
 
   private addOperation(
@@ -2268,7 +2200,7 @@ class ScopeBuilder {
   }
 
   private instantiateCall(call: CallAst, instanceName: string): ResolvedEntry {
-    const custom = this.analyzer.getStructure(call.name);
+    const custom = this.analyzer.getStructure(call.name, this.packageName);
     if (custom) return this.instantiateCustom(custom, call, instanceName);
     return {
       kind: "value",
@@ -2312,6 +2244,7 @@ class ScopeBuilder {
     const child = new ScopeBuilder(
       this.analyzer,
       target,
+      target.packageName,
       childPrefix,
       [...this.scope, instanceName],
       false,
@@ -2523,131 +2456,54 @@ class ScopeBuilder {
   ): Map<string, ValueRef> {
     const updates = new Map(base);
     for (const statement of statements) {
-      if (statement.kind === "SequentialAssignment") {
-        if (statement.target.length !== 1) {
-          this.analyzer.error(
-            "E207",
-            "A clocked assignment target must be a single state name.",
-            statement.span.line,
-            statement.span.column,
-          );
-          continue;
-        }
-        const name = statement.target[0]!.name;
-        const state = this.stateRefs.get(name);
-        if (!state) {
-          const available = [...this.stateRefs.keys()];
-          const suggestion = suggestName(name, available, 3);
-          this.analyzer.errorWithSuggestion(
-            "E220",
-            `"${name}" is not a STATE signal in this circuit.`,
-            statement.span.line,
-            statement.span.column,
-            suggestion,
-            name.length,
-            suggestion
-              ? `Did you mean state "${suggestion}"?`
-              : "Only STATE signals can be updated inside an ON block. Use a combinational assignment for ordinary signals.",
-          );
-          continue;
-        }
-        const stateSpec = this.structure.stateByName.get(name)!;
-        if (updates.has(state.node)) {
-          this.analyzer.warning(
-            "W303",
-            `State "${name}" is assigned more than once along this clock path.`,
-            statement.span.line,
-            statement.span.column,
-            "The later assignment wins. Use IF/ELSE if you intended mutually exclusive updates.",
-          );
-        }
-        const ref = this.resolveExpression(statement.value);
-        updates.set(
-          state.node,
-          this.coerce(ref, stateSpec.width, statement.value, `State ${name}`, statement.span),
+      if (statement.target.length !== 1) {
+        this.analyzer.error(
+          "E207",
+          "A clocked assignment target must be a single state name.",
+          statement.span.line,
+          statement.span.column,
         );
         continue;
       }
-
-      const condition = this.resolveExpression(statement.condition);
-      const conditionIsWide = this.isNonConstantWidth(condition, 1);
-      const conditionRef = conditionIsWide
-        ? condition
-        : this.coerce(condition, 1, statement.condition, "IF condition", statement.span);
-      if (conditionIsWide) {
-        this.analyzer.error(
-          "E303",
-          `IF condition must be 1 bit, but got ${condition.width} bits.`,
-          statement.condition.span.line,
-          statement.condition.span.column,
+      const name = statement.target[0]!.name;
+      const state = this.stateRefs.get(name);
+      if (!state) {
+        const available = [...this.stateRefs.keys()];
+        const suggestion = suggestName(name, available, 3);
+        this.analyzer.errorWithSuggestion(
+          "E220",
+          `"${name}" is not a STATE signal in this circuit.`,
+          statement.span.line,
+          statement.span.column,
+          suggestion,
+          name.length,
+          suggestion
+            ? `Did you mean state "${suggestion}"?`
+            : "Only STATE signals can be updated inside an ON block. Use a combinational assignment for ordinary signals.",
+        );
+        continue;
+      }
+      const stateSpec = this.structure.stateByName.get(name)!;
+      if (updates.has(state.node)) {
+        this.analyzer.warning(
+          "W303",
+          `State "${name}" is assigned more than once along this clock path.`,
+          statement.span.line,
+          statement.span.column,
+          "The later assignment wins. Compute a single next-state value before the ON block.",
         );
       }
-      const baseCopy = new Map(updates);
-      const thenUpdates = this.compileSequentialStatements(statement.thenBody, new Map(baseCopy));
-      const elseUpdates = statement.elseBody
-        ? this.compileSequentialStatements(statement.elseBody, new Map(baseCopy))
-        : new Map(baseCopy);
-
-      const touched = new Set<string>();
-      for (const key of thenUpdates.keys()) {
-        if (thenUpdates.get(key)?.node !== baseCopy.get(key)?.node) touched.add(key);
-      }
-      for (const key of elseUpdates.keys()) {
-        if (elseUpdates.get(key)?.node !== baseCopy.get(key)?.node) touched.add(key);
-      }
-      for (const stateNode of touched) {
-        const stateName = [...this.stateRefs.entries()].find(([, ref]) => ref.node === stateNode)?.[0] ?? "state";
-        const width = this.stateRefs.get(stateName)?.width ?? 1;
-        const hold =
-          baseCopy.get(stateNode) ??
-          this.stateRefs.get(stateName) ??
-          this.createConstant(0n, width, statement.span.line, statement.span.column, "0");
-        const thenRef = thenUpdates.get(stateNode) ?? hold;
-        const elseRef = elseUpdates.get(stateNode) ?? hold;
-        if (thenRef.node === elseRef.node) {
-          updates.set(stateNode, thenRef);
-          continue;
-        }
-        const mux = this.addOperation(
-          "MUX",
-          width,
-          `${stateName} next`,
-          [elseRef.node, thenRef.node, conditionRef.node],
-          statement.span,
-          { selectZero: "hold", selectOne: "update" },
-        );
-        updates.set(stateNode, mux);
-      }
+      const ref = this.resolveExpression(statement.value);
+      updates.set(
+        state.node,
+        this.coerce(ref, stateSpec.width, statement.value, `State ${name}`, statement.span),
+      );
     }
     return updates;
   }
 }
 
-const BUILTIN_NAMES = [
-  "AND",
-  "OR",
-  "XOR",
-  "NAND",
-  "NOR",
-  "XNOR",
-  "NOT",
-  "BUFFER",
-  "ADD",
-  "SUBTRACT",
-  "MULTIPLY",
-  "DIVIDE",
-  "EQUAL",
-  "LESS",
-  "GREATER",
-  "COMPARE",
-  "MUX",
-  "CONCAT",
-  "SLICE",
-  "SHIFT_LEFT",
-  "SHIFT_RIGHT",
-  "DECODER",
-  "ENCODER",
-];
+const BUILTIN_NAMES = BUILTINS.map((spec) => spec.name);
 
 
 function arityText(spec: BuiltinSpec): string {

@@ -33,12 +33,12 @@ Comments use `//` for a line and `/* ... */` for a block that may span lines. Lo
 ## What works in v0.1
 
 - **Readable hardware expressions** — function-style gates, named signals, comments, no semicolons or braces.
-- **Default packages** — `AND`, `OR`, `NOT`, `BUFFER`, `NAND`, `NOR`, `XOR`, `XNOR`, `HALF_ADDER` and `FULL_ADDER` work out of the box. Gates and adders are provided by bundled packages; the compiler core keeps `NAND` and structural wiring.
+- **Default packages** — the kernel provides `NAND`; bundled packages add `NOT`, `AND`, `OR`, `BUFFER`, `NOR`, `XOR`, `XNOR`, `MUX`, `HALF_ADDER`, `FULL_ADDER`, `ADD4`, and `ADD8`. Gates, selection, and arithmetic are package source; the compiler kernel keeps `NAND` and structural wiring.
 - **Static validation first** — undeclared/duplicate signals, width mismatches, missing ports, illegal recursion, combinational loops and clock conflicts are diagnosed before simulation.
-- **Buses** — `BUS(8)` declarations, indexing (`data[3]`), inclusive slices (`data[7:4]`), concatenation, shifts, decoder/encoder.
+- **Buses** — `BUS(8)` declarations, indexing (`data[3]`), inclusive slices (`data[7:4]`), concatenation, broadcast, sign/zero extension, repetition and reversal.
 - **Composition** — reusable `CIRCUIT` blocks, positional or named instance ports, nested scopes and flattened IR.
-- **Compile-time structure** — `CONST` names a whole number and `FOR` repeats a block once per value, so a grid of cells is one line instead of a hundred.
-- **Sequential logic** — explicit `STATE`, rising/falling edge blocks, conditional next-state, atomic edge commits.
+- **Packages and imports** — `IMPORT "@scope/package" AS Alias`, auto-imported recommended packages, and package toggles in the studio. Package implementations are real `.lf` source files.
+- **Sequential logic** — explicit `STATE`, rising/falling edge blocks, MUX-based next-state logic, atomic edge commits.
 - **Verification** — in-source `TEST` cases, clocked sequences with `STEP`, `CYCLE`, and `LOAD`, plus exhaustive truth-table generation for combinational circuits.
 - **Live studio** — CodeMirror editor with diagnostics, interactive input controls, dependency graph with values, stored-state monitors, test results, and downloadable IR.
 - **Editor that knows the language** — completions for built-ins, keywords, snippets and your own signals, plus hover cards with signatures, width rules and usage tips.
@@ -119,28 +119,20 @@ The engine has no DOM, React, or browser dependency. Another implementation can 
 
 | Example | Focus |
 | --- | --- |
-| Half adder | First circuit; exhaustive gate tests |
+| Half adder | First circuit; NAND-derived package gates and exhaustive tests |
 | Full adder | Nested circuit instances and named ports |
-| 8-bit adder | Buses, binary literals, modular overflow |
-| 4:1 multiplexer | Selection and bus-bit indexing |
+| 8-bit adder | Fixed-width package arithmetic, binary literals, overflow |
+| 4:1 multiplexer | Package MUX and bus-bit indexing |
+| Bus wiring | CONCAT, SLICE, and REVERSE without Boolean gates |
 | Majority vote | Variadic gates and readable intermediates |
-| ALU8 | Arithmetic, logic, comparison and MUX composition |
-| Cell grid | Compile-time constants and loops |
-| Parameterized register | One definition, many widths |
-| Seven-segment display | A number driving the bars of a display |
-| Traffic light | A small state machine |
-| Combination lock | Everyday logic with a secret code |
-| Sequence detector | A shift register spotting 1011 |
-| Tally counter | Counting zero to nine on a display |
-| Array multiplier | Partial products stamped out by a loop |
-| Game of Life | Conway's Life with neighbours counted for you |
+| Gated bus | BROADCAST as a structural mask |
 | Register 8 | Rising-edge state with enable |
-| Counter 4 | Next-state logic and edge commits |
+| Counter 4 | ADD4/MUX next-state logic and edge commits |
 
 ## Roadmap
 
 - Built-in latches, registers, RAM primitives and timed delays
-- Finish moving the remaining arithmetic, selection, and shift builtins into packages
+- More package circuits for wider arithmetic, comparison, and shifts
 - HDL / Verilog export from the IR
 - Faster truth tables for wider buses and symbolic input grouping
 - Clocked test sequences and multi-cycle traces
