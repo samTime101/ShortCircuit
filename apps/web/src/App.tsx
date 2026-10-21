@@ -24,6 +24,7 @@ import {
   type ReactNode,
 } from "react";
 import { CircuitGraph } from "./components/CircuitGraph";
+import { CircuitPicker } from "./components/CircuitPicker";
 import { DiagnosticsPanel } from "./components/DiagnosticsPanel";
 import { IRPanel } from "./components/IRPanel";
 import { Modal } from "./components/Modal";
@@ -40,7 +41,6 @@ import {
   Book,
   Braces,
   Check,
-  ChevronDown,
   CircuitMark,
   Code,
   Cpu,
@@ -817,21 +817,11 @@ function Studio({
 
             {result?.ok && result.circuits.length > 0 ? (
               <div className="inspection-context">
-                <label className="circuit-picker">
-                  <span className="circuit-picker-label">Circuit</span>
-                  <select
-                    value={activeCircuit?.name ?? activeCircuitName}
-                    onChange={(event) => switchCircuit(event.target.value)}
-                    aria-label="Active circuit"
-                  >
-                    {result.circuits.map((circuit) => (
-                      <option key={circuit.name} value={circuit.name}>
-                        {circuit.name}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown size={11} />
-                </label>
+                <CircuitPicker
+                  circuits={result.circuits.map((circuit) => circuit.name)}
+                  value={activeCircuit?.name ?? activeCircuitName}
+                  onChange={switchCircuit}
+                />
               </div>
             ) : null}
           </div>

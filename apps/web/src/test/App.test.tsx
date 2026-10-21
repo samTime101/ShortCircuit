@@ -100,6 +100,53 @@ describe("studio app", () => {
     });
   });
 
+  it("switches the active circuit from the circuit picker", async () => {
+    store(`CIRCUIT First
+INPUT a
+INPUT b
+sum = XOR(a, b)
+OUTPUT sum
+END
+
+CIRCUIT Second
+INPUT a
+INPUT b
+carry = AND(a, b)
+OUTPUT carry
+END`);
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Evaluation graph")).toBeInTheDocument();
+    });
+
+    const picker = screen.getByRole("combobox", { name: /active circuit: first/i });
+    await userEvent.click(picker);
+    expect(screen.getByRole("listbox", { name: "Circuits" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("option", { name: "Second" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("combobox", { name: /active circuit: second/i })).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("listbox", { name: "Circuits" })).toBeNull();
+  });
+
+  it("closes the circuit picker with escape", async () => {
+    store(HALF_ADDER);
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Evaluation graph")).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByRole("combobox", { name: /active circuit/i }));
+    expect(screen.getByRole("listbox", { name: "Circuits" })).toBeInTheDocument();
+
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("listbox", { name: "Circuits" })).toBeNull();
+  });
+
   it("explains a typo in plain language and fixes it in one click", async () => {
     store(`CIRCUIT HalfAdder
 INPUT a
