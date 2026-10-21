@@ -72,6 +72,10 @@ npm run build
 npm run docs:generate # regenerate the operation reference in docs/LANGUAGE.md
 ```
 
+To create and publish your own package, follow the step-by-step guide in
+[`docs/PACKAGES.md`](docs/PACKAGES.md). It covers the source layout, manifest,
+registry entry, bundle build, package tests, imports, and submodule commit.
+
 ## Repository layout
 
 ```text
@@ -101,6 +105,7 @@ short-circuit/
 ├─ scripts/                 Documentation generator
 └─ docs/
    ├─ LANGUAGE.md          Syntax, semantics, widths, diagnostics
+   ├─ PACKAGES.md          Step-by-step package authoring guide
    ├─ ARCHITECTURE.md      Compiler pipeline and extension points
    └─ IR.md                Portable IR schema and porting guide
 ```
