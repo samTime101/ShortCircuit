@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { EditorView } from "@codemirror/view";
 import App from "../App";
 
 const STORAGE_KEY = "shortcircuit.source.v1";
@@ -339,6 +340,49 @@ END`);
     expect(document.querySelectorAll(".cm-line")).toHaveLength(4);
     expect(window.localStorage.getItem(STORAGE_KEY)).toBe(
       "CIRCUIT HalfAdder\n  INPUT a\n  OUTPUT a\nEND",
+    );
+  });
+
+  it("drops the error mark once the source is fixed", async () => {
+    store(`CIRCUIT HalfAdder
+INPUT a
+OUTPUT a
+END`);
+    render(<App />);
+
+    await waitFor(() => {
+      expect(document.querySelector(".cm-content")).not.toBeNull();
+    });
+    const view = EditorView.findFromDOM(
+      document.querySelector(".cm-editor") as HTMLElement,
+    )!;
+
+    // Break the circuit: the END is gone.
+    view.dispatch({
+      changes: { from: 0, to: view.state.doc.length, insert: "CIRCUIT HalfAdder" },
+    });
+
+    await waitFor(
+      () => {
+        expect(document.querySelectorAll(".cm-lintRange-error")).toHaveLength(1);
+      },
+      { timeout: 4000 },
+    );
+
+    // Fix it again. The mark of the broken source must not stay on screen.
+    view.dispatch({
+      changes: {
+        from: 0,
+        to: view.state.doc.length,
+        insert: "CIRCUIT HalfAdder\nINPUT a\nOUTPUT a\nEND",
+      },
+    });
+
+    await waitFor(
+      () => {
+        expect(document.querySelectorAll(".cm-lintRange-error")).toHaveLength(0);
+      },
+      { timeout: 4000 },
     );
   });
 });

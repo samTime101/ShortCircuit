@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { render, waitFor } from "@testing-library/react";
 import { completionStatus, startCompletion } from "@codemirror/autocomplete";
 import { EditorView } from "@codemirror/view";
+import type { Diagnostic } from "@shortcircuit/engine";
 import { SourceEditor } from "../editor/SourceEditor";
 
 /** A source with a half typed operation, ready for the completion popup. */
@@ -10,6 +11,16 @@ const COMPLETION_SOURCE = `CIRCUIT Test
   NAN
   OUTPUT a
 END`;
+
+/** The diagnostic the parser reports for a circuit without its END. */
+const MISSING_END: Diagnostic = {
+  code: "E101",
+  severity: "error",
+  message: "CIRCUIT HalfAdder is missing its END.",
+  line: 1,
+  column: 1,
+  length: 7,
+};
 
 function renderEditor(fontSize: number, value = "CIRCUIT HalfAdder\nEND") {
   return render(
@@ -162,5 +173,57 @@ describe("source editor", () => {
 
     expect(view.state.doc.lines).toBe(lines + 1);
     expect(view.state.doc.toString()).not.toContain("NAND");
+  });
+
+  it("marks the source with the diagnostics of the latest compile result", async () => {
+    const { rerender } = renderEditor(15);
+    await waitFor(() => {
+      expect(document.querySelector(".cm-content")).not.toBeNull();
+    });
+    expect(document.querySelectorAll(".cm-lintRange-error")).toHaveLength(0);
+
+    rerender(
+      <SourceEditor
+        value={"CIRCUIT HalfAdder\nEND"}
+        diagnostics={[MISSING_END]}
+        fontSize={15}
+        onChange={() => {}}
+        onRun={() => {}}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(document.querySelectorAll(".cm-lintRange-error")).toHaveLength(1);
+    });
+  });
+
+  it("drops the marks when the compile result comes back clean", async () => {
+    const { rerender } = render(
+      <SourceEditor
+        value={"CIRCUIT HalfAdder\nEND"}
+        diagnostics={[MISSING_END]}
+        fontSize={15}
+        onChange={() => {}}
+        onRun={() => {}}
+      />,
+    );
+    await waitFor(() => {
+      expect(document.querySelectorAll(".cm-lintRange-error")).toHaveLength(1);
+    });
+
+    // The studio compiled the fixed source and the error is gone.
+    rerender(
+      <SourceEditor
+        value={"CIRCUIT HalfAdder\nEND"}
+        diagnostics={[]}
+        fontSize={15}
+        onChange={() => {}}
+        onRun={() => {}}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(document.querySelectorAll(".cm-lintRange-error")).toHaveLength(0);
+    });
   });
 });

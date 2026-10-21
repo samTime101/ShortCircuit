@@ -2,9 +2,9 @@ import { acceptCompletion } from "@codemirror/autocomplete";
 import { insertNewlineAndIndent } from "@codemirror/commands";
 import { HighlightStyle, indentUnit, syntaxHighlighting } from "@codemirror/language";
 import {
-  forceLinting,
   lintGutter,
   linter,
+  setDiagnostics,
   type Diagnostic as LintMessage,
 } from "@codemirror/lint";
 import { Compartment, EditorState, Prec } from "@codemirror/state";
@@ -204,6 +204,10 @@ export const SourceEditor = forwardRef<SourceEditorHandle, SourceEditorProps>(
     const onRunRef = useRef(onRun);
     const diagnosticsRef = useRef(diagnostics);
     const fontSizeRef = useRef(fontSize);
+    /* The compile result belongs to the text as it was when the compiler
+       ran. Once the text moves on the old marks are stale, so they are
+       dropped until the next result arrives. */
+    const staleMarksRef = useRef(false);
 
     onChangeRef.current = onChange;
     onRunRef.current = onRun;
@@ -269,14 +273,18 @@ export const SourceEditor = forwardRef<SourceEditorHandle, SourceEditorProps>(
             fontSizeCompartment.of(fontSizeTheme(fontSizeRef.current)),
             linter(
               (editorView) =>
-                diagnosticsRef.current.map((diagnostic) =>
-                  toLintMessage(editorView, diagnostic),
-                ),
+                staleMarksRef.current
+                  ? []
+                  : diagnosticsRef.current.map((diagnostic) =>
+                      toLintMessage(editorView, diagnostic),
+                    ),
               { delay: 140 },
             ),
             lintGutter(),
             EditorView.updateListener.of((update) => {
-              if (update.docChanged) onChangeRef.current(update.state.doc.toString());
+              if (!update.docChanged) return;
+              staleMarksRef.current = true;
+              onChangeRef.current(update.state.doc.toString());
             }),
           ],
         }),
@@ -301,8 +309,20 @@ export const SourceEditor = forwardRef<SourceEditorHandle, SourceEditorProps>(
       }
     }, [value]);
 
+    /* The marks have to follow the latest compile result. `forceLinting`
+       only re-runs the linter when a run is already scheduled, so it left
+       the marks of an earlier result on the screen, and the marks of a new
+       result never showed up. The diagnostics are set directly instead. */
     useEffect(() => {
-      if (viewRef.current) forceLinting(viewRef.current);
+      const view = viewRef.current;
+      if (!view) return;
+      staleMarksRef.current = false;
+      view.dispatch(
+        setDiagnostics(
+          view.state,
+          diagnostics.map((diagnostic) => toLintMessage(view, diagnostic)),
+        ),
+      );
     }, [diagnostics]);
 
     useEffect(() => {
