@@ -78,7 +78,7 @@ To create and publish your own package, start with the interactive scaffolder:
 npm run package:init
 ```
 
-It asks for the package name, export name, kind, docs, dependencies, and
+It asks for the package name, export name, kind, description, dependencies, and
 auto-import setting, then writes the package, tests, docs, and registry entry.
 Build and test it with `npm run package:build` and `npm run package:test`. See
 [`docs/PACKAGES.md`](docs/PACKAGES.md) for the full guide, including the
