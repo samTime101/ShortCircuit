@@ -431,7 +431,9 @@ language:
 | --- | --- |
 | `documentModel.ts` | Scans the source for signals, instance ports, and circuits; finds the word under the pointer |
 | `completions.ts` | Builds the completion list: built-ins, keywords, snippets, and the signals in the file |
-| `hover.ts` | Produces the hover card for operations, components, keywords, and signals |
+| `cards.ts` | Builds one info card per operation, package export, keyword, and snippet |
+| `hover.ts` | Shows the card of the word under the pointer |
+| `keywords.ts` | The keyword list, shared by the completion list and the cards |
 
 The completion source is registered through the CodeMirror language-data
 mechanism (`languageData.autocomplete`), so the standard completion UI and key
@@ -439,6 +441,13 @@ bindings do the rest. All descriptive text comes from the engine
 (`BUILTINS`, `DEFAULT_PACKAGE_MACROS`, `DEFAULT_PACKAGE_CIRCUITS`,
 `LANGUAGE_SNIPPETS`), which keeps the editor, the documentation page, and the
 language reference in sync.
+
+Every card shows the same four things: what the thing is, its signature, its
+arguments, what it returns, and a worked example. The example of a package
+export is read from the tests the package ships with, so `packageWorkedExamples`
+in the engine turns a package test case into a real call and its results
+(`FULL_ADDER(1, 1, 1)` returning `sum = 1` and `carry_out = 1`). Nothing has to
+be written twice in a package manifest.
 
 ### 6.5 Documentation page
 

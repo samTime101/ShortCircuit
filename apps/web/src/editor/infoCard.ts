@@ -2,13 +2,24 @@
 
 export interface InfoRow {
   label: string;
-  value: string;
+  /** One line, or several lines for a list of arguments or results. */
+  value: string | string[];
+}
+
+export interface InfoExample {
+  /** The label above the example, e.g. 'Example — "1 + 1 + 1"'. */
+  label?: string;
+  /** The code lines of the example. */
+  lines: string[];
 }
 
 export function infoCard(options: {
   title: string;
   badge?: string;
+  /** The short description of the thing, shown under the title. */
+  description?: string;
   rows?: InfoRow[];
+  example?: InfoExample;
   code?: string;
   note?: string;
 }): HTMLElement {
@@ -29,6 +40,13 @@ export function infoCard(options: {
   }
   root.appendChild(head);
 
+  if (options.description) {
+    const description = document.createElement("p");
+    description.className = "lf-info-desc";
+    description.textContent = options.description;
+    root.appendChild(description);
+  }
+
   if (options.rows && options.rows.length > 0) {
     const list = document.createElement("dl");
     list.className = "lf-info-rows";
@@ -36,11 +54,36 @@ export function infoCard(options: {
       const term = document.createElement("dt");
       term.textContent = row.label;
       const value = document.createElement("dd");
-      value.textContent = row.value;
+      if (Array.isArray(row.value)) {
+        for (const line of row.value) {
+          const item = document.createElement("div");
+          item.className = "lf-info-item";
+          item.textContent = line;
+          value.appendChild(item);
+        }
+      } else {
+        value.textContent = row.value;
+      }
       list.appendChild(term);
       list.appendChild(value);
     }
     root.appendChild(list);
+  }
+
+  if (options.example && options.example.lines.length > 0) {
+    const example = document.createElement("div");
+    example.className = "lf-info-example";
+    if (options.example.label) {
+      const label = document.createElement("span");
+      label.className = "lf-info-example-label";
+      label.textContent = options.example.label;
+      example.appendChild(label);
+    }
+    const code = document.createElement("code");
+    code.className = "lf-info-example-code";
+    code.textContent = options.example.lines.join("\n");
+    example.appendChild(code);
+    root.appendChild(example);
   }
 
   if (options.code) {

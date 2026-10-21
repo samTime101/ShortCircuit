@@ -79,6 +79,11 @@ export type {
   ImportResolution,
   ResolvedPackageImport,
 } from "./packages";
+export {
+  packageWorkedExamples,
+  type WorkedExample,
+  type WorkedExamplePort,
+} from "./packageExamples";
 export { plainFor } from "./plainLanguage";
 export { GLOSSARY, GLOSSARY_BY_TERM } from "./glossary";
 export type { GlossaryEntry } from "./glossary";

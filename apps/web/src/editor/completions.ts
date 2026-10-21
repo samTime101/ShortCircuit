@@ -12,123 +12,14 @@ import {
 } from "@shortcircuit/engine";
 import { scanDocument } from "./documentModel";
 import { infoCard } from "./infoCard";
-
-interface KeywordSpec {
-  name: string;
-  detail: string;
-  note: string;
-  apply?: string;
-}
-
-const KEYWORDS: KeywordSpec[] = [
-  {
-    name: "CIRCUIT",
-    detail: "block",
-    note: "Starts a circuit. Every signal inside is defined exactly once.",
-    apply: "CIRCUIT ",
-  },
-  {
-    name: "END",
-    detail: "block",
-    note: "Closes a CIRCUIT, TEST, CASE, or ON block.",
-    apply: "END",
-  },
-  {
-    name: "INPUT",
-    detail: "declaration",
-    note: "Declares an input port. Add : BUS(n) for a bus.",
-    apply: "INPUT ",
-  },
-  {
-    name: "OUTPUT",
-    detail: "declaration",
-    note: "Exposes a signal or an instance port on the circuit output.",
-    apply: "OUTPUT ",
-  },
-  {
-    name: "STATE",
-    detail: "declaration",
-    note: "Declares stored state. Give it a width and an initial value.",
-    apply: "STATE ",
-  },
-  {
-    name: "ON",
-    detail: "sequential",
-    note: "Starts a clocked block: ON RISING_EDGE(clock):",
-    apply: "ON ",
-  },
-  {
-    name: "RISING_EDGE",
-    detail: "clock",
-    note: "Fires when the clock changes from 0 to 1.",
-    apply: "RISING_EDGE",
-  },
-  {
-    name: "FALLING_EDGE",
-    detail: "clock",
-    note: "Fires when the clock changes from 1 to 0.",
-    apply: "FALLING_EDGE",
-  },
-  {
-    name: "TEST",
-    detail: "block",
-    note: "Starts a test suite for a circuit of the same name.",
-    apply: "TEST ",
-  },
-  {
-    name: "CASE",
-    detail: "block",
-    note: "One test case. Give it a label and list INPUT and EXPECT lines.",
-    apply: "CASE ",
-  },
-  {
-    name: "EXPECT",
-    detail: "test",
-    note: "Expected output value of a test case.",
-    apply: "EXPECT ",
-  },
-  {
-    name: "BUS",
-    detail: "width",
-    note: "Declares a bus width: INPUT data : BUS(8)",
-    apply: "BUS",
-  },
-  {
-    name: "IMPORT",
-    detail: "package",
-    note: "Imports a package: IMPORT \"@scope/package\" AS Alias",
-    apply: "IMPORT ",
-  },
-  {
-    name: "AS",
-    detail: "package",
-    note: "Names an imported package for qualified access.",
-    apply: "AS ",
-  },
-  {
-    name: "LOAD",
-    detail: "test",
-    note: "Loads a state value before a test case runs.",
-    apply: "LOAD ",
-  },
-  {
-    name: "STEP",
-    detail: "test",
-    note: "Groups test input changes so they apply together.",
-    apply: "STEP",
-  },
-  {
-    name: "CYCLE",
-    detail: "test",
-    note: "Ticks a clock a number of times inside a test case.",
-    apply: "CYCLE ",
-  },
-];
-
-const CATEGORY_LABEL: Record<string, string> = {
-  gate: "gate",
-  bus: "bus",
-};
+import {
+  builtinCard,
+  keywordCard,
+  packageCircuitCard,
+  packageMacroCard,
+  snippetCard,
+} from "./cards";
+import { KEYWORDS } from "./keywords";
 
 function packageMacroCompletions(): Completion[] {
   return DEFAULT_PACKAGE_MACROS.map((macro) => ({
@@ -136,42 +27,18 @@ function packageMacroCompletions(): Completion[] {
     type: "function",
     detail: macro.signature,
     boost: 1,
-    info: () =>
-      infoCard({
-        title: macro.name,
-        badge: macro.group ?? "package macro",
-        rows: [
-          { label: "Signature", value: macro.signature },
-          { label: "Width", value: macro.widthRule ?? "Result width follows compiler width rules" },
-        ],
-        code: `result = ${macro.name}(${macro.args.join(", ")})`,
-        note: macro.tip ?? macro.summary ?? "Package macro.",
-      }),
+    info: () => packageMacroCard(macro.name)!,
   }));
 }
 
 function packageCircuitCompletions(): Completion[] {
-  return DEFAULT_PACKAGE_CIRCUITS.map(({ circuit }) => {
-    const inputs = circuit.ports?.inputs.map((port) => port.name) ?? [];
-    const outputs = circuit.ports?.outputs.map((port) => port.name) ?? [];
-    return {
-      label: circuit.name,
-      type: "class",
-      detail: circuit.summary ?? "package circuit",
-      boost: 1,
-      info: () =>
-        infoCard({
-          title: circuit.name,
-          badge: circuit.group ?? "component",
-          rows: [
-            { label: "Signature", value: `${circuit.name}(${inputs.join(", ")})` },
-            { label: "Ports", value: `${inputs.join(", ")} -> ${outputs.join(", ")}` },
-          ],
-          code: `inst = ${circuit.name}(${inputs.join(", ")})\nresult = inst.${outputs[0] ?? "out"}`,
-          note: circuit.summary ?? "Package circuit.",
-        }),
-    };
-  });
+  return DEFAULT_PACKAGE_CIRCUITS.map(({ circuit }) => ({
+    label: circuit.name,
+    type: "class",
+    detail: `${circuit.name}(${(circuit.ports?.inputs ?? []).map((port) => port.name).join(", ")})`,
+    boost: 1,
+    info: () => packageCircuitCard(circuit.name)!,
+  }));
 }
 
 function functionCompletions(): Completion[] {
@@ -182,17 +49,7 @@ function functionCompletions(): Completion[] {
       type: "function",
       detail: spec.signature,
       boost: 1,
-      info: () =>
-        infoCard({
-          title: spec.name,
-          badge: CATEGORY_LABEL[spec.category] ?? spec.category,
-          rows: [
-            { label: "Signature", value: spec.signature },
-            { label: "Width", value: spec.widthRule },
-          ],
-          code: `${spec.name.toLowerCase()}_result = ${spec.signature}`,
-          note: spec.tip,
-        }),
+      info: () => builtinCard(spec.name)!,
     }),
   );
 
@@ -205,12 +62,7 @@ function keywordCompletions(): Completion[] {
     type: "keyword",
     detail: spec.detail,
     apply: spec.apply ?? spec.name,
-    info: () =>
-      infoCard({
-        title: spec.name,
-        badge: spec.detail,
-        note: spec.note,
-      }),
+    info: () => keywordCard(spec.name)!,
   }));
 }
 
@@ -221,13 +73,7 @@ function snippetCompletions(): Completion[] {
       type: "snippet",
       detail: snippet.description,
       boost: -1,
-      info: () =>
-        infoCard({
-          title: snippet.title,
-          badge: snippet.category,
-          note: snippet.description,
-          code: snippet.preview,
-        }),
+      info: () => snippetCard(snippet.title)!,
     }),
   );
 }
@@ -267,7 +113,7 @@ export function logicFlowCompletions(context: CompletionContext): CompletionResu
       infoCard({
         title: signal.name,
         badge: signal.kind,
-        note: `Declared on line ${signal.line}.`,
+        description: `Declared on line ${signal.line}.`,
       }),
   }));
 

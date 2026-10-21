@@ -1729,6 +1729,43 @@ kbd {
   font-variant-numeric: tabular-nums;
 }
 
+.lf-info-item {
+  white-space: pre-wrap;
+}
+
+.lf-info-desc {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+
+.lf-info-example {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.lf-info-example-label {
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.lf-info-example-code {
+  display: block;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--accent-strong);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
 .lf-info-code {
   display: block;
   padding: 6px 8px;

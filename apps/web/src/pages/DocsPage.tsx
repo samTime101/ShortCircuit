@@ -7,6 +7,8 @@ import {
   LANGUAGE_SNIPPETS,
   LANGUAGE_VERSION,
   IR_SCHEMA,
+  packageWorkedExamples,
+  type WorkedExample,
 } from "@shortcircuit/engine";
 import { ArrowUpRight, Check, Code, Copy, Layers } from "../components/Icons";
 import { highlightLogicFlow } from "../editor/logicFlowHighlight";
@@ -22,6 +24,13 @@ interface SectionDef {
   id: string;
   label: string;
   group: string;
+}
+
+/** The worked example of every package export, taken from the package tests. */
+const WORKED_EXAMPLES = packageWorkedExamples();
+
+function workedExampleFor(packageName: string, exportName: string): WorkedExample | undefined {
+  return WORKED_EXAMPLES.get(`${packageName}:${exportName}`);
 }
 
 const SECTIONS: SectionDef[] = [
@@ -713,7 +722,9 @@ STATE armed = 1`}
               ))}
             </div>
 
-            {DEFAULT_PACKAGE_MACROS.map((macro) => (
+            {DEFAULT_PACKAGE_MACROS.map((macro) => {
+              const example = workedExampleFor(macro.packageName, macro.name);
+              return (
               <article className="docs-fn" id={`fn-${macro.name.toLowerCase()}`} key={macro.name}>
                 <header>
                   <h4>
@@ -750,7 +761,17 @@ STATE armed = 1`}
                       <strong>Package</strong>
                       {macro.group ?? "Package macro"}
                     </span>
-                    {macro.examples?.[0] ? (
+                    {example ? (
+                      <span>
+                        <strong>Example</strong>
+                        <code>{`y = ${example.call}`}</code>
+                        <span className="docs-fn-expected">
+                          {example.value === undefined
+                            ? example.ports.map((port) => `${port.name} = ${port.value}`).join(", ")
+                            : example.value}
+                        </span>
+                      </span>
+                    ) : macro.examples?.[0] ? (
                       <span>
                         <strong>Example</strong>
                         <code>{macro.examples[0]}</code>
@@ -759,7 +780,8 @@ STATE armed = 1`}
                   </div>
                 </div>
               </article>
-            ))}
+              );
+            })}
 
             {BUILTINS.map((spec) => (
               <article className="docs-fn" id={`fn-${spec.name.toLowerCase()}`} key={spec.name}>
@@ -806,9 +828,10 @@ STATE armed = 1`}
             ))}
 
             <h4>Circuit-shaped components</h4>
-            {DEFAULT_PACKAGE_CIRCUITS.map(({ circuit }) => {
+            {DEFAULT_PACKAGE_CIRCUITS.map(({ circuit, packageName }) => {
               const inputs = circuit.ports?.inputs.map((port) => port.name) ?? [];
               const outputs = circuit.ports?.outputs.map((port) => port.name) ?? [];
+              const example = workedExampleFor(packageName, circuit.name);
               return (
                 <article className="docs-fn" id={`fn-${circuit.name.toLowerCase()}`} key={circuit.name}>
                   <header>
@@ -840,6 +863,15 @@ STATE armed = 1`}
                         <strong>Tip</strong>
                         Assign an instance, then read its output ports: <code>inst.{outputs[0] ?? "out"}</code>.
                       </span>
+                      {example ? (
+                        <span>
+                          <strong>Example</strong>
+                          <code>{`inst = ${example.call}`}</code>
+                          <span className="docs-fn-expected">
+                            {example.ports.map((port) => `inst.${port.name} = ${port.value}`).join(", ")}
+                          </span>
+                        </span>
+                      ) : null}
                     </div>
                   </div>
                 </article>
