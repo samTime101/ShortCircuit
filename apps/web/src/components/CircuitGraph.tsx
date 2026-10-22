@@ -33,6 +33,13 @@ const MIN_BADGE_SCALE = 0.7;
 const MIN_DETAIL_SCALE = 0.5;
 /** Above this zoom, draw the full curved wires; below it, straight lines. */
 const MIN_CURVE_SCALE = 0.7;
+/** Manual wheel and button zoom limits. The lower bound leaves room to see wide graphs. */
+const MIN_ZOOM = 0.01;
+const MAX_ZOOM = 2.6;
+/** Below this zoom, individual node elements cost more than they can show. */
+const MIN_NODE_BATCH_SCALE = 0.12;
+/** The kind accent is sub-pixel below this zoom, so it is skipped. */
+const MIN_ACCENT_SCALE = 0.2;
 
 type VisualKind = "input" | "state" | "constant" | "operation" | "output";
 
@@ -486,6 +493,7 @@ interface GraphNodeViewProps {
   node: GraphNode;
   value: string | undefined;
   detailed: boolean;
+  accent: boolean;
   active: boolean;
   connected: boolean;
   onSelect(id: string): void;
@@ -497,6 +505,7 @@ const GraphNodeView = memo(function GraphNodeView({
   node,
   value,
   detailed,
+  accent,
   active,
   connected,
   onSelect,
@@ -537,7 +546,9 @@ const GraphNodeView = memo(function GraphNodeView({
         height={node.h}
         rx={node.kind === "constant" ? 9 : 11}
       />
-      <rect className="node-accent" x={0} y={12} width={3} height={node.h - 24} rx={2} />
+      {accent ? (
+        <rect className="node-accent" x={0} y={12} width={3} height={node.h - 24} rx={2} />
+      ) : null}
       {detailed ? (
         <>
           {node.kind === "operation" ? (
@@ -650,7 +661,8 @@ export function CircuitGraph({ circuit, snapshot }: CircuitGraphProps) {
       const cy = event.clientY - rect.top;
       const current = viewRef.current;
       const factor = Math.exp(-event.deltaY * 0.0012);
-      const nextScale = Math.max(0.18, Math.min(2.6, current.scale * factor));
+      const nextScale = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, current.scale * factor));
+      if (nextScale === current.scale) return;
       const ratio = nextScale / current.scale;
       scheduleView({
         scale: nextScale,
@@ -664,7 +676,8 @@ export function CircuitGraph({ circuit, snapshot }: CircuitGraphProps) {
 
   const zoomBy = (factor: number) => {
     const current = viewRef.current;
-    const nextScale = Math.max(0.18, Math.min(2.6, current.scale * factor));
+    const nextScale = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, current.scale * factor));
+    if (nextScale === current.scale) return;
     const ratio = nextScale / current.scale;
     const cx = size.width / 2;
     const cy = size.height / 2;
@@ -738,20 +751,29 @@ export function CircuitGraph({ circuit, snapshot }: CircuitGraphProps) {
     [layout.nodes],
   );
 
-  const visible = useMemo(
-    () =>
-      cullLayout(layout, {
-        scale: view.scale,
-        x: view.x,
-        y: view.y,
-        width: size.width,
-        height: size.height,
-      }),
-    [layout, view.scale, view.x, view.y, size.width, size.height],
-  );
+  const visible = useMemo(() => {
+    const culled = cullLayout(layout, {
+      scale: view.scale,
+      x: view.x,
+      y: view.y,
+      width: size.width,
+      height: size.height,
+    });
+    // When the whole graph fits, reuse the layout arrays so panning does not
+    // rebuild the batched edge and node paths on every frame.
+    if (
+      culled.nodes.length === layout.nodes.length &&
+      culled.edges.length === layout.edges.length
+    ) {
+      return { nodes: layout.nodes, edges: layout.edges };
+    }
+    return culled;
+  }, [layout, view.scale, view.x, view.y, size.width, size.height]);
 
   const detailed = view.scale >= MIN_DETAIL_SCALE;
   const curved = view.scale >= MIN_CURVE_SCALE;
+  const showAccent = view.scale >= MIN_ACCENT_SCALE;
+  const batchedNodes = view.scale < MIN_NODE_BATCH_SCALE;
   const activeNodeId = selectedId ?? hoveredId;
   const selected = selectedId ? nodeMap.get(selectedId) : undefined;
   const hovered = hoveredId ? nodeMap.get(hoveredId) : undefined;
@@ -797,6 +819,22 @@ export function CircuitGraph({ circuit, snapshot }: CircuitGraphProps) {
     }
     return [...buckets].map(([className, d]) => ({ className, d }));
   }, [visible.edges, values, curved]);
+
+  /**
+   * At extreme zoom individual nodes are only a few pixels wide. One path per
+   * node kind keeps the whole graph to a handful of SVG elements.
+   */
+  const nodeBatches = useMemo(() => {
+    if (!batchedNodes) return [];
+    const buckets = new Map<VisualKind, string[]>();
+    for (const node of visible.nodes) {
+      const rect = `M${node.x} ${node.y}h${node.w}v${node.h}h${-node.w}Z`;
+      const bucket = buckets.get(node.kind);
+      if (bucket) bucket.push(rect);
+      else buckets.set(node.kind, [rect]);
+    }
+    return [...buckets].map(([kind, rects]) => ({ kind, d: rects.join(" ") }));
+  }, [batchedNodes, visible.nodes]);
 
   /**
    * Only the active node's wires are redrawn on hover. The bulk edge batches
@@ -883,12 +921,20 @@ export function CircuitGraph({ circuit, snapshot }: CircuitGraphProps) {
           <g className="graph-edges">
             {edgeBatches.map((batch) => (
               <g key={batch.className} className={`graph-edge ${batch.className}`}>
-                <path d={batch.d} vectorEffect="non-scaling-stroke" />
+                <path
+                  d={batch.d}
+                  vectorEffect="non-scaling-stroke"
+                  shapeRendering={batchedNodes ? "optimizeSpeed" : undefined}
+                />
               </g>
             ))}
             {activeEdgePath ? (
               <g className="graph-edge is-active">
-                <path d={activeEdgePath} vectorEffect="non-scaling-stroke" />
+                <path
+                  d={activeEdgePath}
+                  vectorEffect="non-scaling-stroke"
+                  shapeRendering={batchedNodes ? "optimizeSpeed" : undefined}
+                />
               </g>
             ) : null}
           </g>
@@ -915,22 +961,29 @@ export function CircuitGraph({ circuit, snapshot }: CircuitGraphProps) {
           </g>
 
           <g className="graph-nodes">
-            {visible.nodes.map((node) => (
-              <GraphNodeView
-                key={node.id}
-                node={node}
-                value={values.get(node.id)}
-                detailed={detailed}
-                active={node.id === activeNodeId}
-                connected={
-                  activeNodeId !== null &&
-                  (layout.neighbors.get(activeNodeId)?.has(node.id) ?? false)
-                }
-                onSelect={selectNode}
-                onHover={hoverNode}
-                onLeave={leaveNode}
-              />
-            ))}
+            {batchedNodes
+              ? nodeBatches.map((batch) => (
+                  <g key={batch.kind} className={`graph-node-batch kind-${batch.kind}`}>
+                    <path d={batch.d} shapeRendering="crispEdges" />
+                  </g>
+                ))
+              : visible.nodes.map((node) => (
+                  <GraphNodeView
+                    key={node.id}
+                    node={node}
+                    value={values.get(node.id)}
+                    detailed={detailed}
+                    accent={showAccent}
+                    active={node.id === activeNodeId}
+                    connected={
+                      activeNodeId !== null &&
+                      (layout.neighbors.get(activeNodeId)?.has(node.id) ?? false)
+                    }
+                    onSelect={selectNode}
+                    onHover={hoverNode}
+                    onLeave={leaveNode}
+                  />
+                ))}
           </g>
         </g>
       </svg>

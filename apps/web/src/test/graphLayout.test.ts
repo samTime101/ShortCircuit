@@ -199,4 +199,20 @@ describe("cullLayout", () => {
     const far = cullLayout(layout, centered(0.5));
     expect(far.nodes.length).toBeGreaterThan(close.nodes.length);
   });
+
+  it("returns the whole graph at the extreme zoom floor", () => {
+    const layout = buildLayout(bigCircuit());
+    const width = 608;
+    const height = 449;
+    const visible = cullLayout(layout, {
+      scale: 0.01,
+      x: width / 2 - (layout.width / 2) * 0.01,
+      y: height / 2 - (layout.height / 2) * 0.01,
+      width,
+      height,
+    });
+
+    expect(visible.nodes).toHaveLength(layout.nodes.length);
+    expect(visible.edges).toHaveLength(layout.edges.length);
+  });
 });

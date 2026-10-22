@@ -2056,6 +2056,32 @@ body.is-resizing-columns * {
   fill: var(--orange);
 }
 
+/* Batched node layer used when individual nodes would be smaller than a few pixels. */
+.graph-node-batch path {
+  fill: var(--text-faint);
+  stroke: none;
+}
+
+.graph-node-batch.kind-input path {
+  fill: var(--accent);
+}
+
+.graph-node-batch.kind-operation path {
+  fill: var(--violet);
+}
+
+.graph-node-batch.kind-constant path {
+  fill: var(--text-faint);
+}
+
+.graph-node-batch.kind-state path {
+  fill: var(--orange);
+}
+
+.graph-node-batch.kind-output path {
+  fill: var(--text-dim);
+}
+
 .node-op-glyph {
   fill: var(--text-dim);
   font-family: var(--font-mono);
