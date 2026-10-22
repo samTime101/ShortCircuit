@@ -3,10 +3,11 @@ import {
   BUILTINS,
   type CircuitIR,
   type CircuitNode,
-  type CircuitOutput,
   type SimulationSnapshot,
 } from "@shortcircuit/engine";
 import {
+  memo,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -22,6 +23,16 @@ const GAP_X = 86;
 const GAP_Y = 24;
 const PADDING = 54;
 const EDGE_PADDING = 32;
+
+/** Extra world space kept around the viewport so panning does not pop. */
+const VIEW_OVERSCAN = 180;
+/** Bus badges are useful, but only draw them when the view can afford them. */
+const MAX_WIDTH_BADGES = 160;
+const MIN_BADGE_SCALE = 0.7;
+/** Below this zoom, text is unreadable, so nodes collapse to colored blocks. */
+const MIN_DETAIL_SCALE = 0.5;
+/** Above this zoom, draw the full curved wires; below it, straight lines. */
+const MIN_CURVE_SCALE = 0.7;
 
 type VisualKind = "input" | "state" | "constant" | "operation" | "output";
 
@@ -40,8 +51,10 @@ interface GraphNode {
   w: number;
   h: number;
   rank: number;
-  value?: string;
-  output?: CircuitOutput;
+  title: string;
+  displayLabel: string;
+  subLabel: string;
+  opGlyph: string;
 }
 
 interface GraphEdge {
@@ -50,11 +63,35 @@ interface GraphEdge {
   from: string;
   to: string;
   width: number;
+  /** Precomputed curve, so panning and zooming never rebuild edge geometry. */
+  path: string;
+  /** Straight fallback used when wires are too small for curvature to read. */
+  straightPath: string;
+  labelX: number;
+  labelY: number;
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
 }
 
 interface GraphLayout {
   nodes: GraphNode[];
   edges: GraphEdge[];
+  /** Undirected adjacency, used to highlight the selected node's neighbors. */
+  neighbors: Map<string, Set<string>>;
+  depth: number;
+  width: number;
+  height: number;
+}
+
+interface GraphView {
+  scale: number;
+  x: number;
+  y: number;
+}
+
+interface Viewport extends GraphView {
   width: number;
   height: number;
 }
@@ -91,19 +128,21 @@ function truncate(value: string, max: number): string {
   return value.length > max ? `${value.slice(0, max - 1)}…` : value;
 }
 
-function nodeTitle(node: GraphNode): string {
-  if (node.kind === "output") return "Exposed output";
-  if (node.kind === "input") return "External input";
-  if (node.kind === "state") return "Stored state";
-  if (node.kind === "constant") return "Constant";
-  const builtin = node.op ? BUILTIN_BY_NAME.get(node.op) : undefined;
-  return builtin?.description ?? `${node.op ?? "Operation"} component`;
+function nodeTitle(kind: VisualKind, op?: string): string {
+  if (kind === "output") return "Exposed output";
+  if (kind === "input") return "External input";
+  if (kind === "state") return "Stored state";
+  if (kind === "constant") return "Constant";
+  const builtin = op ? BUILTIN_BY_NAME.get(op) : undefined;
+  return builtin?.description ?? `${op ?? "Operation"} component`;
 }
 
-function buildLayout(
-  circuit: CircuitIR,
-  snapshot: SimulationSnapshot | null,
-): GraphLayout {
+/**
+ * Builds the static geometry for a circuit. Signal values are deliberately
+ * kept out of this pass: the layout only changes when the circuit does, while
+ * values change on every simulation tick.
+ */
+export function buildLayout(circuit: CircuitIR): GraphLayout {
   const byId = new Map(circuit.nodes.map((node) => [node.id, node]));
   const needed = new Set<string>();
 
@@ -127,7 +166,6 @@ function buildLayout(
     .map((id) => byId.get(id))
     .filter((node): node is CircuitNode => Boolean(node));
 
-  const values = snapshot?.nodes;
   const baseNodes = new Map<string, GraphNode>();
   for (const node of visible) {
     const kind: VisualKind =
@@ -153,7 +191,22 @@ function buildLayout(
       w: kind === "constant" ? 82 : 166,
       h: kind === "constant" ? 34 : 58,
       rank: 0,
-      value: values?.[node.id],
+      title: nodeTitle(kind, node.op),
+      displayLabel: truncate(node.label, kind === "operation" ? 15 : 20),
+      subLabel:
+        kind === "operation"
+          ? `${node.op ?? "OP"}${
+              node.scope.length ? ` · ${truncate(node.scope.join("."), 13)}` : ""
+            }`
+          : kind === "input"
+            ? "INPUT"
+            : kind === "state"
+              ? "STATE"
+              : "LITERAL",
+      opGlyph:
+        kind === "operation"
+          ? (BUILTIN_BY_NAME.get(node.op ?? "")?.symbol ?? node.op?.slice(0, 3) ?? "OP")
+          : "",
     });
   }
 
@@ -172,14 +225,27 @@ function buildLayout(
     w: 166,
     h: 52,
     rank: 0,
-    value: snapshot?.outputs[output.name]?.binary,
-    output,
+    title: nodeTitle("output"),
+    displayLabel: truncate(output.name, 20),
+    subLabel: "OUTPUT",
+    opGlyph: "",
   }));
 
   const all = [...baseNodes.values(), ...outputNodes];
   const dependencies = new Map<string, string[]>();
+  const neighbors = new Map<string, Set<string>>();
   const edges: GraphEdge[] = [];
   let edgeSerial = 0;
+
+  const connect = (from: string, to: string) => {
+    let set = neighbors.get(from);
+    if (!set) {
+      set = new Set();
+      neighbors.set(from, set);
+    }
+    set.add(to);
+  };
+
   for (const node of baseNodes.values()) {
     const original = byId.get(node.id);
     if (!original) continue;
@@ -192,9 +258,20 @@ function buildLayout(
         from: dep,
         to: node.id,
         width: baseNodes.get(dep)?.width ?? 1,
+        path: "",
+        straightPath: "",
+        labelX: 0,
+        labelY: 0,
+        minX: 0,
+        minY: 0,
+        maxX: 0,
+        maxY: 0,
       });
+      connect(dep, node.id);
+      connect(node.id, dep);
     }
   }
+
   for (const outputNode of outputNodes) {
     if (outputNode.sourceId && baseNodes.has(outputNode.sourceId)) {
       dependencies.set(outputNode.id, [outputNode.sourceId]);
@@ -204,7 +281,17 @@ function buildLayout(
         from: outputNode.sourceId,
         to: outputNode.id,
         width: outputNode.width,
+        path: "",
+        straightPath: "",
+        labelX: 0,
+        labelY: 0,
+        minX: 0,
+        minY: 0,
+        maxX: 0,
+        maxY: 0,
       });
+      connect(outputNode.sourceId, outputNode.id);
+      connect(outputNode.id, outputNode.sourceId);
     } else {
       dependencies.set(outputNode.id, []);
     }
@@ -219,16 +306,23 @@ function buildLayout(
     if (ranking.has(id)) return 0;
     ranking.add(id);
     const deps = dependencies.get(id) ?? [];
-    const rank = deps.length === 0 ? 0 : Math.max(...deps.map((dep) => rankOf(dep) + 1));
+    let rank = 0;
+    for (const dep of deps) {
+      const candidate = rankOf(dep) + 1;
+      if (candidate > rank) rank = candidate;
+    }
     ranking.delete(id);
     ranks.set(id, rank);
     return rank;
   };
   for (const node of all) rankOf(node.id);
-  const maxBaseRank = Math.max(
-    0,
-    ...all.filter((node) => !node.id.startsWith("output:")).map((node) => ranks.get(node.id) ?? 0),
-  );
+
+  let maxBaseRank = 0;
+  for (const node of all) {
+    if (node.id.startsWith("output:")) continue;
+    const rank = ranks.get(node.id) ?? 0;
+    if (rank > maxBaseRank) maxBaseRank = rank;
+  }
   for (const output of outputNodes) {
     ranks.set(output.id, maxBaseRank + 1);
   }
@@ -275,14 +369,16 @@ function buildLayout(
   const totalColumnWidth = rankCount * CELL_WIDTH + (rankCount - 1) * GAP_X;
   let tallest = 0;
   for (const column of columns) {
-    const height = column.reduce((sum, node) => sum + node.h, 0) + Math.max(0, column.length - 1) * GAP_Y;
+    const height =
+      column.reduce((sum, node) => sum + node.h, 0) + Math.max(0, column.length - 1) * GAP_Y;
     tallest = Math.max(tallest, height);
   }
   const height = Math.max(340, tallest + PADDING * 2);
   const width = Math.max(520, totalColumnWidth + PADDING * 2);
 
   columns.forEach((column, rank) => {
-    const columnHeight = column.reduce((sum, node) => sum + node.h, 0) + Math.max(0, column.length - 1) * GAP_Y;
+    const columnHeight =
+      column.reduce((sum, node) => sum + node.h, 0) + Math.max(0, column.length - 1) * GAP_Y;
     let y = (height - columnHeight) / 2;
     const columnLeft = PADDING + rank * (CELL_WIDTH + GAP_X);
     for (const node of column) {
@@ -292,7 +388,84 @@ function buildLayout(
     }
   });
 
-  return { nodes: all, edges, width, height };
+  const nodeById = new Map(all.map((node) => [node.id, node]));
+  for (const edge of edges) {
+    const from = nodeById.get(edge.from);
+    const to = nodeById.get(edge.to);
+    if (!from || !to) continue;
+    const x1 = from.x + from.w;
+    const y1 = from.y + from.h / 2;
+    const x2 = to.x;
+    const y2 = to.y + to.h / 2;
+    const bend = Math.max(34, Math.abs(x2 - x1) * 0.45);
+    edge.path = `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`;
+    edge.straightPath = `M ${x1} ${y1} L ${x2} ${y2}`;
+    edge.labelX = (x1 + x2) / 2;
+    edge.labelY = (y1 + y2) / 2 - 6;
+    const reach = bend + 24;
+    edge.minX = Math.min(x1, x2) - reach;
+    edge.maxX = Math.max(x1, x2) + reach;
+    edge.minY = Math.min(y1, y2) - 40;
+    edge.maxY = Math.max(y1, y2) + 40;
+  }
+
+  return {
+    nodes: all,
+    edges,
+    neighbors,
+    depth: rankCount,
+    width,
+    height,
+  };
+}
+
+/**
+ * Returns only the nodes and edges that can touch the visible area. A small
+ * overscan margin keeps nodes from popping in while the user pans.
+ */
+export function cullLayout(
+  layout: GraphLayout,
+  viewport: Viewport,
+): { nodes: GraphNode[]; edges: GraphEdge[] } {
+  if (viewport.width <= 0 || viewport.height <= 0 || viewport.scale <= 0) {
+    return { nodes: [], edges: [] };
+  }
+  const overscan = Math.min(VIEW_OVERSCAN / viewport.scale, 480);
+  const minX = -viewport.x / viewport.scale - overscan;
+  const maxX = (viewport.width - viewport.x) / viewport.scale + overscan;
+  const minY = -viewport.y / viewport.scale - overscan;
+  const maxY = (viewport.height - viewport.y) / viewport.scale + overscan;
+
+  const nodes = layout.nodes.filter(
+    (node) =>
+      node.x + node.w >= minX &&
+      node.x <= maxX &&
+      node.y + node.h >= minY &&
+      node.y <= maxY,
+  );
+  const edges = layout.edges.filter(
+    (edge) =>
+      edge.maxX >= minX &&
+      edge.minX <= maxX &&
+      edge.maxY >= minY &&
+      edge.minY <= maxY,
+  );
+  return { nodes, edges };
+}
+
+function requestFrame(callback: FrameRequestCallback): number {
+  if (typeof window.requestAnimationFrame === "function") {
+    return window.requestAnimationFrame(callback);
+  }
+  return window.setTimeout(() => callback(performance.now()), 16);
+}
+
+function cancelFrame(id: number): void {
+  if (typeof window.cancelAnimationFrame === "function") {
+    window.cancelAnimationFrame(id);
+    return;
+  }
+  window.clearTimeout(id);
 }
 
 function useElementSize(ref: React.RefObject<HTMLDivElement | null>): { width: number; height: number } {
@@ -309,36 +482,158 @@ function useElementSize(ref: React.RefObject<HTMLDivElement | null>): { width: n
   return size;
 }
 
+interface GraphNodeViewProps {
+  node: GraphNode;
+  value: string | undefined;
+  detailed: boolean;
+  active: boolean;
+  connected: boolean;
+  onSelect(id: string): void;
+  onHover(id: string): void;
+  onLeave(id: string): void;
+}
+
+const GraphNodeView = memo(function GraphNodeView({
+  node,
+  value,
+  detailed,
+  active,
+  connected,
+  onSelect,
+  onHover,
+  onLeave,
+}: GraphNodeViewProps) {
+  const valueState =
+    value === undefined ? "unknown" : value.includes("1") ? "high" : "low";
+  return (
+    <g
+      data-graph-node
+      className={`graph-node kind-${node.kind} ${active ? "is-active" : ""} ${
+        connected ? "is-connected" : ""
+      } value-${valueState}`}
+      transform={`translate(${node.x} ${node.y})`}
+      tabIndex={0}
+      role="button"
+      aria-label={`${node.label}, ${node.title}, value ${value ?? "unknown"}`}
+      onClick={(event) => {
+        event.stopPropagation();
+        onSelect(node.id);
+      }}
+      onPointerDown={(event) => event.stopPropagation()}
+      onMouseEnter={() => onHover(node.id)}
+      onMouseLeave={() => onLeave(node.id)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onSelect(node.id);
+        }
+      }}
+    >
+      <rect
+        className="node-card"
+        x={0}
+        y={0}
+        width={node.w}
+        height={node.h}
+        rx={node.kind === "constant" ? 9 : 11}
+      />
+      <rect className="node-accent" x={0} y={12} width={3} height={node.h - 24} rx={2} />
+      {detailed ? (
+        <>
+          {node.kind === "operation" ? (
+            <text className="node-op-glyph" x={13} y={21}>
+              {node.opGlyph}
+            </text>
+          ) : null}
+          <text className="node-label" x={node.kind === "operation" ? 45 : 13} y={22}>
+            {node.displayLabel}
+          </text>
+          <text className="node-sub" x={13} y={node.h - 12}>
+            {node.subLabel}
+          </text>
+          <text className="node-value" x={node.w - 11} y={22} textAnchor="end">
+            {compactValue(value, node.width)}
+          </text>
+          {node.width > 1 ? (
+            <text className="node-width" x={node.w - 11} y={node.h - 12} textAnchor="end">
+              {node.width}b
+            </text>
+          ) : null}
+        </>
+      ) : null}
+    </g>
+  );
+});
+
 export function CircuitGraph({ circuit, snapshot }: CircuitGraphProps) {
   const stageRef = useRef<HTMLDivElement>(null);
   const size = useElementSize(stageRef);
-  const layout = useMemo(() => buildLayout(circuit, snapshot), [circuit, snapshot]);
-  const [view, setView] = useState({ scale: 1, x: 0, y: 0 });
+  const layout = useMemo(() => buildLayout(circuit), [circuit]);
+  const [view, setView] = useState<GraphView>({ scale: 1, x: 0, y: 0 });
+  const viewRef = useRef<GraphView>(view);
+  const frameRef = useRef(0);
+  const queuedRef = useRef<GraphView | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
-  const dragRef = useRef<{ x: number; y: number; viewX: number; viewY: number; moved: boolean } | null>(null);
+  const dragRef = useRef<{ x: number; y: number; view: GraphView; moved: boolean } | null>(null);
 
-  const fit = () => {
+  const applyView = useCallback((next: GraphView) => {
+    if (frameRef.current) {
+      cancelFrame(frameRef.current);
+      frameRef.current = 0;
+    }
+    queuedRef.current = null;
+    viewRef.current = next;
+    setView(next);
+  }, []);
+
+  /**
+   * Coalesces wheel and drag updates into one React render per animation
+   * frame. The transform must follow the pointer immediately, so the latest
+   * view is kept in a ref and only the final value reaches state.
+   */
+  const scheduleView = useCallback((next: GraphView) => {
+    viewRef.current = next;
+    queuedRef.current = next;
+    if (frameRef.current) return;
+    frameRef.current = requestFrame(() => {
+      frameRef.current = 0;
+      const pending = queuedRef.current;
+      queuedRef.current = null;
+      if (pending) setView(pending);
+    });
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (frameRef.current) cancelFrame(frameRef.current);
+    },
+    [],
+  );
+
+  const fit = useCallback(() => {
     if (!size.width || !size.height) return;
     // Never zoom out past the point where the labels stop being readable:
     // a wide design is panned, not shrunk into a wall of grey.
     const scale = Math.max(
       0.62,
-      Math.min(1.05, (size.width - EDGE_PADDING * 2) / layout.width, (size.height - EDGE_PADDING * 2) / layout.height),
+      Math.min(
+        1.05,
+        (size.width - EDGE_PADDING * 2) / layout.width,
+        (size.height - EDGE_PADDING * 2) / layout.height,
+      ),
     );
-    setView({
+    applyView({
       scale,
       x: (size.width - layout.width * scale) / 2,
       y: (size.height - layout.height * scale) / 2,
     });
-  };
+  }, [applyView, layout.width, layout.height, size.width, size.height]);
 
   useEffect(() => {
     fit();
-    // Refit when a new circuit or viewport arrives, not when signal values change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [circuit, layout.width, layout.height, size.width, size.height]);
+  }, [circuit, fit]);
 
   useEffect(() => {
     setSelectedId(null);
@@ -353,75 +648,118 @@ export function CircuitGraph({ circuit, snapshot }: CircuitGraphProps) {
       const rect = element.getBoundingClientRect();
       const cx = event.clientX - rect.left;
       const cy = event.clientY - rect.top;
-      setView((current) => {
-        const factor = Math.exp(-event.deltaY * 0.0012);
-        const nextScale = Math.max(0.18, Math.min(2.6, current.scale * factor));
-        const ratio = nextScale / current.scale;
-        return {
-          scale: nextScale,
-          x: cx - (cx - current.x) * ratio,
-          y: cy - (cy - current.y) * ratio,
-        };
+      const current = viewRef.current;
+      const factor = Math.exp(-event.deltaY * 0.0012);
+      const nextScale = Math.max(0.18, Math.min(2.6, current.scale * factor));
+      const ratio = nextScale / current.scale;
+      scheduleView({
+        scale: nextScale,
+        x: cx - (cx - current.x) * ratio,
+        y: cy - (cy - current.y) * ratio,
       });
     };
     element.addEventListener("wheel", onWheel, { passive: false });
     return () => element.removeEventListener("wheel", onWheel);
-  }, []);
+  }, [scheduleView]);
 
   const zoomBy = (factor: number) => {
-    setView((current) => {
-      const nextScale = Math.max(0.18, Math.min(2.6, current.scale * factor));
-      const ratio = nextScale / current.scale;
-      const cx = size.width / 2;
-      const cy = size.height / 2;
-      return {
-        scale: nextScale,
-        x: cx - (cx - current.x) * ratio,
-        y: cy - (cy - current.y) * ratio,
-      };
+    const current = viewRef.current;
+    const nextScale = Math.max(0.18, Math.min(2.6, current.scale * factor));
+    const ratio = nextScale / current.scale;
+    const cx = size.width / 2;
+    const cy = size.height / 2;
+    applyView({
+      scale: nextScale,
+      x: cx - (cx - current.x) * ratio,
+      y: cy - (cy - current.y) * ratio,
     });
   };
 
   const onPointerDown = (event: ReactPointerEvent<SVGSVGElement>) => {
     if (event.button !== 0) return;
     if ((event.target as Element).closest("[data-graph-node]")) return;
-    dragRef.current = { x: event.clientX, y: event.clientY, viewX: view.x, viewY: view.y, moved: false };
+    dragRef.current = {
+      x: event.clientX,
+      y: event.clientY,
+      view: viewRef.current,
+      moved: false,
+    };
     setDragging(true);
-    event.currentTarget.setPointerCapture(event.pointerId);
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture is an enhancement; dragging still works without it.
+    }
   };
+
   const onPointerMove = (event: ReactPointerEvent<SVGSVGElement>) => {
     const drag = dragRef.current;
     if (!drag) return;
     const dx = event.clientX - drag.x;
     const dy = event.clientY - drag.y;
     if (Math.abs(dx) + Math.abs(dy) > 2) drag.moved = true;
-    setView((current) => ({ ...current, x: drag.viewX + dx, y: drag.viewY + dy }));
+    scheduleView({ ...drag.view, x: drag.view.x + dx, y: drag.view.y + dy });
   };
+
   const onPointerUp = (event: ReactPointerEvent<SVGSVGElement>) => {
     if (dragRef.current && !dragRef.current.moved) setSelectedId(null);
     dragRef.current = null;
     setDragging(false);
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+    if (
+      typeof event.currentTarget.hasPointerCapture === "function" &&
+      event.currentTarget.hasPointerCapture(event.pointerId)
+    ) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
   };
 
-  const connectedEdges = useMemo(() => {
-    const active = selectedId ?? hoveredId;
-    if (!active) return new Set<string>();
-    return new Set(
-      layout.edges
-        .filter((edge) => edge.from === active || edge.to === active)
-        .map((edge) => edge.id),
-    );
-  }, [layout.edges, selectedId, hoveredId]);
+  const values = useMemo(() => {
+    const map = new Map<string, string>();
+    if (!snapshot) return map;
+    for (const node of layout.nodes) {
+      if (node.kind === "output") {
+        const signal = snapshot.outputs[node.label];
+        if (signal) map.set(node.id, signal.binary);
+      } else {
+        const value = snapshot.nodes[node.id];
+        if (value !== undefined) map.set(node.id, value);
+      }
+    }
+    return map;
+  }, [layout, snapshot]);
 
-  const nodeMap = useMemo(() => new Map(layout.nodes.map((node) => [node.id, node])), [layout.nodes]);
+  const circuitNodes = useMemo(
+    () => new Map(circuit.nodes.map((node) => [node.id, node])),
+    [circuit.nodes],
+  );
+
+  const nodeMap = useMemo(
+    () => new Map(layout.nodes.map((node) => [node.id, node])),
+    [layout.nodes],
+  );
+
+  const visible = useMemo(
+    () =>
+      cullLayout(layout, {
+        scale: view.scale,
+        x: view.x,
+        y: view.y,
+        width: size.width,
+        height: size.height,
+      }),
+    [layout, view.scale, view.x, view.y, size.width, size.height],
+  );
+
+  const detailed = view.scale >= MIN_DETAIL_SCALE;
+  const curved = view.scale >= MIN_CURVE_SCALE;
+  const activeNodeId = selectedId ?? hoveredId;
   const selected = selectedId ? nodeMap.get(selectedId) : undefined;
   const hovered = hoveredId ? nodeMap.get(hoveredId) : undefined;
+  const selectedValue = selected ? values.get(selected.id) : undefined;
+  const hoveredValue = hovered ? values.get(hovered.id) : undefined;
 
   const originalSelected = selected?.sourceId
-    ? circuit.nodes.find((node) => node.id === selected.sourceId)
+    ? circuitNodes.get(selected.sourceId)
     : undefined;
 
   const builtinSpec = selected?.op
@@ -441,28 +779,51 @@ export function CircuitGraph({ circuit, snapshot }: CircuitGraphProps) {
     ? (originalSelected?.operands ?? [])
         .map((id) => nodeMap.get(id))
         .filter((node): node is GraphNode => Boolean(node))
-        .map((node) => ({ name: node.label, value: compactValue(node.value, node.width) }))
+        .map((node) => ({
+          name: node.label,
+          value: compactValue(values.get(node.id), node.width),
+        }))
     : [];
 
-  const edgePath = (edge: GraphEdge) => {
-    const from = nodeMap.get(edge.from);
-    const to = nodeMap.get(edge.to);
-    if (!from || !to) return "";
-    const x1 = from.x + from.w;
-    const y1 = from.y + from.h / 2;
-    const x2 = to.x;
-    const y2 = to.y + to.h / 2;
-    const bend = Math.max(34, Math.abs(x2 - x1) * 0.45);
-    return `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`;
-  };
+  const edgeBatches = useMemo(() => {
+    const buckets = new Map<string, string>();
+    for (const edge of visible.edges) {
+      const source = values.get(edge.from);
+      const tone =
+        source === undefined ? "unknown" : source.includes("1") ? "high" : "low";
+      const path = curved ? edge.path : edge.straightPath;
+      const existing = buckets.get(tone);
+      buckets.set(tone, existing ? `${existing} ${path}` : path);
+    }
+    return [...buckets].map(([className, d]) => ({ className, d }));
+  }, [visible.edges, values, curved]);
 
-  const edgeValue = (edge: GraphEdge) => {
-    const from = nodeMap.get(edge.from);
-    if (!from?.value) return "unknown";
-    return from.value.includes("1") ? "high" : "low";
-  };
+  /**
+   * Only the active node's wires are redrawn on hover. The bulk edge batches
+   * stay untouched, so moving the pointer never re-parses thousands of paths.
+   */
+  const activeEdgePath = useMemo(() => {
+    if (!activeNodeId) return "";
+    let path = "";
+    for (const edge of visible.edges) {
+      if (edge.from !== activeNodeId && edge.to !== activeNodeId) continue;
+      const segment = curved ? edge.path : edge.straightPath;
+      path = path ? `${path} ${segment}` : segment;
+    }
+    return path;
+  }, [visible.edges, activeNodeId, curved]);
 
-  const activeNode = selectedId ?? hoveredId;
+  const widthBadges = useMemo(() => {
+    if (view.scale < MIN_BADGE_SCALE) return [];
+    const badges = visible.edges.filter((edge) => edge.width > 1);
+    return badges.length <= MAX_WIDTH_BADGES ? badges : [];
+  }, [visible.edges, view.scale]);
+
+  const selectNode = useCallback((id: string) => setSelectedId(id), []);
+  const hoverNode = useCallback((id: string) => setHoveredId(id), []);
+  const leaveNode = useCallback((id: string) => {
+    setHoveredId((current) => (current === id ? null : current));
+  }, []);
 
   if (layout.nodes.length === 0) {
     return (
@@ -480,12 +841,12 @@ export function CircuitGraph({ circuit, snapshot }: CircuitGraphProps) {
             <strong>{hovered.label}</strong>
             <span>{hovered.kind === "operation" ? hovered.op : hovered.kind}</span>
           </div>
-          <p>{nodeTitle(hovered)}</p>
+          <p>{hovered.title}</p>
           <div className="graph-hover-meta">
             <span>
               {hovered.width} bit{hovered.width === 1 ? "" : "s"}
             </span>
-            <span className="mono">{hovered.value ?? "—"}</span>
+            <span className="mono">{hoveredValue ?? "—"}</span>
           </div>
         </div>
       ) : null}
@@ -504,7 +865,7 @@ export function CircuitGraph({ circuit, snapshot }: CircuitGraphProps) {
 
       <div className="graph-overlay graph-layers">
         <span>{layout.nodes.length} nodes</span>
-        <span>{Math.max(...layout.nodes.map((node) => node.rank)) + 1} layers</span>
+        <span>{layout.depth} layers</span>
       </div>
 
       <svg
@@ -520,104 +881,56 @@ export function CircuitGraph({ circuit, snapshot }: CircuitGraphProps) {
       >
         <g transform={`translate(${view.x} ${view.y}) scale(${view.scale})`}>
           <g className="graph-edges">
-            {layout.edges.map((edge) => {
-              const active = connectedEdges.has(edge.id);
-              const muted = Boolean(activeNode) && !active;
+            {edgeBatches.map((batch) => (
+              <g key={batch.className} className={`graph-edge ${batch.className}`}>
+                <path d={batch.d} vectorEffect="non-scaling-stroke" />
+              </g>
+            ))}
+            {activeEdgePath ? (
+              <g className="graph-edge is-active">
+                <path d={activeEdgePath} vectorEffect="non-scaling-stroke" />
+              </g>
+            ) : null}
+          </g>
+
+          <g className="graph-widths">
+            {widthBadges.map((edge) => {
+              const active = activeNodeId === edge.from || activeNodeId === edge.to;
+              const muted = activeNodeId !== null && !active;
               return (
                 <g
                   key={edge.key}
-                  className={`graph-edge ${edgeValue(edge)} ${active ? "is-active" : ""} ${
+                  className={`edge-width ${active ? "is-active" : ""} ${
                     muted ? "is-muted" : ""
                   }`}
+                  transform={`translate(${edge.labelX} ${edge.labelY})`}
                 >
-                  <path d={edgePath(edge)} vectorEffect="non-scaling-stroke" />
-                  {edge.width > 1 ? (
-                    (() => {
-                      const from = nodeMap.get(edge.from);
-                      const to = nodeMap.get(edge.to);
-                      if (!from || !to) return null;
-                      const x = (from.x + from.w + to.x) / 2;
-                      const y = (from.y + from.h / 2 + to.y + to.h / 2) / 2 - 6;
-                      return (
-                        <g className="edge-width" transform={`translate(${x} ${y})`}>
-                          <rect x={-10} y={-8} width={20} height={13} rx={4} />
-                          <text x={0} y={2} textAnchor="middle">
-                            {edge.width}b
-                          </text>
-                        </g>
-                      );
-                    })()
-                  ) : null}
+                  <rect x={-10} y={-8} width={20} height={13} rx={4} />
+                  <text x={0} y={2} textAnchor="middle">
+                    {edge.width}b
+                  </text>
                 </g>
               );
             })}
           </g>
 
           <g className="graph-nodes">
-            {layout.nodes.map((node) => {
-              const active = node.id === selectedId || node.id === hoveredId;
-              const connected =
-                activeNode &&
-                (connectedEdges.has(`${node.id}->${activeNode}`) ||
-                  connectedEdges.has(`${activeNode}->${node.id}`));
-              const valueState = node.value === undefined ? "unknown" : node.value.includes("1") ? "high" : "low";
-              return (
-                <g
-                  key={node.id}
-                  data-graph-node
-                  className={`graph-node kind-${node.kind} ${active ? "is-active" : ""} ${
-                    connected ? "is-connected" : ""
-                  } value-${valueState}`}
-                  transform={`translate(${node.x} ${node.y})`}
-                  tabIndex={0}
-                  role="button"
-                  aria-label={`${node.label}, ${nodeTitle(node)}, value ${node.value ?? "unknown"}`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setSelectedId(node.id);
-                  }}
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onMouseEnter={() => setHoveredId(node.id)}
-                  onMouseLeave={() => setHoveredId((current) => (current === node.id ? null : current))}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      setSelectedId(node.id);
-                    }
-                  }}
-                >
-                  <rect className="node-card" x={0} y={0} width={node.w} height={node.h} rx={node.kind === "constant" ? 9 : 11} />
-                  <rect className="node-accent" x={0} y={12} width={3} height={node.h - 24} rx={2} />
-                  {node.kind === "operation" ? (
-                    <text className="node-op-glyph" x={13} y={21}>
-                      {BUILTIN_BY_NAME.get(node.op ?? "")?.symbol ?? node.op?.slice(0, 3) ?? "OP"}
-                    </text>
-                  ) : null}
-                  <text className="node-label" x={node.kind === "operation" ? 45 : 13} y={22}>
-                    {truncate(node.label, node.kind === "operation" ? 15 : 20)}
-                  </text>
-                  <text className="node-sub" x={13} y={node.h - 12}>
-                    {node.kind === "operation"
-                      ? `${node.op ?? "OP"}${node.scope.length ? ` · ${truncate(node.scope.join("."), 13)}` : ""}`
-                      : node.kind === "input"
-                        ? "INPUT"
-                        : node.kind === "state"
-                          ? "STATE"
-                          : node.kind === "constant"
-                            ? "LITERAL"
-                            : "OUTPUT"}
-                  </text>
-                  <text className="node-value" x={node.w - 11} y={22} textAnchor="end">
-                    {compactValue(node.value, node.width)}
-                  </text>
-                  {node.width > 1 ? (
-                    <text className="node-width" x={node.w - 11} y={node.h - 12} textAnchor="end">
-                      {node.width}b
-                    </text>
-                  ) : null}
-                </g>
-              );
-            })}
+            {visible.nodes.map((node) => (
+              <GraphNodeView
+                key={node.id}
+                node={node}
+                value={values.get(node.id)}
+                detailed={detailed}
+                active={node.id === activeNodeId}
+                connected={
+                  activeNodeId !== null &&
+                  (layout.neighbors.get(activeNodeId)?.has(node.id) ?? false)
+                }
+                onSelect={selectNode}
+                onHover={hoverNode}
+                onLeave={leaveNode}
+              />
+            ))}
           </g>
         </g>
       </svg>
@@ -626,7 +939,7 @@ export function CircuitGraph({ circuit, snapshot }: CircuitGraphProps) {
         <aside className="graph-inspector">
           <div className="graph-inspector-head">
             <div>
-              <span className="eyebrow">{nodeTitle(selected)}</span>
+              <span className="eyebrow">{selected.title}</span>
               <h3>{selected.label}</h3>
             </div>
             <button className="icon-button tiny" onClick={() => setSelectedId(null)} aria-label="Close node details">
@@ -634,7 +947,7 @@ export function CircuitGraph({ circuit, snapshot }: CircuitGraphProps) {
             </button>
           </div>
           <div className="graph-inspector-value">
-            <span className="mono">{compactValue(selected.value, selected.width)}</span>
+            <span className="mono">{compactValue(selectedValue, selected.width)}</span>
             <span>
               {selected.width} bit{selected.width === 1 ? "" : "s"}
             </span>
@@ -650,7 +963,7 @@ export function CircuitGraph({ circuit, snapshot }: CircuitGraphProps) {
             <p className="graph-inspector-explain is-detail">
               Right now:{" "}
               {liveInputs.map((input) => `${input.name} = ${input.value}`).join(", ")} →{" "}
-              {compactValue(selected.value, selected.width)}
+              {compactValue(selectedValue, selected.width)}
             </p>
           ) : null}
           {truthTable ? (
@@ -678,7 +991,7 @@ export function CircuitGraph({ circuit, snapshot }: CircuitGraphProps) {
           <dl>
             <div>
               <dt>Decimal</dt>
-              <dd className="mono">{decimalValue(selected.value)}</dd>
+              <dd className="mono">{decimalValue(selectedValue)}</dd>
             </div>
             <div>
               <dt>{selected.kind === "output" ? "Source" : "Type"}</dt>
@@ -732,6 +1045,4 @@ export function CircuitGraph({ circuit, snapshot }: CircuitGraphProps) {
       ) : null}
     </div>
   );
-
-
 }

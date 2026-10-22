@@ -1803,6 +1803,8 @@ body.is-resizing-columns * {
   display: block;
   width: 100%;
   height: 100%;
+  touch-action: none;
+  user-select: none;
 }
 
 .graph-overlay {
@@ -2121,21 +2123,21 @@ body.is-resizing-columns * {
   letter-spacing: 0.02em;
 }
 
-.graph-edge.is-active .edge-width rect {
+.edge-width.is-active rect {
   fill: var(--panel-3);
   stroke: var(--violet);
 }
 
-.graph-edge.is-active .edge-width text {
+.edge-width.is-active text {
   fill: var(--violet);
 }
 
-.graph-edge.is-muted .edge-width rect {
+.edge-width.is-muted rect {
   fill: var(--panel);
   stroke: var(--line);
 }
 
-.graph-edge.is-muted {
+.edge-width.is-muted {
   opacity: 0.4;
 }
 
