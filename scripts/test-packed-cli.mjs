@@ -83,8 +83,20 @@ try {
     throw new Error("the installed binary did not print the command help");
   }
 
+  const listed = run(bin, ["package", "list"], projectDir);
+  const gatesRow = listed
+    .split("\n")
+    .find((line) => line.startsWith("@shortcircuit/gates"));
+  if (!gatesRow || !gatesRow.includes("enabled")) {
+    throw new Error(`unexpected package list output:\n${listed}`);
+  }
+
   writeFileSync(join(projectDir, "half-adder.lf"), SOURCE);
-  const compiled = run(bin, ["compile", "half-adder.lf"], projectDir);
+  const compiled = run(
+    bin,
+    ["compile", "half-adder.lf", "--only-packages", "@shortcircuit/gates"],
+    projectDir,
+  );
   if (!compiled.includes("Compiled 1 circuit")) {
     throw new Error(`unexpected compile output:\n${compiled}`);
   }
@@ -94,9 +106,62 @@ try {
     throw new Error(`unexpected test output:\n${tested}`);
   }
 
+  const localDir = join(projectDir, "local-package");
+  mkdirSync(join(localDir, "macros", "twice"), { recursive: true });
+  writeFileSync(
+    join(localDir, "manifest.json"),
+    JSON.stringify(
+      {
+        schema: "shortcircuit.package/v1",
+        name: "@test/double",
+        version: "0.1.0",
+        exports: [
+          {
+            kind: "macro",
+            name: "TWICE",
+            source: "macros/twice/macro.lf",
+          },
+        ],
+      },
+      null,
+      2,
+    ),
+  );
+  writeFileSync(
+    join(localDir, "macros", "twice", "macro.lf"),
+    "MACRO TWICE(x)\n  BODY NAND(NAND(x, x), NAND(x, x))\nEND\n",
+  );
+  writeFileSync(
+    join(projectDir, "local.lf"),
+    `CIRCUIT Local
+  INPUT a
+  y = TWICE(a)
+  OUTPUT y
+END
+`,
+  );
+  const localCompiled = run(
+    bin,
+    [
+      "compile",
+      "local.lf",
+      "--package",
+      localDir,
+      "--only-packages",
+      "@test/double",
+      "--no-default-packages",
+    ],
+    projectDir,
+  );
+  if (!localCompiled.includes("Compiled 1 circuit")) {
+    throw new Error(`unexpected local package compile output:\n${localCompiled}`);
+  }
+
   console.log(`Installed ${installed.name}@${installed.version} in a clean project.`);
+  console.log(gatesRow.trim());
   console.log(compiled.trim());
   console.log(tested.trim().split("\n").at(-1));
+  console.log(localCompiled.trim());
 } catch (error) {
   console.error(error instanceof Error ? error.message : error);
   process.exitCode = 1;

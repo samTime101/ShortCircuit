@@ -198,6 +198,38 @@ Every command exits with 0 on success and 1 on a diagnostic error or a failed
 test, so it works in a pipeline. `--json` prints machine-readable output where
 it is available.
 
+### Packages
+
+The CLI ships with the bundled package snapshot. `package list` shows every
+package, its export count, and whether it is enabled:
+
+```bash
+shortcircuit package list
+shortcircuit package list --json
+```
+
+Change the active packages on any compile command:
+
+```bash
+shortcircuit compile circuit.lf --disable-package @shortcircuit/arithmetic
+shortcircuit compile circuit.lf --only-packages @shortcircuit/gates
+shortcircuit compile circuit.lf --no-default-packages
+```
+
+Load a local package directory, or point directly at its manifest:
+
+```bash
+shortcircuit compile circuit.lf --package /path/to/package
+shortcircuit package list --package /path/to/package/manifest.json
+```
+
+`--package`, `--disable-package`, and `--only-packages` are repeatable.
+`--disable-package` and `--only-packages` also accept comma-separated names.
+`--only-packages` is an allowlist, so list a package's dependencies too. Local
+packages must use a name that is not already bundled. The loader inlines the
+package source, docs, and tests, so the same directory layout works with the
+engine API.
+
 ### Releasing
 
 The `Release CLI` GitHub Actions workflow publishes the CLI. Update the version

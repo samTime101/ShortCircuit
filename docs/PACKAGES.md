@@ -515,8 +515,22 @@ The main repository must point at the package commit that contains the built
 
 ## 13. Using a custom package outside the registry
 
+The CLI can load a package directory directly. It reads `manifest.json`,
+resolves every source path, and inlines the source, docs, and tests:
+
+```bash
+shortcircuit compile circuit.lf --package /path/to/package
+shortcircuit package list --package /path/to/package
+```
+
+`--package` accepts a directory or a `manifest.json` path and can be repeated.
+Use `--no-default-packages` to load only the local packages, or
+`--only-packages @acme/parity,@shortcircuit/gates` to keep the parity package
+and its dependency active. `--only-packages` is an allowlist. Local package
+names must not collide with the bundled snapshot.
+
 The studio package manager lists packages from the bundled snapshot. A host can
-load a different bundle through the compiler API:
+also load a different bundle through the compiler API:
 
 ```ts
 import { compile, type PackageBundle } from "@shortcircuit/engine";

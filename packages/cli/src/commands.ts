@@ -1,10 +1,14 @@
 import {
+  DEFAULT_PACKAGE_BUNDLE,
   compile,
   exportVerilog,
   formatSource,
   generateTruthTable,
   runTests,
+  type CompileOptions,
   type CompileResult,
+  type PackageBundle,
+  type PackageManifest,
 } from "@shortcircuit/engine";
 
 export interface CommandResult {
@@ -19,6 +23,24 @@ export interface CommandOptions {
   circuit?: string;
   out?: string;
   write?: boolean;
+  packages?: PackageBundle;
+  packageOrigins?: Map<string, string>;
+  disableDefaultPackages?: boolean;
+  enabledPackages?: string[];
+  disabledPackages?: string[];
+}
+
+function compileOptions(options: CommandOptions): CompileOptions {
+  return {
+    ...(options.packages ? { packages: options.packages } : {}),
+    ...(options.disableDefaultPackages ? { disableDefaultPackages: true } : {}),
+    ...(options.enabledPackages ? { enabledPackages: options.enabledPackages } : {}),
+    ...(options.disabledPackages ? { disabledPackages: options.disabledPackages } : {}),
+  };
+}
+
+function compileSource(source: string, options: CommandOptions): CompileResult {
+  return compile(source, compileOptions(options));
 }
 
 function report(result: CompileResult): { lines: string[]; errors: number } {
@@ -35,7 +57,7 @@ function report(result: CompileResult): { lines: string[]; errors: number } {
 }
 
 export function compileCommand(source: string, options: CommandOptions = {}): CommandResult {
-  const result = compile(source);
+  const result = compileSource(source, options);
   const { lines, errors } = report(result);
 
   if (options.json) {
@@ -82,7 +104,7 @@ export function compileCommand(source: string, options: CommandOptions = {}): Co
 }
 
 export function testCommand(source: string, options: CommandOptions = {}): CommandResult {
-  const result = compile(source);
+  const result = compileSource(source, options);
   if (!result.ok) {
     const { lines } = report(result);
     return {
@@ -122,7 +144,7 @@ export function testCommand(source: string, options: CommandOptions = {}): Comma
 }
 
 export function truthTableCommand(source: string, options: CommandOptions = {}): CommandResult {
-  const result = compile(source);
+  const result = compileSource(source, options);
   if (!result.ok) {
     const { lines } = report(result);
     return { code: 1, stdout: "", stderr: `${lines.join("\n")}\n` };
@@ -173,8 +195,96 @@ export function formatCommand(source: string, options: CommandOptions = {}): Com
   return { code: 0, stdout: formatted, stderr: "" };
 }
 
+interface PackageListRow {
+  manifest: PackageManifest;
+  enabled: boolean;
+  origin: string;
+}
+
+function pad(value: string, width: number): string {
+  return value.padEnd(width);
+}
+
+export function packageListCommand(options: CommandOptions = {}): CommandResult {
+  const defaultPackages = DEFAULT_PACKAGE_BUNDLE.packages;
+  const defaultSet = new Set(defaultPackages);
+  const customPackages = options.packages?.packages ?? [];
+  const allPackages = [...defaultPackages, ...customPackages];
+  const disabled = new Set(options.disabledPackages ?? []);
+  const enabled = options.enabledPackages ? new Set(options.enabledPackages) : null;
+  const origins = options.packageOrigins ?? new Map<string, string>();
+
+  const rows: PackageListRow[] = allPackages.map((manifest) => {
+    const isDefault = defaultSet.has(manifest);
+    return {
+      manifest,
+      enabled:
+        !disabled.has(manifest.name) &&
+        (!enabled || enabled.has(manifest.name)) &&
+        !(isDefault && options.disableDefaultPackages),
+      origin: isDefault ? "bundled" : (origins.get(manifest.name) ?? "local"),
+    };
+  });
+
+  const known = new Set(allPackages.map((manifest) => manifest.name));
+  const unknown = (options.enabledPackages ?? []).filter((name) => !known.has(name));
+  const stderr =
+    unknown.length > 0
+      ? `warning: No ${unknown.length === 1 ? "package" : "packages"} named ${unknown
+          .map((name) => `"${name}"`)
+          .join(", ")} for --only-packages.\n`
+      : "";
+
+  if (options.json) {
+    return {
+      code: 0,
+      stdout: `${JSON.stringify(
+        {
+          includeDefaultPackages: !options.disableDefaultPackages,
+          packages: rows.map((row) => ({
+            name: row.manifest.name,
+            version: row.manifest.version,
+            description: row.manifest.description,
+            enabled: row.enabled,
+            origin: row.origin,
+            exports: row.manifest.exports.length,
+          })),
+        },
+        null,
+        2,
+      )}\n`,
+      stderr,
+    };
+  }
+
+  const headers = ["NAME", "VERSION", "EXPORTS", "STATUS", "ORIGIN"];
+  const values = rows.map((row) => [
+    row.manifest.name,
+    row.manifest.version,
+    String(row.manifest.exports.length),
+    row.enabled ? "enabled" : "disabled",
+    row.origin,
+  ]);
+  const widths = headers.map((header, column) =>
+    Math.max(header.length, ...values.map((value) => value[column]!.length)),
+  );
+  const formatRow = (cells: string[]) =>
+    cells
+      .map((cell, column) => (column === cells.length - 1 ? cell : pad(cell, widths[column]!)))
+      .join("  ");
+  const lines = [formatRow(headers), ...values.map(formatRow)];
+  const enabledCount = rows.filter((row) => row.enabled).length;
+  const disabledCount = rows.length - enabledCount;
+  lines.push("");
+  lines.push(
+    `${rows.length} package${rows.length === 1 ? "" : "s"}, ${enabledCount} enabled, ${disabledCount} disabled.`,
+  );
+
+  return { code: 0, stdout: `${lines.join("\n")}\n`, stderr };
+}
+
 export function exportIrCommand(source: string, options: CommandOptions = {}): CommandResult {
-  const result = compile(source);
+  const result = compileSource(source, options);
   if (!result.ok) {
     const { lines } = report(result);
     return { code: 1, stdout: "", stderr: `${lines.join("\n")}\n` };
@@ -187,7 +297,7 @@ export function exportIrCommand(source: string, options: CommandOptions = {}): C
 }
 
 export function exportVerilogCommand(source: string, options: CommandOptions = {}): CommandResult {
-  const result = compile(source);
+  const result = compileSource(source, options);
   if (!result.ok) {
     const { lines } = report(result);
     return { code: 1, stdout: "", stderr: `${lines.join("\n")}\n` };
