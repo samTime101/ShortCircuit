@@ -46,6 +46,7 @@ export type {
 export { generateTruthTable, type TruthTableOptions } from "./truthTable";
 export { formatSource } from "./formatter";
 export {
+  binaryToDecimal,
   formatBinary,
   formatHex,
   parseLanguageLiteral,

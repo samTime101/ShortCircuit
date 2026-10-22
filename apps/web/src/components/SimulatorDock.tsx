@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  binaryToDecimal,
   formatBinary,
   parseSimulationInput,
   type CircuitIR,
@@ -93,6 +94,19 @@ function BusTextField({
       />
       {error ? <span className="field-error">{error}</span> : null}
     </div>
+  );
+}
+
+/**
+ * The decimal reading of a bus, shown beside its bits so the value can be read
+ * off without counting bits by hand.
+ */
+function BusDecimal({ name, binary }: { name: string; binary: string }) {
+  const decimal = binaryToDecimal(binary);
+  return (
+    <span className="decimal-value bus-decimal" title={`${name} is ${decimal} in decimal`}>
+      #{decimal}
+    </span>
   );
 }
 
@@ -330,12 +344,15 @@ export function SimulatorDock({
                         <span className="io-label">{input.name}</span>
                         <span className="io-width">{input.width}b</span>
                       </div>
-                      <BusTextField
-                        name={input.name}
-                        width={input.width}
-                        value={value}
-                        onChange={(next) => onInputChange(input.name, next)}
-                      />
+                      <div className="bus-wide-row">
+                        <BusTextField
+                          name={input.name}
+                          width={input.width}
+                          value={value}
+                          onChange={(next) => onInputChange(input.name, next)}
+                        />
+                        <BusDecimal name={input.name} binary={value} />
+                      </div>
                     </div>
                   );
                 }
@@ -346,25 +363,28 @@ export function SimulatorDock({
                       <span className="io-label">{input.name}</span>
                       <span className="io-width">{input.width}b</span>
                     </div>
-                    <div className="bit-cells" aria-label={`${input.name} bits`}>
-                      {value.split("").map((bit, index) => {
-                        const bitIndex = input.width - 1 - index;
-                        return (
-                          <button
-                            className={`bit-cell ${bit === "1" ? "is-on" : ""}`}
-                            key={`${input.name}-${bitIndex}`}
-                            title={`${input.name}[${bitIndex}] = ${bit}. Click to flip.`}
-                            aria-label={`Flip ${input.name} bit ${bitIndex}`}
-                            onClick={() => {
-                              const next = value.split("");
-                              next[index] = bit === "1" ? "0" : "1";
-                              onInputChange(input.name, next.join(""));
-                            }}
-                          >
-                            {bit}
-                          </button>
-                        );
-                      })}
+                    <div className="bus-cells-row">
+                      <div className="bit-cells" aria-label={`${input.name} bits`}>
+                        {value.split("").map((bit, index) => {
+                          const bitIndex = input.width - 1 - index;
+                          return (
+                            <button
+                              className={`bit-cell ${bit === "1" ? "is-on" : ""}`}
+                              key={`${input.name}-${bitIndex}`}
+                              title={`${input.name}[${bitIndex}] = ${bit}. Click to flip.`}
+                              aria-label={`Flip ${input.name} bit ${bitIndex}`}
+                              onClick={() => {
+                                const next = value.split("");
+                                next[index] = bit === "1" ? "0" : "1";
+                                onInputChange(input.name, next.join(""));
+                              }}
+                            >
+                              {bit}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <BusDecimal name={input.name} binary={value} />
                     </div>
                   </div>
                 );

@@ -142,4 +142,38 @@ describe("simulator dock", () => {
     expect(screen.getByText(/simulation stopped/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /step/i })).toBeInTheDocument();
   });
+
+  it("shows the decimal reading beside a bus input", () => {
+    const result = compile("CIRCUIT Bus4\nINPUT a : BUS(4)\nINPUT b : BUS(4)\npair = CONCAT(a, b)\nOUTPUT pair\nEND");
+    expect(result.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
+    const circuit = result.circuits[0]!;
+    const simulator = new Simulator(circuit);
+    render(
+      <SimulatorDock
+        circuit={circuit}
+        snapshot={simulator.snapshot()}
+        inputValues={{ a: "1010", b: "0101" }}
+        runtimeError={null}
+        clocks={[]}
+        selectedClock={null}
+        onSelectClock={() => {}}
+        onStep={() => {}}
+        running={false}
+        onToggleRun={() => {}}
+        speed={2}
+        onSpeedChange={() => {}}
+        onInputChange={() => {}}
+        onSetState={() => {}}
+        onReset={() => {}}
+        recording={false}
+        onStartRecording={() => {}}
+        onStopRecording={() => {}}
+        onExpectThis={() => {}}
+        displays={{}}
+        onDisplayChange={() => {}}
+      />,
+    );
+    expect(screen.getByTitle("a is 10 in decimal")).toHaveTextContent("#10");
+    expect(screen.getByTitle("b is 5 in decimal")).toHaveTextContent("#5");
+  });
 });

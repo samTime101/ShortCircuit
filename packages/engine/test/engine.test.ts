@@ -3,6 +3,7 @@ import {
   BUILTINS,
   LANGUAGE_SNIPPETS,
   Simulator,
+  binaryToDecimal,
   compile,
   exportVerilog,
   formatSource,
@@ -861,6 +862,20 @@ describe("language metadata", () => {
       const closes = (snippet.template.match(/\}/g) ?? []).length;
       expect(opens, snippet.id).toBe(closes);
     }
+  });
+});
+
+describe("value formatting", () => {
+  it("reads a binary string as a decimal number", () => {
+    expect(binaryToDecimal("1010")).toBe("10");
+    expect(binaryToDecimal("0101")).toBe("5");
+    expect(binaryToDecimal("0000")).toBe("0");
+    expect(binaryToDecimal("11111111")).toBe("255");
+  });
+
+  it("treats a non-binary string as zero", () => {
+    expect(binaryToDecimal("")).toBe("0");
+    expect(binaryToDecimal("2")).toBe("0");
   });
 });
 

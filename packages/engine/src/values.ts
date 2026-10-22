@@ -29,6 +29,13 @@ export function formatHex(value: bigint, width: number): string {
   return `0x${normalize(value, width).toString(16).toUpperCase()}`;
 }
 
+/** Reads a binary string, most-significant bit first, as a decimal string. */
+export function binaryToDecimal(binary: string): string {
+  const clean = binary.trim();
+  if (!/^[01]+$/.test(clean)) return "0";
+  return BigInt(`0b${clean}`).toString(10);
+}
+
 export function bitLength(value: bigint): number {
   if (value <= 0n) return 1;
   return value.toString(2).length;

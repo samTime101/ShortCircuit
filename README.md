@@ -51,6 +51,7 @@ Comments use `//` for a line and `/* ... */` for a block that may span lines. Lo
 - **Beginner mode** — hides the advanced views and uses everyday wording, so the studio grows with you.
 - **Never blocks** — compilation runs in a worker, so typing stays smooth on a large design.
 - **Readable outputs** — every output can be shown as a number, LEDs, a seven-segment digit, a bar, or a grid of cells.
+- **Bus values in decimal** — every bus input shows its decimal reading beside its bits, so a value can be read off without counting bits.
 - **Verilog export** — the portable IR writes Verilog modules, and a testbench from the test cases.
 - **Dark workbench** — neutral graphite surfaces with an electric-blue accent, readable in a dim room.
 

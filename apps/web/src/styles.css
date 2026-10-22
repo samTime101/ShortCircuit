@@ -1359,6 +1359,26 @@ kbd {
   gap: 6px;
 }
 
+.bus-cells-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bus-wide-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.bus-wide-row .bus-text-field {
+  flex: 1;
+}
+
+.bus-decimal {
+  white-space: nowrap;
+}
+
 .bit-cells {
   display: flex;
   gap: 2px;
