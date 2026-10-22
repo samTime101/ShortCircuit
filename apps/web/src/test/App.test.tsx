@@ -57,10 +57,38 @@ describe("studio app", () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText(/Simulation paused/)).toBeInTheDocument();
+      expect(screen.getByText(/Errors detected/)).toBeInTheDocument();
     });
     expect(screen.getAllByText(/Unknown signal "missing"/).length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: "Toggle a" })).toBeNull();
+  });
+
+  it("shows each error once and points at the console", async () => {
+    store(`CIRCUIT Demo
+INPUT a : BUS(4)
+compared = COMPARE4(a, 1000)
+OUTPUT compared.eq
+END
+
+CIRCUIT Wrapper
+INPUT a : BUS(4)
+inner = Demo(a)
+OUTPUT inner.compared.eq
+END`);
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Errors detected/)).toBeInTheDocument();
+    });
+
+    // The error lives in Demo and is reported once, not again for Wrapper.
+    expect(document.querySelectorAll(".diagnostic-item")).toHaveLength(1);
+
+    // The paused view points at the console instead of repeating the error.
+    const paused = document.querySelector(".inspection-fatal");
+    expect(paused?.textContent).toContain("Errors detected");
+    expect(paused?.textContent).toContain("Check the error console and fix them.");
+    expect(paused?.textContent).not.toContain("COMPARE4 input b needs");
   });
 
   it("disables a package from the package manager and recompiles", async () => {
@@ -76,7 +104,7 @@ describe("studio app", () => {
 
     await userEvent.click(screen.getByRole("checkbox", { name: "@shortcircuit/gates" }));
     await waitFor(() => {
-      expect(screen.getByText(/Simulation paused/)).toBeInTheDocument();
+      expect(screen.getByText(/Errors detected/)).toBeInTheDocument();
     });
     expect(window.localStorage.getItem("shortcircuit.disabledPackages.v1")).toContain(
       "@shortcircuit/gates",

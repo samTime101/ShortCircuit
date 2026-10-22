@@ -470,7 +470,6 @@ function Studio({
     () => result?.circuits.reduce((sum, circuit) => sum + circuit.stats.nodes, 0) ?? 0,
     [result],
   );
-  const firstError = result?.diagnostics.find((item) => item.severity === "error");
 
   const switchCircuit = (name: string) => {
     if (!result?.ok) return;
@@ -880,22 +879,11 @@ function Studio({
                   <span className="fatal-icon">
                     <AlertTriangle size={21} />
                   </span>
-                  <h2>Simulation paused</h2>
+                  <h2>Errors detected</h2>
                   <p>
                     The compiler found {errorCount || "one or more"} error{errorCount === 1 ? "" : "s"}.
-                    Fix the source and the graph will rebuild automatically. No stale or partial output is
-                    shown as live.
+                    Check the error console and fix them. The graph rebuilds automatically.
                   </p>
-                  {firstError ? (
-                    <button
-                      className="fatal-error"
-                      onClick={() => jumpToDiagnostic(firstError.line, firstError.column)}
-                    >
-                      <code>{firstError.code}</code>
-                      <span>{firstError.message}</span>
-                    </button>
-                  ) : null}
-                  <span className="fatal-hint">line {firstError?.line ?? 1} · press Run to retry</span>
                 </div>
               ) : (
                 <div className="circuit-tab">

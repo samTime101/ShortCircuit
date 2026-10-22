@@ -2,6 +2,21 @@ import type { Diagnostic } from "./types";
 
 const DEFAULT_MAX = 100;
 
+/**
+ * Two diagnostics are the same report when every part a reader can see matches.
+ * The same source line can legitimately carry two different messages, so the
+ * message is part of the identity.
+ */
+function sameDiagnostic(a: Diagnostic, b: Diagnostic): boolean {
+  return (
+    a.code === b.code &&
+    a.severity === b.severity &&
+    a.message === b.message &&
+    a.line === b.line &&
+    a.column === b.column
+  );
+}
+
 export class DiagnosticBag {
   readonly items: Diagnostic[] = [];
   private readonly max: number;
@@ -44,6 +59,10 @@ export class DiagnosticBag {
 
   add(diagnostic: Diagnostic): void {
     if (this.items.length >= this.max) return;
+    // A circuit that another circuit instantiates is analyzed once on its own
+    // and again while expanding the instance. Both passes describe the same
+    // source position, so keep the first report instead of showing it twice.
+    if (this.items.some((item) => sameDiagnostic(item, diagnostic))) return;
     this.items.push(diagnostic);
     if (diagnostic.severity === "error") this.hasErrors = true;
   }

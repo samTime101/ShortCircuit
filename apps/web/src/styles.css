@@ -599,14 +599,59 @@ kbd {
   display: flex;
   flex: 0 0 32px;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
   height: 32px;
-  padding: 0 10px;
+  padding: 0 6px 0 10px;
+}
+
+.diagnostics-toggle {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  height: 100%;
   border: 0;
   text-align: left;
   cursor: pointer;
   user-select: none;
+}
+
+.diagnostics-copy {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  cursor: pointer;
+  transition: border-color 0.14s ease, color 0.14s ease, background 0.14s ease;
+}
+
+.diagnostics-copy:hover {
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+
+.diagnostics-copy.copied {
+  border-color: rgba(110, 200, 140, 0.4);
+  color: var(--green);
+}
+
+.diagnostics-copy.failed {
+  border-color: rgba(239, 111, 111, 0.4);
+  color: var(--red);
+}
+
+.diagnostics-copy svg {
+  flex: 0 0 auto;
 }
 
 .diagnostics-title {
@@ -721,7 +766,10 @@ kbd {
   display: flex;
   gap: 9px;
   padding: 9px 12px;
+  border: 0;
   border-bottom: 1px solid var(--line);
+  background: transparent;
+  text-align: left;
   cursor: pointer;
   transition: background 0.12s ease;
 }
@@ -749,6 +797,7 @@ kbd {
   flex-direction: column;
   min-width: 0;
   flex: 1;
+  text-align: left;
 }
 
 .diagnostic-line {
@@ -761,9 +810,27 @@ kbd {
 
 .diag-code {
   flex: 0 0 auto;
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--panel-2);
   color: var(--text-faint);
   font-family: var(--font-mono);
   font-size: var(--fs-2xs);
+  line-height: 16px;
+}
+
+.diagnostic-headline {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.diagnostic-message {
+  margin: 3px 0 0;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
 }
 
 .diagnostic-hint {
@@ -773,7 +840,8 @@ kbd {
 }
 
 .diagnostic-snippet {
-  display: block;
+  display: flex;
+  gap: 10px;
   margin: 6px 0 0;
   padding: 6px 9px;
   border: 1px solid var(--line);
@@ -782,11 +850,25 @@ kbd {
   color: var(--text-dim);
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
+}
+
+.snippet-gutter {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  user-select: none;
+}
+
+.snippet-code {
+  min-width: 0;
   white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .diagnostic-location {
   flex: 0 0 auto;
+  margin-left: auto;
   color: var(--text-faint);
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
@@ -1028,24 +1110,19 @@ kbd {
   color: var(--red);
 }
 
-.inspection-fatal h3 {
-  margin: 0;
+.inspection-fatal h2 {
+  margin: 4px 0 0;
   color: var(--text);
   font-size: var(--fs-md);
   font-weight: 600;
 }
 
-.fatal-error {
-  max-width: 60ch;
+.inspection-fatal p {
+  max-width: 48ch;
   margin: 0;
   color: var(--text-dim);
   font-size: var(--fs-sm);
-}
-
-.fatal-hint {
-  color: var(--text-faint);
-  font-family: var(--font-mono);
-  font-size: var(--fs-xs);
+  line-height: 1.6;
 }
 
 /* ---------------- Circuit tab / simulator ---------------- */

@@ -647,6 +647,23 @@ END`);
     expect(result.ir).toBeNull();
     expect(result.source).toBe(source);
   });
+
+  it("reports an error in a circuit once even when another circuit instantiates it", () => {
+    const result = compile(`CIRCUIT Inner
+INPUT a : BUS(4)
+compared = COMPARE4(a, 1000)
+OUTPUT compared.eq
+END
+
+CIRCUIT Top
+INPUT a : BUS(4)
+inner = Inner(a)
+OUTPUT inner.compared.eq
+END`);
+    const errors = result.diagnostics.filter((entry) => entry.code === "E305");
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.line).toBe(3);
+  });
 });
 
 describe("removed language features", () => {
