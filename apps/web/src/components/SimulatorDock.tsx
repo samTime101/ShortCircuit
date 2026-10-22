@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   binaryToDecimal,
   formatBinary,
@@ -7,6 +7,7 @@ import {
   type SimulationSnapshot,
 } from "@shortcircuit/engine";
 import { DISPLAY_MODES, OutputDisplay, type DisplayMode } from "./OutputDisplay";
+import { PaneResizer } from "./PaneResizer";
 import {
   Circle as CircleIcon,
   Clock,
@@ -17,6 +18,17 @@ import {
   X,
   Zap,
 } from "./Icons";
+import {
+  DEFAULT_SIM_SPLIT,
+  MAX_SIM_SPLIT,
+  MIN_SIM_SPLIT,
+  clampSimSplit,
+  readSimSplit,
+  writeSimSplit,
+} from "../lib/settings";
+
+/** Each arrow press moves the column split by two percentage points. */
+const COLUMN_NUDGE = 2;
 
 interface SimulatorDockProps {
   circuit: CircuitIR;
@@ -183,6 +195,24 @@ export function SimulatorDock({
   onDisplayChange,
   beginner,
 }: SimulatorDockProps) {
+  const [split, setSplit] = useState(readSimSplit);
+  const columnsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => writeSimSplit(split), 200);
+    return () => window.clearTimeout(timer);
+  }, [split]);
+
+  const resizeColumns = (delta: number) => {
+    const width = columnsRef.current?.clientWidth ?? 0;
+    if (width <= 0) return;
+    setSplit((current) => clampSimSplit(current + (delta / width) * 100));
+  };
+
+  const nudgeColumns = (delta: number) => {
+    setSplit((current) => clampSimSplit(current + (delta > 0 ? COLUMN_NUDGE : -COLUMN_NUDGE)));
+  };
+
   const clockInputNames = useMemo(() => {
     const labels = new Set<string>();
     for (const event of circuit.events) {
@@ -298,7 +328,11 @@ export function SimulatorDock({
         </div>
       ) : null}
 
-      <div className="sim-columns">
+      <div
+        className="sim-columns"
+        ref={columnsRef}
+        style={{ "--sim-split": `${split}%` } as CSSProperties}
+      >
         <div className="sim-group inputs-group">
           <div className="sim-group-title">
             <span>Inputs</span>
@@ -393,7 +427,17 @@ export function SimulatorDock({
           </div>
         </div>
 
-        <div className="sim-divider" />
+        <PaneResizer
+          orientation="vertical"
+          label="Resize the input and output columns"
+          value={split}
+          min={MIN_SIM_SPLIT}
+          max={MAX_SIM_SPLIT}
+          onDrag={resizeColumns}
+          onNudge={nudgeColumns}
+          onEdge={(edge) => setSplit(edge === "start" ? MIN_SIM_SPLIT : MAX_SIM_SPLIT)}
+          onReset={() => setSplit(DEFAULT_SIM_SPLIT)}
+        />
 
         <div className="sim-group outputs-group">
           <div className="sim-group-title">

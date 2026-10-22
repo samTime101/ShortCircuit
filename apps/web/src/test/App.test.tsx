@@ -6,6 +6,8 @@ import App from "../App";
 
 const STORAGE_KEY = "shortcircuit.source.v1";
 const FONT_SIZE_KEY = "shortcircuit.editorFontSize.v1";
+const SIM_DOCK_HEIGHT_KEY = "shortcircuit.simDockHeight.v1";
+const SIM_SPLIT_KEY = "shortcircuit.simSplit.v1";
 
 const HALF_ADDER = `CIRCUIT HalfAdder
 INPUT a
@@ -325,6 +327,77 @@ END`);
     expect(screen.getByRole("button", { name: /Editor font size \d+ pixels/ })).toHaveTextContent(
       "19px",
     );
+  });
+
+  it("resizes the simulator dock and keeps the choice", async () => {
+    store(HALF_ADDER);
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("Evaluation graph")).toBeInTheDocument();
+    });
+
+    const pane = document.querySelector(".sim-pane") as HTMLElement;
+    expect(pane.style.height).toBe("300px");
+
+    const bar = screen.getByRole("separator", {
+      name: "Resize the simulation panel and graph",
+    });
+    fireEvent.pointerDown(bar, { button: 0, clientY: 400, pointerId: 1 });
+    fireEvent.pointerMove(bar, { clientY: 340, pointerId: 1 });
+    fireEvent.pointerUp(bar, { pointerId: 1 });
+
+    expect(pane.style.height).toBe("240px");
+    await waitFor(() => {
+      expect(window.localStorage.getItem(SIM_DOCK_HEIGHT_KEY)).toBe("240");
+    });
+
+    // Arrow keys move by a fixed step, and Home goes to the smallest size.
+    fireEvent.keyDown(bar, { key: "ArrowDown" });
+    expect(pane.style.height).toBe("256px");
+    fireEvent.keyDown(bar, { key: "Home" });
+    expect(pane.style.height).toBe("150px");
+    fireEvent.doubleClick(bar);
+    expect(pane.style.height).toBe("300px");
+  });
+
+  it("resizes the input and output columns and keeps the choice", async () => {
+    store(HALF_ADDER);
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("Evaluation graph")).toBeInTheDocument();
+    });
+
+    const columns = document.querySelector(".sim-columns") as HTMLElement;
+    expect(columns.style.getPropertyValue("--sim-split")).toBe("50%");
+
+    const bar = screen.getByRole("separator", {
+      name: "Resize the input and output columns",
+    });
+    fireEvent.keyDown(bar, { key: "ArrowRight" });
+    expect(columns.style.getPropertyValue("--sim-split")).toBe("52%");
+    await waitFor(() => {
+      expect(window.localStorage.getItem(SIM_SPLIT_KEY)).toBe("52");
+    });
+
+    fireEvent.keyDown(bar, { key: "End" });
+    expect(columns.style.getPropertyValue("--sim-split")).toBe("75%");
+    fireEvent.doubleClick(bar);
+    expect(columns.style.getPropertyValue("--sim-split")).toBe("50%");
+  });
+
+  it("restores the simulator sizes on the next visit", async () => {
+    store(HALF_ADDER);
+    window.localStorage.setItem(SIM_DOCK_HEIGHT_KEY, "420");
+    window.localStorage.setItem(SIM_SPLIT_KEY, "62");
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("Evaluation graph")).toBeInTheDocument();
+    });
+
+    expect((document.querySelector(".sim-pane") as HTMLElement).style.height).toBe("420px");
+    expect(
+      (document.querySelector(".sim-columns") as HTMLElement).style.getPropertyValue("--sim-split"),
+    ).toBe("62%");
   });
 
   it("migrates a source saved with the old comment marker", async () => {

@@ -29,6 +29,7 @@ import { CircuitPicker } from "./components/CircuitPicker";
 import { DiagnosticsPanel } from "./components/DiagnosticsPanel";
 import { IRPanel } from "./components/IRPanel";
 import { Modal } from "./components/Modal";
+import { PaneResizer } from "./components/PaneResizer";
 import { SimulatorDock } from "./components/SimulatorDock";
 import { TestsPanel } from "./components/TestsPanel";
 import { TruthTablePanel } from "./components/TruthTablePanel";
@@ -66,22 +67,32 @@ import { useRoute } from "./lib/router";
 import { createCompilerClient, type CompilerClient } from "./lib/compilerClient";
 import {
   DEFAULT_EDITOR_FONT_SIZE,
+  DEFAULT_SIM_DOCK_HEIGHT,
   EDITOR_FONT_SIZE_STEP,
   MAX_EDITOR_FONT_SIZE,
+  MAX_SIM_DOCK_HEIGHT,
   MIN_EDITOR_FONT_SIZE,
+  MIN_SIM_DOCK_HEIGHT,
   clampEditorFontSize,
+  clampSimDockHeight,
   readDisabledPackages,
   readEditorFontSize,
   readMode,
+  readSimDockHeight,
   writeDisabledPackages,
   writeEditorFontSize,
   writeMode,
+  writeSimDockHeight,
   type StudioMode,
 } from "./lib/settings";
 
 const STORAGE_KEY = "shortcircuit.source.v1";
 const DISPLAY_STORAGE_KEY = "shortcircuit.displays.v1";
 const COMPILE_DELAY = 360;
+
+/** Keep enough of the graph visible that it never gets squeezed away. */
+const GRAPH_MIN_HEIGHT = 140;
+const RESIZER_STRIP = 10;
 
 // CodeMirror is the largest dependency in the studio. Load it separately so the
 // shell and compiler can paint before the editor bundle arrives.
@@ -183,8 +194,11 @@ function Studio({
   const [toast, setToast] = useState<{ id: number; message: string } | null>(null);
   const [editorMaximized, setEditorMaximized] = useState(false);
   const [editorFontSize, setEditorFontSize] = useState(readEditorFontSize);
+  const [dockHeight, setDockHeight] = useState(readSimDockHeight);
 
   const editorRef = useRef<SourceEditorHandle>(null);
+  const circuitTabRef = useRef<HTMLDivElement>(null);
+  const simPaneRef = useRef<HTMLDivElement>(null);
   const compilerRef = useRef<CompilerClient | null>(null);
   if (compilerRef.current === null) compilerRef.current = createCompilerClient();
   const compiler = compilerRef.current;
@@ -224,6 +238,11 @@ function Studio({
   useEffect(() => {
     writeEditorFontSize(editorFontSize);
   }, [editorFontSize]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => writeSimDockHeight(dockHeight), 200);
+    return () => window.clearTimeout(timer);
+  }, [dockHeight]);
 
   useEffect(() => {
     try {
@@ -476,6 +495,33 @@ function Studio({
     const circuit = result.circuits.find((entry) => entry.name === name);
     if (!circuit) return;
     activateCircuit(circuit);
+  };
+
+  const dockHeightLimit = () => {
+    const available = circuitTabRef.current?.clientHeight ?? 0;
+    if (available <= 0) return MAX_SIM_DOCK_HEIGHT;
+    return Math.max(
+      MIN_SIM_DOCK_HEIGHT,
+      Math.min(MAX_SIM_DOCK_HEIGHT, available - GRAPH_MIN_HEIGHT - RESIZER_STRIP),
+    );
+  };
+
+  const resizeDock = (delta: number) => {
+    const limit = dockHeightLimit();
+    setDockHeight((current) => clampSimDockHeight(Math.min(limit, current + delta)));
+  };
+
+  const resetDockHeight = () => {
+    setDockHeight(clampSimDockHeight(Math.min(DEFAULT_SIM_DOCK_HEIGHT, dockHeightLimit())));
+  };
+
+  /**
+   * Start a drag from the height the browser actually shows, which may be
+   * capped by the window even when the stored size is larger.
+   */
+  const syncDockHeight = () => {
+    const measured = simPaneRef.current?.getBoundingClientRect().height ?? 0;
+    if (measured > 0) setDockHeight(clampSimDockHeight(measured));
   };
 
   const onInputChange = (name: string, value: string) => {
@@ -886,32 +932,49 @@ function Studio({
                   </p>
                 </div>
               ) : (
-                <div className="circuit-tab">
-                  <SimulatorDock
-                    circuit={activeCircuit}
-                    snapshot={snapshot}
-                    inputValues={inputValues}
-                    runtimeError={runtimeError}
-                    clocks={clockNames}
-                    selectedClock={selectedClock}
-                    onSelectClock={setSelectedClock}
-                    onStep={stepClock}
-                    running={running}
-                    onToggleRun={() => setRunning((current) => !current)}
-                    speed={clockSpeed}
-                    onSpeedChange={setClockSpeed}
-                    onInputChange={onInputChange}
-                    onSetState={forceState}
-                    onReset={resetSimulation}
-                    recording={recording !== null}
-                    onStartRecording={startRecording}
-                    onStopRecording={stopRecording}
-                    onExpectThis={expectThis}
-                    displays={displays}
-                    beginner={mode === "beginner"}
-                    onDisplayChange={(name, mode) =>
-                      setDisplays((current) => ({ ...current, [name]: mode }))
+                <div className="circuit-tab" ref={circuitTabRef}>
+                  <div className="sim-pane" ref={simPaneRef} style={{ height: `${dockHeight}px` }}>
+                    <SimulatorDock
+                      circuit={activeCircuit}
+                      snapshot={snapshot}
+                      inputValues={inputValues}
+                      runtimeError={runtimeError}
+                      clocks={clockNames}
+                      selectedClock={selectedClock}
+                      onSelectClock={setSelectedClock}
+                      onStep={stepClock}
+                      running={running}
+                      onToggleRun={() => setRunning((current) => !current)}
+                      speed={clockSpeed}
+                      onSpeedChange={setClockSpeed}
+                      onInputChange={onInputChange}
+                      onSetState={forceState}
+                      onReset={resetSimulation}
+                      recording={recording !== null}
+                      onStartRecording={startRecording}
+                      onStopRecording={stopRecording}
+                      onExpectThis={expectThis}
+                      displays={displays}
+                      beginner={mode === "beginner"}
+                      onDisplayChange={(name, mode) =>
+                        setDisplays((current) => ({ ...current, [name]: mode }))
+                      }
+                    />
+                  </div>
+
+                  <PaneResizer
+                    orientation="horizontal"
+                    label="Resize the simulation panel and graph"
+                    value={dockHeight}
+                    min={MIN_SIM_DOCK_HEIGHT}
+                    max={MAX_SIM_DOCK_HEIGHT}
+                    onDrag={resizeDock}
+                    onStart={syncDockHeight}
+                    onNudge={resizeDock}
+                    onEdge={(edge) =>
+                      setDockHeight(edge === "start" ? MIN_SIM_DOCK_HEIGHT : dockHeightLimit())
                     }
+                    onReset={resetDockHeight}
                   />
 
                   <div className="graph-panel">
