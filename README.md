@@ -166,7 +166,13 @@ Published releases install globally:
 npm install -g @shortcircuitcli/cli
 ```
 
-Until the first npm release, build from this repository:
+To update an existing global install:
+
+```bash
+npm install -g @shortcircuitcli/cli@latest
+```
+
+To build from this repository:
 
 ```bash
 git clone --recurse-submodules https://github.com/samTime101/ShortCircuit.git
@@ -232,25 +238,61 @@ engine API.
 
 ### Releasing
 
-The `Release CLI` GitHub Actions workflow publishes the CLI. Update the version
-in `packages/cli/package.json`, refresh the lockfile, commit it, then push a
-matching tag:
+The `Release CLI` workflow publishes a new npm version when the version in
+`packages/cli/package.json` is new. It runs on pushes to `main` that change the
+CLI, the engine, the package submodule, or the release inputs. Manual runs are
+available from the Actions tab.
+
+To release a compiler or package change:
+
+1. Update the version in `packages/cli/package.json`.
+2. Refresh the lockfile:
+
+   ```bash
+   npm install --package-lock-only
+   ```
+
+3. Commit the version and lockfile, then push to `main`:
+
+   ```bash
+   git add packages/cli/package.json package-lock.json
+   git commit -m "chore(cli): release v0.2.0"
+   git push origin main
+   ```
+
+Use a stable `x.y.z` version greater than the latest published version. The
+workflow rejects prereleases and older versions.
+
+The workflow checks npm first. If the version is already published, it skips the
+publish steps. If the version is new, it typechecks, tests, builds, tests the
+packed install, publishes with automatic provenance, creates the `v<version>`
+tag, and creates a GitHub release.
+
+The workflow uses npm trusted publishing through GitHub OIDC, so no npm token is
+stored in GitHub. After this workflow is on `main`, run the one-time setup from
+a machine logged in as an owner of the `@shortcircuitcli` org:
 
 ```bash
-npm install --package-lock-only
-git add packages/cli/package.json package-lock.json
-git commit -m "chore(cli): release v0.1.0"
-git tag v0.1.0
-git push origin main v0.1.0
+npm trust github @shortcircuitcli/cli --file release.yml --repo samTime101/ShortCircuit --allow-publish
 ```
 
-The workflow typechecks, tests, builds, verifies the packed install, and
-publishes `@shortcircuitcli/cli` to npm with provenance. It requires an `NPM_TOKEN`
-repository secret with publish access to the `@shortcircuit` scope, or npm
-trusted publishing configured for this repository.
+The trusted publisher must be configured before the first automated release.
+See [docs/RELEASING.md](docs/RELEASING.md) for the full checklist, package
+submodule updates, and troubleshooting.
 
-The workflow will not publish if the tag and `packages/cli/package.json`
-version do not match.
+Users update an existing global install with:
+
+```bash
+npm install -g @shortcircuitcli/cli@latest
+```
+
+or:
+
+```bash
+npm update -g @shortcircuitcli/cli
+```
+
+The explicit `@latest` install is the most reliable.
 
 ---
 
@@ -277,5 +319,7 @@ request.
 - [Language reference](docs/LANGUAGE.md)
 - [Architecture and pipeline](docs/ARCHITECTURE.md)
 - [Portable IR](docs/IR.md)
+- [Package authoring](docs/PACKAGES.md)
+- [Releasing the CLI](docs/RELEASING.md)
 
 Short Circuit is an independent project. “Short Circuit” and “LogicFlow” are working names for the studio and language.

@@ -511,6 +511,11 @@ git push origin main
 The main repository must point at the package commit that contains the built
 `dist/packages.json`; otherwise CI and Vercel cannot compile the engine.
 
+Updating the submodule pointer changes the package snapshot, but it does not
+publish a new npm version. To ship the new package to CLI users, bump the CLI
+version in `packages/cli/package.json` and push to `main`. The release workflow
+publishes new versions automatically. See [RELEASING.md](RELEASING.md).
+
 ---
 
 ## 13. Using a custom package outside the registry

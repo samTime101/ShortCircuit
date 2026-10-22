@@ -13,6 +13,20 @@ Node.js 22.19 or newer.
 npm install -g @shortcircuitcli/cli
 ```
 
+To update an existing global install:
+
+```bash
+npm install -g @shortcircuitcli/cli@latest
+```
+
+or:
+
+```bash
+npm update -g @shortcircuitcli/cli
+```
+
+The explicit `@latest` install is the most reliable.
+
 ## Commands
 
 ```bash
