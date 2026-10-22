@@ -264,6 +264,48 @@ END`);
     expect(simulator.outputs.y?.binary).toBe("1100");
   });
 
+  it("compares every pair of values with the comparison package", () => {
+    for (const [exportName, width] of [
+      ["COMPARE1", 1],
+      ["COMPARE2", 2],
+      ["COMPARE4", 4],
+      ["COMPARE8", 8],
+    ] as const) {
+      const result = compile(`CIRCUIT Check
+INPUT a : BUS(${width})
+INPUT b : BUS(${width})
+compared = ${exportName}(a, b)
+OUTPUT compared.eq
+OUTPUT compared.lt
+OUTPUT compared.gt
+END`);
+      expect(result.diagnostics.filter((entry) => entry.severity === "error")).toEqual([]);
+      const simulator = new Simulator(result.circuits[0]!);
+      const limit = 1 << width;
+      const failures: string[] = [];
+      for (let x = 0; x < limit; x++) {
+        for (let y = 0; y < limit; y++) {
+          const snapshot = simulator.setInputs({
+            a: x.toString(2).padStart(width, "0"),
+            b: y.toString(2).padStart(width, "0"),
+          });
+          const flags = ["eq", "lt", "gt"].map(
+            (name) => snapshot.outputs[`compared.${name}`]?.binary === "1",
+          );
+          const wanted = [x === y, x < y, x > y];
+          if (flags.some((flag, index) => flag !== wanted[index])) {
+            failures.push(`${exportName}: a=${x} b=${y}`);
+          }
+          // Exactly one of eq, lt and gt must be high.
+          if (flags.filter(Boolean).length !== 1) {
+            failures.push(`${exportName}: a=${x} b=${y} set ${flags.join(",")}`);
+          }
+        }
+      }
+      expect(failures).toEqual([]);
+    }
+  }, 120000);
+
   it("runs every package test in the bundled snapshot", () => {
     const report = runPackageTests();
     expect(report.files.length).toBeGreaterThan(0);

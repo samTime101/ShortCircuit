@@ -935,7 +935,8 @@ STATE armed = 1`}
                 <h4>Use the defaults</h4>
                 <CodeBlock
                   code={`// @shortcircuit/gates, @shortcircuit/selection,
-// and @shortcircuit/arithmetic load automatically.
+// @shortcircuit/arithmetic, and @shortcircuit/comparison
+// load automatically.
 CIRCUIT Blink
   INPUT a
   INPUT b

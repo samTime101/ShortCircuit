@@ -33,7 +33,7 @@ Comments use `//` for a line and `/* ... */` for a block that may span lines. Lo
 ## What works in v0.1
 
 - **Readable hardware expressions** — function-style gates, named signals, comments, no semicolons or braces.
-- **Default packages** — the kernel provides `NAND`; bundled packages add `NOT`, `AND`, `OR`, `BUFFER`, `NOR`, `XOR`, `XNOR`, `MUX`, `HALF_ADDER`, `FULL_ADDER`, `ADD4`, and `ADD8`. Gates, selection, and arithmetic are package source; the compiler kernel keeps `NAND` and structural wiring.
+- **Default packages** — the kernel provides `NAND`; bundled packages add `NOT`, `AND`, `OR`, `BUFFER`, `NOR`, `XOR`, `XNOR`, `MUX`, `HALF_ADDER`, `FULL_ADDER`, `ADD4`, `ADD8`, `COMPARE1`, `COMPARE2`, `COMPARE4`, and `COMPARE8`. Gates, selection, arithmetic, and comparison are package source; the compiler kernel keeps `NAND` and structural wiring.
 - **Static validation first** — undeclared/duplicate signals, width mismatches, missing ports, illegal recursion, combinational loops and clock conflicts are diagnosed before simulation.
 - **Buses** — `BUS(8)` declarations, indexing (`data[3]`), inclusive slices (`data[7:4]`), concatenation, broadcast, sign/zero extension, repetition and reversal.
 - **Composition** — reusable `CIRCUIT` blocks, positional or named instance ports, nested scopes and flattened IR.

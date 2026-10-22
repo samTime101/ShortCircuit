@@ -33,6 +33,7 @@ describe("documentation page", () => {
       "Universal Logic Gates",
       "Exclusive Gates",
       "Arithmetic Circuits",
+      "Comparison Circuits",
     ]) {
       expect(text, group).toContain(group);
     }
@@ -47,6 +48,10 @@ describe("documentation page", () => {
       "XNOR",
       "HALF_ADDER",
       "FULL_ADDER",
+      "COMPARE1",
+      "COMPARE2",
+      "COMPARE4",
+      "COMPARE8",
     ]) {
       expect(text, name).toContain(name);
     }

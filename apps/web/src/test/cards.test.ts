@@ -32,7 +32,16 @@ describe("editor info cards", () => {
   });
 
   it("shows a worked example for every package circuit", () => {
-    for (const name of ["HALF_ADDER", "FULL_ADDER", "ADD4", "ADD8"]) {
+    for (const name of [
+      "HALF_ADDER",
+      "FULL_ADDER",
+      "ADD4",
+      "ADD8",
+      "COMPARE1",
+      "COMPARE2",
+      "COMPARE4",
+      "COMPARE8",
+    ]) {
       const card = text(packageCircuitCard(name));
       expect(card, name).toContain("Example");
       expect(card, name).toContain(`inst = ${name}(`);

@@ -167,7 +167,8 @@ END
 
 Packages are auto-imported unless their manifest sets
 `recommendedAutoImport: false`. Bundled `@shortcircuit/gates`,
-`@shortcircuit/selection`, and `@shortcircuit/arithmetic` are auto-imported, and
+`@shortcircuit/selection`, `@shortcircuit/arithmetic`, and
+`@shortcircuit/comparison` are auto-imported, and
 custom packages are too unless they opt out.
 
 - An explicit import with an alias adds qualified access through that alias.
@@ -358,6 +359,8 @@ Bundled packages provide:
   and `BROADCAST`, so the select bit reaches every bit of the values.
 - `@shortcircuit/arithmetic`: `HALF_ADDER`, `FULL_ADDER`, `ADD4`, and `ADD8`.
   Adders expose `sum` and `carry_out`.
+- `@shortcircuit/comparison`: `COMPARE1`, `COMPARE2`, `COMPARE4`, and `COMPARE8`.
+  Comparators expose `eq`, `lt`, and `gt`, and exactly one of them is high.
 
 ```logicflow
 CIRCUIT AddAndSelect
@@ -570,6 +573,38 @@ Eight-bit adder built from two chained ADD4 circuits.
 - **Inputs:** a, b, carry_in
 - **Outputs:** sum, carry_out
 - **Package:** Arithmetic Circuits
+
+#### `COMPARE1(a, b)`
+
+One-bit comparator. Sets exactly one of eq, lt or gt.
+
+- **Inputs:** a, b
+- **Outputs:** eq, lt, gt
+- **Package:** Comparison Circuits
+
+#### `COMPARE2(a, b)`
+
+Two-bit comparator. Sets exactly one of eq, lt or gt.
+
+- **Inputs:** a, b
+- **Outputs:** eq, lt, gt
+- **Package:** Comparison Circuits
+
+#### `COMPARE4(a, b)`
+
+Four-bit comparator. Sets exactly one of eq, lt or gt.
+
+- **Inputs:** a, b
+- **Outputs:** eq, lt, gt
+- **Package:** Comparison Circuits
+
+#### `COMPARE8(a, b)`
+
+Eight-bit comparator. Sets exactly one of eq, lt or gt.
+
+- **Inputs:** a, b
+- **Outputs:** eq, lt, gt
+- **Package:** Comparison Circuits
 
 <!-- END GENERATED REFERENCE -->
 
