@@ -163,7 +163,7 @@ Requires **Node.js 22.19+**.
 Published releases install globally:
 
 ```bash
-npm install -g @shortcircuit/cli
+npm install -g @shortcircuitcli/cli
 ```
 
 Until the first npm release, build from this repository:
@@ -245,7 +245,7 @@ git push origin main v0.1.0
 ```
 
 The workflow typechecks, tests, builds, verifies the packed install, and
-publishes `@shortcircuit/cli` to npm with provenance. It requires an `NPM_TOKEN`
+publishes `@shortcircuitcli/cli` to npm with provenance. It requires an `NPM_TOKEN`
 repository secret with publish access to the `@shortcircuit` scope, or npm
 trusted publishing configured for this repository.
 

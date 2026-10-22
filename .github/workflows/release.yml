@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   publish:
-    name: Publish @shortcircuit/cli
+    name: Publish @shortcircuitcli/cli
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -48,6 +48,6 @@ jobs:
         run: npm run test:cli-packed
 
       - name: Publish
-        run: npm publish --workspace @shortcircuit/cli --provenance --access public
+        run: npm publish --workspace @shortcircuitcli/cli --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

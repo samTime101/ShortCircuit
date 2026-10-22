@@ -1,4 +1,4 @@
-# @shortcircuit/cli
+# @shortcircuitcli/cli
 
 The command line compiler, simulator, tester, formatter, and exporter for the
 Short Circuit LogicFlow language.
@@ -10,7 +10,7 @@ Node.js 22.19 or newer.
 ## Install
 
 ```bash
-npm install -g @shortcircuit/cli
+npm install -g @shortcircuitcli/cli
 ```
 
 ## Commands

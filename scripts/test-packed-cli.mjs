@@ -62,12 +62,12 @@ try {
   const installedPath = join(
     projectDir,
     "node_modules",
-    "@shortcircuit",
+    "@shortcircuitcli",
     "cli",
     "package.json",
   );
   const installed = JSON.parse(readFileSync(installedPath, "utf8"));
-  if (installed.name !== "@shortcircuit/cli") {
+  if (installed.name !== "@shortcircuitcli/cli") {
     throw new Error(`unexpected package name ${installed.name}`);
   }
 

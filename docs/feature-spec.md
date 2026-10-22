@@ -339,7 +339,7 @@ shortcircuit export-verilog circuit.lf -o out.v
 
 - Exit code 0 on success and non-zero on any diagnostic error or failed test, so it works in CI.
 - Output can be human-readable or `--json`.
-- Publish `@shortcircuit/engine` and `@shortcircuit/cli` to npm.
+- Publish the engine and `@shortcircuitcli/cli` to npm.
 
 ---
 

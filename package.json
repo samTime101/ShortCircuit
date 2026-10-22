@@ -9,7 +9,7 @@
   ],
   "scripts": {
     "dev": "npm run dev -w @shortcircuit/web",
-    "build": "npm run build -w @shortcircuit/web && npm run build -w @shortcircuit/cli",
+    "build": "npm run build -w @shortcircuit/web && npm run build -w @shortcircuitcli/cli",
     "preview": "npm run preview -w @shortcircuit/web",
     "test": "vitest run",
     "test:packages": "vitest run packages/engine/test/packages.test.ts",
@@ -20,9 +20,9 @@
     "package:test": "npm --prefix vendor/ShortCircuit-Packages run package:test",
     "package:check": "npm --prefix vendor/ShortCircuit-Packages run package:check",
     "package:list": "npm --prefix vendor/ShortCircuit-Packages run package:list",
-    "typecheck": "npm run typecheck -w @shortcircuit/engine && npm run typecheck -w @shortcircuit/web && npm run typecheck -w @shortcircuit/cli && tsc --noEmit -p tests/tsconfig.json",
+    "typecheck": "npm run typecheck -w @shortcircuit/engine && npm run typecheck -w @shortcircuit/web && npm run typecheck -w @shortcircuitcli/cli && tsc --noEmit -p tests/tsconfig.json",
     "docs:generate": "node --experimental-strip-types scripts/generate-docs.mts",
-    "cli:build": "npm run build -w @shortcircuit/cli",
+    "cli:build": "npm run build -w @shortcircuitcli/cli",
     "cli": "node packages/cli/dist/cli.js"
   },
   "devDependencies": {
