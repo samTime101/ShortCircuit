@@ -156,20 +156,69 @@ The engine has no DOM, React, or browser dependency. Another implementation can 
 
 The engine has no browser dependency, so the same tools run from a terminal.
 
-```bash
-npm run cli:build            # bundle the command line tool
+### Install
 
-node packages/cli/dist/cli.js compile circuit.lf
-node packages/cli/dist/cli.js test circuit.lf
-node packages/cli/dist/cli.js truth-table circuit.lf --circuit HalfAdder
-node packages/cli/dist/cli.js format circuit.lf --write
-node packages/cli/dist/cli.js export-ir circuit.lf --out out.json
-node packages/cli/dist/cli.js export-verilog circuit.lf --out out.v
+Requires **Node.js 22.19+**.
+
+Published releases install globally:
+
+```bash
+npm install -g @shortcircuit/cli
+```
+
+Until the first npm release, build from this repository:
+
+```bash
+git clone --recurse-submodules https://github.com/samTime101/ShortCircuit.git
+cd ShortCircuit
+npm ci
+npm run cli:build
+npx shortcircuit help
+```
+
+The built bundle is self-contained at `packages/cli/dist/cli.js`. To test the
+exact package that will be published, run:
+
+```bash
+npm run test:cli-packed
+```
+
+### Commands
+
+```bash
+shortcircuit compile circuit.lf
+shortcircuit test circuit.lf
+shortcircuit truth-table circuit.lf --circuit HalfAdder
+shortcircuit format circuit.lf --write
+shortcircuit export-ir circuit.lf --out out.json
+shortcircuit export-verilog circuit.lf --out out.v
 ```
 
 Every command exits with 0 on success and 1 on a diagnostic error or a failed
 test, so it works in a pipeline. `--json` prints machine-readable output where
 it is available.
+
+### Releasing
+
+The `Release CLI` GitHub Actions workflow publishes the CLI. Update the version
+in `packages/cli/package.json`, refresh the lockfile, commit it, then push a
+matching tag:
+
+```bash
+npm install --package-lock-only
+git add packages/cli/package.json package-lock.json
+git commit -m "chore(cli): release v0.1.0"
+git tag v0.1.0
+git push origin main v0.1.0
+```
+
+The workflow typechecks, tests, builds, verifies the packed install, and
+publishes `@shortcircuit/cli` to npm with provenance. It requires an `NPM_TOKEN`
+repository secret with publish access to the `@shortcircuit` scope, or npm
+trusted publishing configured for this repository.
+
+The workflow will not publish if the tag and `packages/cli/package.json`
+version do not match.
 
 ---
 

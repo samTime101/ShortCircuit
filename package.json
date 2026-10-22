@@ -13,6 +13,7 @@
     "preview": "npm run preview -w @shortcircuit/web",
     "test": "vitest run",
     "test:packages": "vitest run packages/engine/test/packages.test.ts",
+    "test:cli-packed": "node scripts/test-packed-cli.mjs",
     "test:package-cli": "npm --prefix vendor/ShortCircuit-Packages run test:cli",
     "package:init": "npm --prefix vendor/ShortCircuit-Packages run package:init --",
     "package:build": "npm --prefix vendor/ShortCircuit-Packages run package:build",
