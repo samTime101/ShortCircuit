@@ -170,7 +170,14 @@ describe("command line", () => {
     const result = run(["help"]);
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("shortcircuit package list");
+    expect(result.stdout).toContain("shortcircuit package registry");
+    expect(result.stdout).toContain("shortcircuit package init");
+    expect(result.stdout).toContain("shortcircuit package build");
+    expect(result.stdout).toContain("shortcircuit package test");
+    expect(result.stdout).toContain("shortcircuit package check");
     expect(result.stdout).toContain("--package <dir>");
+    expect(result.stdout).toContain("--root <dir>");
+    expect(result.stdout).toContain("--main <dir>");
     expect(result.stdout).not.toContain("--disable-package");
     expect(result.stdout).not.toContain("--only-packages");
     expect(result.stdout).not.toContain("--no-default-packages");

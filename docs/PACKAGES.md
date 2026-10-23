@@ -51,8 +51,14 @@ Wrote dist/packages.json (3 packages)
 
 ## Quick start: scaffold with the CLI
 
-The registry ships an interactive authoring CLI. Run it from the main
-repository root:
+The main CLI can create a package from anywhere inside a Short Circuit checkout:
+
+```bash
+shortcircuit package init
+```
+
+It finds `vendor/ShortCircuit-Packages` from the current directory. Use
+`--root` when the registry is elsewhere. The repository alias still works:
 
 ```bash
 npm run package:init
@@ -87,23 +93,44 @@ The generated source is a NAND scaffold. Replace it with the real
 implementation, then build and test:
 
 ```bash
-npm run package:build   # validate manifests and rebuild dist/packages.json
-npm run package:test    # build, then run the package tests
-npm run package:check   # build and test in one command
-npm run package:list    # show registered packages and export counts
+shortcircuit package build   # validate manifests and rebuild dist/packages.json
+shortcircuit package test    # build, then run the package tests
+shortcircuit package check   # build and test in one command
+shortcircuit package registry # show registered packages and export counts
 ```
 
-`package:test` runs `npm run test:packages` in the main repository. If the
-package repository is checked out outside the main repository, point it at the
-main checkout:
+The repository aliases run the same commands:
 
 ```bash
-SHORTCIRCUIT_ROOT=/path/to/ShortCircuit npm run package:test
+npm run package:build
+npm run package:test
+npm run package:check
+npm run package:list
+```
+
+`package test` runs `npm run test:packages` in the main repository. If the
+package repository is checked out outside the main repository, pass `--main` or
+point `SHORTCIRCUIT_ROOT` at the main checkout:
+
+```bash
+shortcircuit package test --root /path/to/ShortCircuit-Packages \
+  --main /path/to/ShortCircuit
 ```
 
 ### Non-interactive init
 
 For scripts and automation, pass the fields directly:
+
+```bash
+shortcircuit package init \
+  --name @acme/parity \
+  --export PARITY3 \
+  --kind macro \
+  --description "Three-input parity built from NAND." \
+  --dependencies @shortcircuit/gates
+```
+
+The repository alias is:
 
 ```bash
 npm run package:init -- \
@@ -123,9 +150,11 @@ npm run package:init -- \
 | `--version <semver>` | Package version. Default: `0.1.0`. |
 | `--license <id>` | License identifier. Default: `MIT`. |
 | `--dependencies <list>` | Comma-separated package names. |
+| `--auto-import` | Enable legacy `recommendedAutoImport` metadata. |
 | `--no-registry` | Do not edit `registry.json`. |
 | `--force` | Replace an existing package directory and registry entry. |
 | `--yes` | Accept defaults and never prompt. `--name` is still required. |
+| `--root <dir>` | Package registry checkout. The CLI finds `vendor/ShortCircuit-Packages` by default. |
 
 When stdin is not a TTY, init behaves like `--yes`: it uses defaults for fields
 that were not passed and requires `--name`.
@@ -137,7 +166,7 @@ when you want to understand or hand-edit every file.
 
 ## 2. Create the package directory
 
-> **Using the CLI?** Skip steps 2–8. `npm run package:init` creates the package
+> **Using the CLI?** Skip steps 2 through 8. `shortcircuit package init` creates the package
 > directory, `package.json`, `manifest.json`, `.lf` source, docs, tests, and the
 > registry entry for you. The manual steps below show exactly what it generates,
 > or how to build a package by hand.
@@ -383,13 +412,14 @@ calling GitHub.
 
 ## 9. Build and validate the bundle
 
-From `vendor/ShortCircuit-Packages`:
+From the main repository or the package repository:
 
 ```bash
-npm run package:build
+shortcircuit package build
 ```
 
-This runs `node scripts/build.mjs`. Expected output:
+The repository alias `npm run package:build` does the same. This runs
+`node scripts/build.mjs`. Expected output:
 
 ```text
 Wrote dist/packages.json (4 packages)
@@ -411,14 +441,21 @@ Do not edit `dist/packages.json` by hand. It is generated.
 
 ## 10. Run the package tests
 
-From `vendor/ShortCircuit-Packages`:
+From the main repository or the package repository:
 
 ```bash
-npm run package:test
+shortcircuit package test
 ```
 
-This rebuilds the bundle, then runs `npm run test:packages` in the main
-repository. You can also run the test directly from the main repository:
+The repository alias `npm run package:test` does the same. This rebuilds the
+bundle, then runs `npm run test:packages` in the main repository. If the
+registry is outside the main checkout, pass `--main`:
+
+```bash
+shortcircuit package test --main /path/to/ShortCircuit
+```
+
+You can also run the test directly from the main repository:
 
 ```bash
 cd ../..
@@ -565,6 +602,19 @@ git submodule update --init --recursive
 
 or clone with `--recurse-submodules`.
 
+### `Could not find the Short Circuit package registry`
+
+Run the authoring command from inside the main checkout, initialize the
+submodule, or pass the registry path directly:
+
+```bash
+git submodule update --init --recursive
+shortcircuit package build --root /path/to/ShortCircuit-Packages
+```
+
+If the registry is outside the main checkout, point `package test` and
+`package check` at the main repository with `--main`.
+
 ### `package validation failed: ... is not declared in ...`
 
 The exported name in `manifest.json` does not match the `MACRO` or `CIRCUIT`
@@ -603,13 +653,13 @@ is listed in both `package.json` and `manifest.json`.
 ## Minimal checklist
 
 ```text
-[ ] Run npm run package:init (or create packages/<name>/ by hand)
+[ ] Run shortcircuit package init (or create packages/<name>/ by hand)
 [ ] Put implementations in .lf files
 [ ] Point every export at its source
 [ ] Add docs and tests
-[ ] Add the manifest to registry.json (package:init does this by default)
-[ ] Run npm run package:build
-[ ] Run npm run package:test
+[ ] Add the manifest to registry.json (package init does this by default)
+[ ] Run shortcircuit package build
+[ ] Run shortcircuit package test
 [ ] Commit and push the package repository
 [ ] Commit the updated submodule pointer in the main repository
 ```

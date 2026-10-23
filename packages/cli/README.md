@@ -81,6 +81,41 @@ shortcircuit compile circuit.lf --package /path/to/package
 `--package` is repeatable. Local packages must use a name that is not already
 bundled. The loader inlines the package source, docs, and tests.
 
+### Authoring packages
+
+The CLI can drive the package registry from a Short Circuit checkout:
+
+```bash
+shortcircuit package init
+shortcircuit package init --name @acme/parity --export PARITY3 --kind macro
+shortcircuit package build
+shortcircuit package test
+shortcircuit package check
+shortcircuit package registry
+```
+
+`init` prompts for the package fields, then writes the package directory,
+source, docs, tests, and registry entry. Use `shortcircuit package init --help`
+for every flag.
+
+The commands find `vendor/ShortCircuit-Packages` from the current directory, or
+accept `--root`:
+
+```bash
+shortcircuit package build --root /path/to/ShortCircuit-Packages
+```
+
+`package test` and `package check` run the main repository tests. Use `--main`
+when the package registry is outside the main checkout:
+
+```bash
+shortcircuit package test --root /path/to/ShortCircuit-Packages \
+  --main /path/to/ShortCircuit
+```
+
+`package list` shows packages available to the compiler. `package registry`
+shows packages registered for authoring.
+
 ## Source
 
 [github.com/samTime101/ShortCircuit](https://github.com/samTime101/ShortCircuit)

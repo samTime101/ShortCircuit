@@ -11,11 +11,20 @@ import {
   type PackageManifest,
 } from "@shortcircuit/engine";
 
+export interface DelegatedCommand {
+  command: string;
+  args: string[];
+  cwd: string;
+  env: Record<string, string | undefined>;
+}
+
 export interface CommandResult {
   /** Process exit code: 0 on success, 1 on a diagnostic error or a failed test. */
   code: number;
   stdout: string;
   stderr: string;
+  /** Run this command with inherited stdio instead of printing the result. */
+  delegate?: DelegatedCommand;
 }
 
 export interface CommandOptions {

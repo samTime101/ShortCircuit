@@ -154,6 +154,8 @@ npm view @shortcircuitcli/cli version
 npm view "@shortcircuitcli/cli@$VERSION" dist.tarball
 npm install -g @shortcircuitcli/cli@latest
 shortcircuit package list
+shortcircuit package init --help
+shortcircuit package registry --root /path/to/ShortCircuit-Packages
 ```
 
 Set `VERSION` to the version you released.

@@ -14,6 +14,15 @@ const VALUE_FLAGS = new Set([
   "width",
   "rows",
   "package",
+  "root",
+  "main",
+  "name",
+  "export",
+  "kind",
+  "description",
+  "version",
+  "license",
+  "dependencies",
 ]);
 
 /** Value flags that can be passed more than once. */
@@ -115,8 +124,28 @@ export const HELP: HelpEntry[] = [
     description: "Write Verilog modules, with a testbench.",
   },
   {
-    usage: "shortcircuit package list [--json]",
-    description: "List bundled and local packages with their origin.",
+    usage: "shortcircuit package list [--json] [--package <dir>]",
+    description: "List bundled and local packages available to the compiler.",
+  },
+  {
+    usage: "shortcircuit package registry [--json] [--root <dir>]",
+    description: "List packages registered for authoring.",
+  },
+  {
+    usage: "shortcircuit package init [flags]",
+    description: "Create a package, source, docs, tests, and registry entry.",
+  },
+  {
+    usage: "shortcircuit package build [--root <dir>]",
+    description: "Validate package manifests and rebuild the bundle.",
+  },
+  {
+    usage: "shortcircuit package test [--root <dir>] [--main <dir>]",
+    description: "Build, then run the package tests.",
+  },
+  {
+    usage: "shortcircuit package check [--root <dir>] [--main <dir>]",
+    description: "Build and test the package registry.",
   },
 ];
 
@@ -133,6 +162,56 @@ export function helpText(): string {
   lines.push("  --out <file>               Write to a file instead of standard output.");
   lines.push("  --circuit <name>           Choose a circuit (truth-table).");
   lines.push("  --package <dir>            Load a local package directory or manifest. Repeatable.");
+  lines.push("  --root <dir>               Package registry checkout for authoring commands.");
+  lines.push("  --main <dir>               Main checkout for package tests.");
+  lines.push("");
+  lines.push('Run "shortcircuit package help" for package authoring details.');
   lines.push("");
   return lines.join("\n");
+}
+
+export function packageHelpText(): string {
+  return `Short Circuit package commands
+
+Usage:
+  shortcircuit package list [--json] [--package <dir>]
+      List bundled and local packages available to the compiler.
+  shortcircuit package registry [--json] [--root <dir>]
+      List packages registered for authoring.
+  shortcircuit package init [flags]
+      Create a package, source, docs, tests, and registry entry.
+  shortcircuit package build [--root <dir>]
+      Validate manifests and rebuild dist/packages.json.
+  shortcircuit package test [--root <dir>] [--main <dir>]
+      Build, then run the package tests.
+  shortcircuit package check [--root <dir>] [--main <dir>]
+      Build and test the package registry.
+
+Run "shortcircuit package init --help" for init flags.
+`;
+}
+
+export function packageInitHelpText(): string {
+  return `Create a Short Circuit package
+
+Usage:
+  shortcircuit package init
+  shortcircuit package init --name @acme/parity --export PARITY3 --kind macro
+
+Options:
+  --name <@scope/name>       Package name. Required when not prompting.
+  --export <NAME>            Public macro or circuit name.
+  --kind <macro|circuit>     Export kind. Default: macro.
+  --description <text>       Catalog description.
+  --version <semver>         Package version. Default: 0.1.0.
+  --license <id>             License identifier. Default: MIT.
+  --dependencies <list>      Comma-separated package names.
+  --auto-import              Enable recommendedAutoImport.
+  --no-registry              Do not edit registry.json.
+  --force                    Replace an existing package directory.
+  --yes                      Use defaults and never prompt.
+  --root <dir>               Package registry checkout.
+
+The package is created under <root>/packages/<package-directory>.
+`;
 }

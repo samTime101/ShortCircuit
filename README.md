@@ -75,16 +75,24 @@ npm run build
 npm run docs:generate # regenerate the operation reference in docs/LANGUAGE.md
 ```
 
-To create and publish your own package, start with the interactive scaffolder:
+To create and publish your own package, use the package authoring commands:
+
+```bash
+shortcircuit package init
+shortcircuit package build
+shortcircuit package test
+```
+
+The commands find `vendor/ShortCircuit-Packages` from the checkout. If the CLI
+is not installed globally, the repository aliases do the same thing:
 
 ```bash
 npm run package:init
+npm run package:build
+npm run package:test
 ```
 
-It asks for the package name, export name, kind, description, and dependencies,
-then writes the package, tests, docs, and registry entry.
-Build and test it with `npm run package:build` and `npm run package:test`. See
-[`docs/PACKAGES.md`](docs/PACKAGES.md) for the full guide, including the
+See [`docs/PACKAGES.md`](docs/PACKAGES.md) for the full guide, including the
 non-interactive flags and the manual source layout.
 
 ## Repository layout
@@ -214,6 +222,17 @@ installed package, its export count, and where it came from:
 ```bash
 shortcircuit package list
 shortcircuit package list --json
+```
+
+Package authoring uses the same binary. It finds the package registry in the
+current checkout, or accepts `--root`:
+
+```bash
+shortcircuit package init
+shortcircuit package build
+shortcircuit package test
+shortcircuit package check
+shortcircuit package registry
 ```
 
 Activate a package by adding an `IMPORT` line to the source. Every command

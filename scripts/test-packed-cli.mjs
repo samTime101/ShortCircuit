@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
@@ -48,6 +48,22 @@ function run(bin, args, cwd) {
   });
 }
 
+function runFailure(bin, args, cwd) {
+  const result = spawnSync(bin, args, {
+    cwd,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (result.status === 0) {
+    throw new Error(`expected ${args.join(" ")} to fail`);
+  }
+  return {
+    status: result.status,
+    stdout: result.stdout ?? "",
+    stderr: result.stderr ?? "",
+  };
+}
+
 try {
   mkdirSync(tarballDir, { recursive: true });
   mkdirSync(projectDir, { recursive: true });
@@ -86,6 +102,71 @@ try {
   }
   if (help.includes("--disable-package") || help.includes("--only-packages")) {
     throw new Error(`the installed binary still documents package toggles:\n${help}`);
+  }
+
+  const packageHelp = run(bin, ["package", "help"], projectDir);
+  for (const command of [
+    "package list",
+    "package registry",
+    "package init",
+    "package build",
+    "package test",
+    "package check",
+  ]) {
+    if (!packageHelp.includes(`shortcircuit ${command}`)) {
+      throw new Error(`package help is missing ${command}:\n${packageHelp}`);
+    }
+  }
+  const initHelp = run(bin, ["package", "init", "--help"], projectDir);
+  if (!initHelp.includes("--name") || !initHelp.includes("--dependencies")) {
+    throw new Error(`package init help is incomplete:\n${initHelp}`);
+  }
+
+  const missingRegistry = runFailure(bin, ["package", "build"], projectDir);
+  if (!missingRegistry.stderr.includes("Could not find the Short Circuit package registry")) {
+    throw new Error(`unexpected missing registry output:\n${missingRegistry.stderr}`);
+  }
+
+  const fakeRoot = join(tempRoot, "fake-registry");
+  mkdirSync(join(fakeRoot, "scripts"), { recursive: true });
+  writeFileSync(
+    join(fakeRoot, "package.json"),
+    `${JSON.stringify({ name: "@shortcircuit/packages", version: "0.1.0" }, null, 2)}\n`,
+  );
+  writeFileSync(
+    join(fakeRoot, "registry.json"),
+    `${JSON.stringify({ schema: "shortcircuit.registry/v1", packages: [] }, null, 2)}\n`,
+  );
+  writeFileSync(
+    join(fakeRoot, "scripts", "package.mjs"),
+    "const command = process.argv[2];\n" +
+      "process.stdout.write(`fake package ${process.argv.slice(2).join(' ')}\\n`);\n" +
+      "if (command === 'check') process.exitCode = 7;\n",
+  );
+
+  const registryJson = JSON.parse(
+    run(bin, ["package", "registry", "--json", "--root", fakeRoot], projectDir),
+  );
+  if (!Array.isArray(registryJson.packages) || registryJson.packages.length !== 0) {
+    throw new Error(`unexpected registry JSON:\n${JSON.stringify(registryJson)}`);
+  }
+
+  const delegated = run(
+    bin,
+    ["package", "build", "--root", fakeRoot],
+    projectDir,
+  );
+  if (!delegated.includes("fake package build")) {
+    throw new Error(`package build did not delegate:\n${delegated}`);
+  }
+
+  const failed = runFailure(
+    bin,
+    ["package", "check", "--root", fakeRoot],
+    projectDir,
+  );
+  if (failed.status !== 7) {
+    throw new Error(`package check did not return the child status: ${failed.status}`);
   }
 
   const listed = run(bin, ["package", "list"], projectDir);
@@ -152,6 +233,7 @@ END
     throw new Error(`unexpected local package compile output:\n${localCompiled}`);
   }
 
+  console.log("Package authoring commands work in the packed CLI.");
   console.log(`Installed ${installed.name}@${installed.version} in a clean project.`);
   console.log(gatesRow.trim());
   console.log(compiled.trim());
