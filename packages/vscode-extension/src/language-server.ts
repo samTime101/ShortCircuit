@@ -20,9 +20,11 @@ import {
 } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { fileURLToPath } from "url";
+import * as path from "path";
 import {
   compile,
   formatSource,
+  parsePackageMacroSource,
   BUILTINS,
   KEYWORDS,
   type Diagnostic as EngineDiagnostic,
@@ -109,6 +111,16 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
   const filePath = uriToPath(textDocument.uri);
 
   try {
+    // Check if this is a package macro file (starts with MACRO or in macros/ directory)
+    const isMacroFile = /^\s*MACRO\b/im.test(source) || filePath.replace(/\\/g, "/").includes("/macros/");
+    if (isMacroFile) {
+      const fileName = filePath ? path.basename(filePath) : "package macro";
+      const { diagnostics: macroDiags } = parsePackageMacroSource(source, fileName);
+      const diagnostics: Diagnostic[] = macroDiags.map((d: EngineDiagnostic) => convertDiagnostic(d));
+      connection.sendDiagnostics({ uri: textDocument.uri, diagnostics });
+      return;
+    }
+
     const wsContext = resolveWorkspaceContext(filePath, source);
     const result = compile(source, {
       packages: wsContext.bundle,

@@ -1,5 +1,5 @@
 import { compileCore as compile } from "@shortcircuit/engine/core";
-import { compile as compileWithPackages, Simulator, generateTruthTable, formatSource } from "@shortcircuit/engine";
+import { compile as compileWithPackages, Simulator, generateTruthTable, formatSource, parsePackageMacroSource } from "@shortcircuit/engine";
 import { describe, it, expect } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
@@ -488,5 +488,13 @@ describe("Package Resolution (Intra-Package & Local Packages)", () => {
         // Ignore cleanup errors
       }
     }
+  });
+
+  it("validates package macro files without false E100 errors", () => {
+    const macroSource = "MACRO BUFFER(x)\n  BODY NOT(NOT(x))\nEND\n";
+    const { declarations, diagnostics } = parsePackageMacroSource(macroSource, "macro.lf");
+    expect(diagnostics).toHaveLength(0);
+    expect(declarations).toHaveLength(1);
+    expect(declarations[0]!.name).toBe("BUFFER");
   });
 });

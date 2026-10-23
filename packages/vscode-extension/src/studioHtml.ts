@@ -1393,13 +1393,17 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
         <span class="tab-badge" id="tests-count">0</span>
       </button>
       <button class="tab-btn" data-tab="ir">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
-        { } IR
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1"/><path d="M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1"/></svg>
+        IR
       </button>
     </div>
 
     <div class="top-actions">
       <select id="circuit-picker" class="circuit-select"></select>
+      <button id="btn-refresh" class="btn-action" title="Refresh Studio from current editor">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
+        Refresh
+      </button>
       <button id="btn-expand" class="btn-action" title="Open in Editor Beside">⤢ Expand</button>
     </div>
   </div>
@@ -1411,6 +1415,10 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
       <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color: var(--text-faint);"><path d="M4 6h5l4 6h7M4 18h5l4-6"/><circle cx="20" cy="12" r="2"/></svg>
       <h3>No LogicFlow file active</h3>
       <p>Open or focus a <code>.lf</code> file in the editor to start live circuit simulation.</p>
+      <button id="btn-empty-refresh" class="btn-action" style="margin-top: 14px; align-self: center;" title="Refresh Studio">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
+        Refresh Studio
+      </button>
     </div>
 
     <!-- Circuit Tab Content -->
@@ -1600,6 +1608,8 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
     const truthRowCount = document.getElementById("truth-row-count");
     const testsCount = document.getElementById("tests-count");
     const btnReset = document.getElementById("btn-reset");
+    const btnRefresh = document.getElementById("btn-refresh");
+    const btnEmptyRefresh = document.getElementById("btn-empty-refresh");
     const btnExpand = document.getElementById("btn-expand");
     const inputsList = document.getElementById("inputs-list");
     const outputsList = document.getElementById("outputs-list");
@@ -1698,6 +1708,18 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
     btnExpand.addEventListener("click", () => {
       vscode.postMessage({ type: "expand" });
     });
+
+    // Refresh buttons
+    if (btnRefresh) {
+      btnRefresh.addEventListener("click", () => {
+        vscode.postMessage({ type: "refresh" });
+      });
+    }
+    if (btnEmptyRefresh) {
+      btnEmptyRefresh.addEventListener("click", () => {
+        vscode.postMessage({ type: "refresh" });
+      });
+    }
 
     // Clock Step & Run
     btnClockStep.addEventListener("click", () => {
@@ -1917,8 +1939,11 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
       if (!model || !model.circuits || model.circuits.length === 0) {
         emptyState.style.display = "flex";
         document.querySelectorAll(".tab-content").forEach(c => c.style.display = "none");
+        circuitPicker.innerHTML = "";
+        circuitPicker.style.display = "none";
         return;
       }
+      circuitPicker.style.display = "";
       emptyState.style.display = "none";
       document.querySelectorAll(".tab-content").forEach(c => c.style.display = "");
       const currentTabEl = document.getElementById("tab-" + activeTab);

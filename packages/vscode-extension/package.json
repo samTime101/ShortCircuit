@@ -35,6 +35,7 @@
     "onView:shortcircuit.studioView",
     "onCommand:shortcircuit.openStudio",
     "onCommand:shortcircuit.expandStudio",
+    "onCommand:shortcircuit.refreshStudio",
     "onCommand:shortcircuit.openWaveform",
     "onCommand:shortcircuit.openTruthTable",
     "onCommand:shortcircuit.runTest",
@@ -127,6 +128,12 @@
         "icon": "$(screen-full)"
       },
       {
+        "command": "shortcircuit.refreshStudio",
+        "title": "Refresh Studio",
+        "category": "Short Circuit",
+        "icon": "$(refresh)"
+      },
+      {
         "command": "shortcircuit.openWaveform",
         "title": "Open Waveform Preview",
         "category": "Short Circuit",
@@ -158,8 +165,13 @@
       "view/title": [
         {
           "when": "view == shortcircuit.studioView",
+          "command": "shortcircuit.refreshStudio",
+          "group": "navigation@1"
+        },
+        {
+          "when": "view == shortcircuit.studioView",
           "command": "shortcircuit.expandStudio",
-          "group": "navigation"
+          "group": "navigation@2"
         }
       ],
       "editor/title": [

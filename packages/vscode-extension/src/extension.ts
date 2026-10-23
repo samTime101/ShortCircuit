@@ -12,6 +12,7 @@ import {
   generateTruthTable,
   runPackageTests,
   formatSource,
+  parsePackageMacroSource,
   parseSimulationInput,
   formatBinary,
   binaryToDecimal,
@@ -89,6 +90,10 @@ export function activate(context: vscode.ExtensionContext): void {
 
     vscode.commands.registerCommand("shortcircuit.expandStudio", () => {
       StudioPanel.createOrShow(context.extensionUri, provider, "circuit");
+    }),
+
+    vscode.commands.registerCommand("shortcircuit.refreshStudio", () => {
+      provider.refresh();
     }),
 
     vscode.commands.registerCommand("shortcircuit.openWaveform", () => {
@@ -193,6 +198,26 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.onDidChangeActiveTextEditor((editor) => {
       if (editor && editor.document.languageId === "logicflow") {
         studioProvider?.updateForDocument(editor.document);
+      } else if (!editor) {
+        studioProvider?.clear();
+      } else {
+        const visible = vscode.window.visibleTextEditors.find((e) => e.document.languageId === "logicflow");
+        if (visible) {
+          studioProvider?.updateForDocument(visible.document);
+        } else {
+          studioProvider?.clear();
+        }
+      }
+    }),
+
+    vscode.workspace.onDidCloseTextDocument((closedDoc) => {
+      if (studioProvider?.getCurrentDocument()?.uri.toString() === closedDoc.uri.toString()) {
+        const remaining = vscode.window.visibleTextEditors.find((e) => e.document.languageId === "logicflow");
+        if (remaining) {
+          studioProvider.updateForDocument(remaining.document);
+        } else {
+          studioProvider.clear();
+        }
       }
     })
   );
@@ -249,6 +274,37 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
 
   public getModel(): StudioModel | undefined {
     return this.lastModel;
+  }
+
+  public getCurrentDocument(): vscode.TextDocument | undefined {
+    return this.currentDocument;
+  }
+
+  public clear(): void {
+    this.currentDocument = undefined;
+    this.lastModel = undefined;
+    this.activeCircuit = undefined;
+    this.activeSimulator = undefined;
+    this.activeCircuitName = undefined;
+    this.currentInputs = {};
+    if (this.view) {
+      this.view.webview.postMessage({ type: "update", payload: null });
+    }
+  }
+
+  public refresh(): void {
+    invalidatePackageCache();
+    const active = vscode.window.activeTextEditor;
+    if (active && active.document.languageId === "logicflow") {
+      this.updateForDocument(active.document);
+      return;
+    }
+    const visible = vscode.window.visibleTextEditors.find((e) => e.document.languageId === "logicflow");
+    if (visible) {
+      this.updateForDocument(visible.document);
+      return;
+    }
+    this.clear();
   }
 
   public updateForDocument(document: vscode.TextDocument): void {
@@ -324,12 +380,43 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
       this.recompileAndBroadcast(this.currentDocument?.getText() || "");
     } else if (msg.type === "expand") {
       vscode.commands.executeCommand("shortcircuit.expandStudio");
+    } else if (msg.type === "refresh") {
+      this.refresh();
     }
   }
 
   private recompileAndBroadcast(source: string): void {
     try {
       const filePath = this.currentDocument?.fileName || "";
+      const isMacroFile = /^\s*MACRO\b/im.test(source) || filePath.replace(/\\/g, "/").includes("/macros/");
+      if (isMacroFile) {
+        const fileName = filePath ? path.basename(filePath) : "package macro";
+        const { declarations, diagnostics: macroDiags } = parsePackageMacroSource(source, fileName);
+        this.lastModel = {
+          circuits: declarations.map((d) => ({
+            name: d.name,
+            inputs: d.args.map((a) => ({ name: a, width: 1 })),
+            outputs: [{ name: "out", width: 1 }],
+          })),
+          activeCircuit: declarations[0]?.name || "",
+          inputs: {},
+          snapshot: null,
+          layout: null,
+          truthTable: null,
+          waveform: null,
+          tests: null,
+          ir: null,
+          diagnostics: macroDiags.map((d) => ({
+            message: d.message,
+            severity: d.severity,
+            line: d.line ?? 1,
+            column: d.column ?? 1,
+          })),
+        };
+        this.broadcastUpdate();
+        return;
+      }
+
       const wsContext = filePath ? resolveWorkspaceContext(filePath, source) : null;
       const result = compile(source, {
         packages: wsContext?.bundle,
