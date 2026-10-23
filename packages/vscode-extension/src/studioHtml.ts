@@ -2118,11 +2118,11 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
             vscode.postMessage({ type: "toggleInput", name: inp.name });
           });
           row.appendChild(sw);
-        } else {
+        } else if (inp.width > 16) {
           row.appendChild(labelRow);
 
-          const cellsRow = document.createElement("div");
-          cellsRow.className = "bus-cells-row";
+          const wideRow = document.createElement("div");
+          wideRow.className = "bus-wide-row";
 
           const textField = document.createElement("div");
           textField.className = "bus-text-field";
@@ -2144,7 +2144,38 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
             }
           });
           textField.appendChild(inpBox);
-          cellsRow.appendChild(textField);
+          wideRow.appendChild(textField);
+
+          const decVal = decimalValue(val);
+          const decBadge = document.createElement("span");
+          decBadge.className = "decimal-value bus-decimal";
+          decBadge.textContent = "#" + decVal;
+          decBadge.title = inp.name + " is " + decVal + " in decimal";
+          wideRow.appendChild(decBadge);
+          row.appendChild(wideRow);
+        } else {
+          row.appendChild(labelRow);
+
+          const cellsRow = document.createElement("div");
+          cellsRow.className = "bus-cells-row";
+
+          const bitCells = document.createElement("div");
+          bitCells.className = "bit-cells";
+          bitCells.setAttribute("aria-label", inp.name + " bits");
+
+          for (let i = 0; i < inp.width; i++) {
+            const bit = val[i] || "0";
+            const bitIdx = inp.width - 1 - i;
+            const cell = document.createElement("button");
+            cell.className = "bit-cell" + (bit === "1" ? " is-on" : "");
+            cell.textContent = bit;
+            cell.title = inp.name + "[" + bitIdx + "] = " + bit + ". Click to flip.";
+            cell.addEventListener("click", () => {
+              vscode.postMessage({ type: "flipBit", name: inp.name, bitIndex: bitIdx });
+            });
+            bitCells.appendChild(cell);
+          }
+          cellsRow.appendChild(bitCells);
 
           const decVal = decimalValue(val);
           const decBadge = document.createElement("span");
@@ -2152,27 +2183,8 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
           decBadge.textContent = "#" + decVal;
           decBadge.title = inp.name + " is " + decVal + " in decimal";
           cellsRow.appendChild(decBadge);
+
           row.appendChild(cellsRow);
-
-          if (inp.width <= 16) {
-            const bitCells = document.createElement("div");
-            bitCells.className = "bit-cells";
-            bitCells.setAttribute("aria-label", inp.name + " bits");
-
-            for (let i = 0; i < inp.width; i++) {
-              const bit = val[i] || "0";
-              const bitIdx = inp.width - 1 - i;
-              const cell = document.createElement("button");
-              cell.className = "bit-cell" + (bit === "1" ? " is-on" : "");
-              cell.textContent = bit;
-              cell.title = inp.name + "[" + bitIdx + "] = " + bit + ". Click to flip.";
-              cell.addEventListener("click", () => {
-                vscode.postMessage({ type: "flipBit", name: inp.name, bitIndex: bitIdx });
-              });
-              bitCells.appendChild(cell);
-            }
-            row.appendChild(bitCells);
-          }
         }
 
         inputsList.appendChild(row);
