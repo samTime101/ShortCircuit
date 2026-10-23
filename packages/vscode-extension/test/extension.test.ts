@@ -422,7 +422,7 @@ describe("Package Resolution (Intra-Package & Local Packages)", () => {
       // Package circuit source
       fs.writeFileSync(
         path.join(localCircuitsDir, "circuit.lf"),
-        `CIRCUIT MY_ADDER\n  INPUT a\n  INPUT b\n  out = XOR(a, b)\n  OUTPUT out\nEND`
+        `CIRCUIT MY_ADDER\n  INPUT a\n  INPUT b\n  out = NAND(a, b)\n  OUTPUT out\nEND`
       );
 
       // Project manifest
@@ -459,6 +459,29 @@ describe("Package Resolution (Intra-Package & Local Packages)", () => {
       expect(result.circuits.some((c) => c.name === "Top")).toBe(true);
     } finally {
       // Clean up
+      try {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+  });
+
+  it("does not ship or resolve default packages in a clean project", () => {
+    const tempDir = path.join(__dirname, "temp-clean-project");
+    try {
+      fs.mkdirSync(tempDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, "shortcircuit.json"),
+        JSON.stringify({ schema: "shortcircuit.project/v1", dependencies: {} }, null, 2)
+      );
+      const mainPath = path.join(tempDir, "main.lf");
+      const mainSource = "CIRCUIT Top\n  INPUT x\n  OUTPUT x\nEND";
+      fs.writeFileSync(mainPath, mainSource);
+
+      const context = resolveWorkspaceContext(mainPath, mainSource);
+      expect(context.bundle.packages).toHaveLength(0);
+    } finally {
       try {
         fs.rmSync(tempDir, { recursive: true, force: true });
       } catch {

@@ -20,7 +20,13 @@ import {
 } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { fileURLToPath } from "url";
-import { compile, formatSource, type Diagnostic as EngineDiagnostic } from "@shortcircuit/engine";
+import {
+  compile,
+  formatSource,
+  BUILTINS,
+  KEYWORDS,
+  type Diagnostic as EngineDiagnostic,
+} from "@shortcircuit/engine";
 import { resolveWorkspaceContext, invalidatePackageCache } from "./packageResolver";
 
 const connection = createConnection(ProposedFeatures.all);
@@ -148,52 +154,93 @@ connection.onCompletion(async (params: CompletionParams): Promise<CompletionItem
   try {
     const items: CompletionItem[] = [];
     const document = documents.get(params.textDocument.uri);
+    const source = document ? document.getText() : "";
     const filePath = document ? uriToPath(document.uri) : "";
-    const wsContext = filePath ? resolveWorkspaceContext(filePath) : null;
+    const wsContext = filePath ? resolveWorkspaceContext(filePath, source) : null;
 
-    const builtins = [
-      "NAND", "NOR", "AND", "OR", "XOR", "XNOR", "NOT", "BUF", "BUFFER",
-      "MUX", "CONCAT", "BROADCAST", "SLICE", "ZEXT", "SEXT", "REPEAT", "REVERSE",
-      "HALF_ADDER", "FULL_ADDER", "ADD4", "ADD8"
-    ];
-    for (const b of builtins) {
-      items.push({
-        label: b,
-        kind: CompletionItemKind.Function,
-        detail: "Built-in component"
-      });
-    }
+    // Check what the user has typed on the current line up to the cursor
+    const line = source.split("\n")[params.position.line] || "";
+    const beforeCursor = line.slice(0, params.position.character);
 
-    const keywords = [
-      "circuit", "macro", "input", "output", "end", "body", "state", "const",
-      "import", "as", "test", "case", "expect", "load", "step", "cycle",
-      "on", "rising_edge", "falling_edge", "bus"
-    ];
-    for (const k of keywords) {
-      items.push({
-        label: k,
-        kind: CompletionItemKind.Keyword
-      });
-    }
-
-    // Add components from workspace packages
-    if (wsContext) {
-      for (const pkg of wsContext.bundle.packages) {
-        // Suggest package imports: import "@package/name"
-        items.push({
-          label: `"${pkg.name}"`,
-          kind: CompletionItemKind.Module,
-          detail: `Short Circuit Package (${pkg.version})`
-        });
-
-        // Suggest exports
-        for (const exp of pkg.exports) {
-          items.push({
+    // If typing after a dot (e.g. MyAlias.EX...), offer exports from the aliased package
+    const dotMatch = /([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)?$/.exec(beforeCursor);
+    if (dotMatch && wsContext) {
+      const aliasName = dotMatch[1].toUpperCase();
+      const importRegex = /^\s*IMPORT\s+"([^"]+)"\s+AS\s+([A-Za-z_][A-Za-z0-9_]*)/gim;
+      let match: RegExpExecArray | null;
+      let targetPkgName: string | undefined;
+      while ((match = importRegex.exec(source)) !== null) {
+        if (match[2].toUpperCase() === aliasName) {
+          targetPkgName = match[1];
+          break;
+        }
+      }
+      if (targetPkgName) {
+        const pkg = wsContext.bundle.packages.find((p) => p.name === targetPkgName);
+        if (pkg) {
+          return pkg.exports.map((exp) => ({
             label: exp.name,
             kind: exp.kind === "macro" ? CompletionItemKind.Snippet : CompletionItemKind.Class,
             detail: `${exp.name} (${pkg.name})`,
-            documentation: exp.summary
-          });
+            documentation: exp.summary,
+          }));
+        }
+      }
+      return [];
+    }
+
+    // Built-in operations (structural engine kernel only)
+    for (const b of BUILTINS) {
+      items.push({
+        label: b.name,
+        kind: CompletionItemKind.Function,
+        detail: b.signature,
+        documentation: b.description,
+      });
+    }
+
+    // Keywords
+    for (const k of KEYWORDS) {
+      items.push({
+        label: k,
+        kind: CompletionItemKind.Keyword,
+      });
+    }
+
+    // Workspace package completions
+    if (wsContext) {
+      // Collect packages that are imported in this document
+      const importedPackages = new Set<string>(wsContext.implicitImports);
+      const importRegex = /^\s*IMPORT\s+"([^"]+)"(?:\s+AS\s+([A-Za-z_][A-Za-z0-9_]*))?/gim;
+      let match: RegExpExecArray | null;
+      while ((match = importRegex.exec(source)) !== null) {
+        if (!match[2]) {
+          // Unqualified import brings exports into file scope
+          importedPackages.add(match[1]);
+        }
+      }
+
+      // If typing on an IMPORT line, suggest available workspace packages
+      const onImportLine = /^\s*IMPORT\b/i.test(beforeCursor);
+      for (const pkg of wsContext.bundle.packages) {
+        items.push({
+          label: onImportLine ? `"${pkg.name}"` : pkg.name,
+          kind: CompletionItemKind.Module,
+          detail: `Short Circuit Package (${pkg.version})`,
+        });
+      }
+
+      // ONLY suggest exports from packages that are actually imported in this file
+      for (const pkg of wsContext.bundle.packages) {
+        if (importedPackages.has(pkg.name)) {
+          for (const exp of pkg.exports) {
+            items.push({
+              label: exp.name,
+              kind: exp.kind === "macro" ? CompletionItemKind.Snippet : CompletionItemKind.Class,
+              detail: `${exp.name} (${pkg.name})`,
+              documentation: exp.summary,
+            });
+          }
         }
       }
     }

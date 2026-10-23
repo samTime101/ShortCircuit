@@ -44,7 +44,7 @@ export {
   parseLanguageLiteral,
   parseSimulationInput,
 } from "./values";
-export { BUILTINS, BUILTIN_BY_NAME } from "./builtins";
+export { BUILTINS, BUILTIN_BY_NAME, KEYWORDS } from "./builtins";
 export type { BuiltinArgument, BuiltinExample, BuiltinSpec } from "./builtins";
 export {
   createPackageCatalog,

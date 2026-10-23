@@ -1,7 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
 import {
-  DEFAULT_PACKAGE_BUNDLE,
   type PackageBundle,
   type PackageManifest,
   type PackageExport,
@@ -184,6 +183,18 @@ export function resolveWorkspaceContext(
         }
       }
     }
+
+    // Installed dependencies in .shortcircuit/packages/
+    const packageStoreDir = path.join(packageRoot, ".shortcircuit", "packages");
+    if (fs.existsSync(packageStoreDir)) {
+      scanPackageDirs(packageStoreDir, packageRoots);
+    }
+
+    // Sibling packages if this package is inside a packages/ collection or monorepo
+    const parentDir = path.dirname(packageRoot);
+    if (path.basename(parentDir) === "packages" && fs.existsSync(parentDir)) {
+      scanPackageDirs(parentDir, packageRoots);
+    }
   }
 
   // 2. If inside a project (shortcircuit.json)
@@ -223,11 +234,6 @@ export function resolveWorkspaceContext(
 
   // Load all manifests
   const loadedPackages = new Map<string, PackageManifest>();
-
-  // Add default bundled packages first as fallback baseline
-  for (const pkg of DEFAULT_PACKAGE_BUNDLE.packages) {
-    loadedPackages.set(pkg.name, pkg);
-  }
 
   // Override / augment with workspace packages from disk
   const resolvedCurrentPath = path.resolve(filePath);
