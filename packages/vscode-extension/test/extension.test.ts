@@ -1,5 +1,5 @@
 import { compileCore as compile } from "@shortcircuit/engine/core";
-import { compile as compileWithPackages, Simulator, generateTruthTable } from "@shortcircuit/engine";
+import { compile as compileWithPackages, Simulator, generateTruthTable, formatSource } from "@shortcircuit/engine";
 import { describe, it, expect } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
@@ -241,6 +241,10 @@ end`;
     expect(html).toContain("tab-waveform");
     expect(html).toContain("tab-tests");
     expect(html).toContain("tab-ir");
+    expect(html).toContain("bus-text-input");
+    expect(html).toContain("output-pill");
+    expect(html).toContain("bit-cells");
+    expect(html).toContain("renderSevenSegment");
   });
 
   it("handles empty or null model gracefully", () => {
@@ -274,6 +278,7 @@ describe("Extension Package Manifest", () => {
     expect(commands).toContain("shortcircuit.openTruthTable");
     expect(commands).toContain("shortcircuit.runTest");
     expect(commands).toContain("shortcircuit.runAllTests");
+    expect(commands).toContain("shortcircuit.formatDocument");
   });
 
   it("includes proper activation events", () => {
@@ -282,6 +287,56 @@ describe("Extension Package Manifest", () => {
     expect(pkg.activationEvents).toContain("onCommand:shortcircuit.openStudio");
     expect(pkg.activationEvents).toContain("onCommand:shortcircuit.openTruthTable");
     expect(pkg.activationEvents).toContain("onCommand:shortcircuit.openWaveform");
+    expect(pkg.activationEvents).toContain("onCommand:shortcircuit.formatDocument");
+  });
+
+  it("contributes language icon and file icon theme for .lf files", () => {
+    const lang = pkg.contributes.languages[0];
+    expect(lang.id).toBe("logicflow");
+    expect(lang.icon).toBeDefined();
+    expect(lang.icon.dark).toBe("./media/shortcircuit.svg");
+    expect(lang.icon.light).toBe("./media/shortcircuit.svg");
+
+    expect(pkg.contributes.iconThemes).toBeDefined();
+    expect(pkg.contributes.iconThemes[0].id).toBe("shortcircuit-icons");
+    const iconThemePath = path.join(__dirname, "..", pkg.contributes.iconThemes[0].path);
+    expect(fs.existsSync(iconThemePath)).toBe(true);
+    const themeJson = JSON.parse(fs.readFileSync(iconThemePath, "utf-8"));
+    expect(themeJson.fileExtensions.lf).toBe("logicflow");
+  });
+});
+
+describe("LogicFlow Formatter (Auto-capitalization and Indentation)", () => {
+  it("auto-capitalizes keywords and built-in functions while indenting cleanly", () => {
+    const messySource = `circuit my_adder
+input a : bus(4)
+input b : bus(4)
+sum = and(a, b)
+output sum
+end`;
+    const formatted = formatSource(messySource);
+    expect(formatted).toContain("CIRCUIT my_adder");
+    expect(formatted).toContain("  INPUT a : BUS(4)");
+    expect(formatted).toContain("  INPUT b : BUS(4)");
+    expect(formatted).toContain("  sum = AND(a, b)");
+    expect(formatted).toContain("  OUTPUT sum");
+    expect(formatted.trimEnd().endsWith("END")).toBe(true);
+  });
+
+  it("auto-capitalizes import statements and aliases", () => {
+    const messy = `import "@shortcircuit/gates" as gates`;
+    const formatted = formatSource(messy);
+    expect(formatted).toContain(`IMPORT "@shortcircuit/gates" AS gates`);
+  });
+
+  it("preserves comments and string literal casing", () => {
+    const code = `circuit Test
+// this is a note about and(a, b)
+out = "keep lower and(a, b)"
+end`;
+    const formatted = formatSource(code);
+    expect(formatted).toContain("// this is a note about and(a, b)");
+    expect(formatted).toContain(`"keep lower and(a, b)"`);
   });
 });
 

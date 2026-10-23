@@ -38,7 +38,8 @@
     "onCommand:shortcircuit.openWaveform",
     "onCommand:shortcircuit.openTruthTable",
     "onCommand:shortcircuit.runTest",
-    "onCommand:shortcircuit.runAllTests"
+    "onCommand:shortcircuit.runAllTests",
+    "onCommand:shortcircuit.formatDocument"
   ],
   "contributes": {
     "languages": [
@@ -52,7 +53,18 @@
         "extensions": [
           ".lf"
         ],
-        "configuration": "./language-configuration.json"
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./media/shortcircuit.svg",
+          "dark": "./media/shortcircuit.svg"
+        }
+      }
+    ],
+    "iconThemes": [
+      {
+        "id": "shortcircuit-icons",
+        "label": "Short Circuit",
+        "path": "./icons/icon-theme.json"
       }
     ],
     "grammars": [
@@ -135,6 +147,11 @@
         "command": "shortcircuit.runAllTests",
         "title": "Run All Tests in File",
         "category": "Short Circuit"
+      },
+      {
+        "command": "shortcircuit.formatDocument",
+        "title": "Format Document",
+        "category": "Short Circuit"
       }
     ],
     "menus": {
@@ -167,6 +184,11 @@
           "when": "editorLangId == logicflow",
           "command": "shortcircuit.runTest",
           "group": "shortcircuit"
+        },
+        {
+          "when": "editorLangId == logicflow",
+          "command": "shortcircuit.formatDocument",
+          "group": "1_modification"
         }
       ]
     },
@@ -187,6 +209,12 @@
         "command": "shortcircuit.openTruthTable",
         "key": "ctrl+shift+t",
         "mac": "cmd+shift+t",
+        "when": "editorLangId == logicflow"
+      },
+      {
+        "command": "shortcircuit.formatDocument",
+        "key": "shift+alt+f",
+        "mac": "shift+option+f",
         "when": "editorLangId == logicflow"
       }
     ]

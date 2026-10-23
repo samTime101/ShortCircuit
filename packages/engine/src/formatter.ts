@@ -10,21 +10,35 @@ const UPPERCASE_KEYWORDS = new Set([
   "CASE",
   "EXPECT",
   "IMPORT",
+  "AS",
+  "BUS",
+  "LOAD",
+  "STEP",
+  "CYCLE",
+  "WHEN",
+  "MACRO",
+  "BODY",
+  "FOLD",
 ]);
 
-const OPENERS = new Set(["CIRCUIT", "TEST", "CASE"]);
+const OPENERS = new Set(["CIRCUIT", "TEST", "CASE", "STEP", "MACRO", "BODY", "FOLD", "WHEN"]);
 
-type Part = { kind: "code" | "comment"; text: string };
+const BUILTIN_CALL_REGEX = /\b(nand|nor|and|or|xor|xnor|not|buf|buffer|mux|concat|broadcast|slice|zext|sext|repeat|reverse)\s*\(/gi;
+const BUS_KEYWORD_REGEX = /:\s*\bbus\b\s*\(/gi;
+const CLOCK_EDGE_REGEX = /\b(rising_edge|falling_edge)\b/gi;
+const IMPORT_AS_REGEX = /^(\s*IMPORT\s+("[^"]*"|'[^']*')\s+)\bas\b/i;
+
+type Part = { kind: "code" | "comment" | "string"; text: string };
 
 /**
- * Splits one line into code and comment parts so the formatter can rewrite
- * code without ever touching a comment. String literals are respected, so a
- * `//` inside a quoted string stays part of the string.
+ * Splits one line into code, string literal, and comment parts so the
+ * formatter can rewrite code without ever touching comments or strings.
  */
 function scanLine(line: string, inBlock: boolean): { parts: Part[]; inBlock: boolean } {
   const parts: Part[] = [];
   let code = "";
   let comment = "";
+  let str = "";
   let index = 0;
   let inString: string | null = null;
   let block = inBlock;
@@ -61,19 +75,24 @@ function scanLine(line: string, inBlock: boolean): { parts: Part[]; inBlock: boo
 
     if (inString) {
       if (char === "\\") {
-        code += char + (line[index + 1] ?? "");
+        str += char + (line[index + 1] ?? "");
         index += 2;
         continue;
       }
-      if (char === inString) inString = null;
-      code += char;
+      str += char;
+      if (char === inString) {
+        parts.push({ kind: "string", text: str });
+        str = "";
+        inString = null;
+      }
       index += 1;
       continue;
     }
 
     if (char === '"' || char === "'") {
+      flushCode();
       inString = char;
-      code += char;
+      str = char;
       index += 1;
       continue;
     }
@@ -107,6 +126,9 @@ function scanLine(line: string, inBlock: boolean): { parts: Part[]; inBlock: boo
 
   flushCode();
   flushComment();
+  if (str !== "") {
+    parts.push({ kind: "string", text: str });
+  }
   return { parts, inBlock: block };
 }
 
@@ -163,7 +185,7 @@ export function formatSource(source: string): string {
     let result = "";
     let isFirst = true;
     for (const part of parts) {
-      if (part.kind === "comment") {
+      if (part.kind === "comment" || part.kind === "string") {
         result += part.text;
         continue;
       }
@@ -175,6 +197,16 @@ export function formatSource(source: string): string {
           text = text.replace(leadMatch[1]!, firstWord);
         }
       }
+      // Auto-capitalize built-in function calls: e.g. and(...) -> AND(...)
+      text = text.replace(BUILTIN_CALL_REGEX, (_match, name) => `${name.toUpperCase()}(`);
+      // Auto-capitalize : bus(...) -> : BUS(...)
+      text = text.replace(BUS_KEYWORD_REGEX, ": BUS(");
+      // Auto-capitalize clock edges
+      text = text.replace(CLOCK_EDGE_REGEX, (match) => match.toUpperCase());
+      // Auto-capitalize 'as' keyword
+      text = text.replace(/\b(as)\b/gi, "AS");
+      // Normalize comma spacing
+      text = text.replace(/,\s*/g, ", ");
       result += text;
     }
     const last = parts[parts.length - 1];

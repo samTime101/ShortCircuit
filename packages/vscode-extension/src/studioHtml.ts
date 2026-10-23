@@ -265,15 +265,15 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
     .sim-dock {
       display: flex;
       flex-wrap: wrap;
-      gap: 12px;
-      padding: 12px;
+      gap: 16px;
+      padding: 14px 16px;
       border-bottom: 1px solid var(--sc-border);
-      background: rgba(0, 0, 0, 0.15);
+      background: rgba(0, 0, 0, 0.2);
       flex-shrink: 0;
     }
 
     .sim-column {
-      flex: 1 1 200px;
+      flex: 1 1 240px;
       display: flex;
       flex-direction: column;
       gap: 8px;
@@ -284,11 +284,11 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
       align-items: center;
       justify-content: space-between;
       font-size: 11px;
-      font-weight: 600;
+      font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 0.05em;
+      letter-spacing: 0.08em;
       color: var(--sc-muted);
-      padding-bottom: 4px;
+      padding-bottom: 6px;
       border-bottom: 1px solid var(--sc-border);
     }
 
@@ -296,35 +296,112 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 6px 10px;
-      background: var(--sc-card-bg);
-      border: 1px solid var(--sc-border);
+      padding: 10px 14px;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.08);
       border-radius: 6px;
-      gap: 8px;
-      transition: border-color 0.15s;
+      gap: 12px;
+      transition: border-color 0.15s, background-color 0.15s;
     }
 
     .sim-item:hover {
-      border-color: var(--sc-border-strong);
+      border-color: rgba(255, 255, 255, 0.18);
+      background: rgba(255, 255, 255, 0.04);
     }
 
     .sim-label-group {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
     }
 
     .sim-name {
       font-family: var(--sc-font-mono);
-      font-size: 12px;
-      font-weight: 600;
+      font-size: 13px;
+      font-weight: 700;
       color: var(--sc-fg);
     }
 
     .sim-width {
-      font-size: 10px;
+      font-size: 11px;
       color: var(--sc-muted);
       font-family: var(--sc-font-mono);
+    }
+
+    .sim-controls-group {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 6px;
+    }
+
+    .bus-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .bus-text-input {
+      background: #090c0a;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 6px;
+      color: #fff;
+      font-family: var(--sc-font-mono);
+      font-size: 12px;
+      padding: 5px 10px;
+      text-align: right;
+      width: 110px;
+      transition: border-color 0.15s;
+    }
+
+    .bus-text-input:focus {
+      outline: none;
+      border-color: var(--sc-lime);
+      box-shadow: 0 0 6px rgba(209, 255, 82, 0.3);
+    }
+
+    .bus-decimal {
+      font-family: var(--sc-font-mono);
+      font-size: 11px;
+      color: var(--sc-lime);
+      background: var(--sc-lime-dim);
+      padding: 2px 6px;
+      border-radius: 4px;
+      white-space: nowrap;
+    }
+
+    .bit-cells {
+      display: flex;
+      gap: 3px;
+    }
+
+    .bit-cell {
+      width: 22px;
+      height: 24px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--sc-muted);
+      font-family: var(--sc-font-mono);
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.12s;
+    }
+
+    .bit-cell:hover {
+      border-color: var(--sc-lime);
+      transform: translateY(-1px);
+    }
+
+    .bit-cell.is-on {
+      background: var(--sc-lime);
+      color: #0c100d;
+      border-color: var(--sc-lime);
+      box-shadow: 0 0 6px rgba(209, 255, 82, 0.4);
     }
 
     /* Interactive Switch */
@@ -332,10 +409,10 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
       position: relative;
       display: inline-flex;
       align-items: center;
-      width: 44px;
-      height: 22px;
+      width: 46px;
+      height: 24px;
       background: rgba(255, 255, 255, 0.1);
-      border-radius: 11px;
+      border-radius: 12px;
       border: 1px solid var(--sc-border);
       cursor: pointer;
       transition: all 0.2s ease;
@@ -349,15 +426,15 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
     }
 
     .switch-knob {
-      width: 16px;
-      height: 16px;
+      width: 18px;
+      height: 18px;
       border-radius: 50%;
       background: #fff;
       transition: transform 0.2s ease;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 9px;
+      font-size: 10px;
       font-weight: bold;
       color: #111;
       font-family: var(--sc-font-mono);
@@ -374,24 +451,92 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      min-width: 32px;
-      height: 22px;
-      padding: 0 8px;
-      border-radius: 11px;
+      min-width: 42px;
+      height: 24px;
+      padding: 0 14px;
+      border-radius: 12px;
       font-family: var(--sc-font-mono);
-      font-size: 11px;
-      font-weight: bold;
-      background: rgba(255, 255, 255, 0.08);
-      color: var(--sc-muted);
-      border: 1px solid var(--sc-border);
-      transition: all 0.15s;
+      font-size: 12px;
+      font-weight: 700;
+      background: rgba(255, 255, 255, 0.04);
+      color: #777;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      transition: all 0.15s ease;
     }
 
     .output-pill.high {
-      background: var(--sc-lime-dim);
+      background: rgba(209, 255, 82, 0.12);
       color: var(--sc-lime);
+      border: 1.5px solid var(--sc-lime);
+      box-shadow: 0 0 12px rgba(209, 255, 82, 0.35);
+    }
+
+    .sim-output-container {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .output-display-el {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .display-bin {
+      font-family: var(--sc-font-mono);
+      font-size: 12px;
+      color: var(--sc-fg);
+      font-weight: 600;
+    }
+
+    .display-mode-select {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--sc-border);
+      border-radius: 4px;
+      color: var(--sc-muted);
+      font-size: 10px;
+      padding: 2px 6px;
+      cursor: pointer;
+    }
+
+    .display-leds {
+      display: inline-flex;
+      gap: 4px;
+      align-items: center;
+    }
+
+    .led-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.15);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .led-dot.on {
+      background: var(--sc-lime);
       border-color: var(--sc-lime);
-      box-shadow: 0 0 8px rgba(209, 255, 82, 0.25);
+      box-shadow: 0 0 6px var(--sc-lime);
+    }
+
+    .bar-track {
+      width: 80px;
+      height: 10px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 5px;
+      overflow: hidden;
+    }
+
+    .bar-fill {
+      height: 100%;
+      background: var(--sc-lime);
+      transition: width 0.2s ease;
+    }
+
+    .seven-seg-svg {
+      display: inline-block;
+      vertical-align: middle;
     }
 
     /* Graph Section */
@@ -1097,11 +1242,56 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
       irPre.textContent = JSON.stringify(model.ir || activeCircuit, null, 2);
     }
 
+    const outputDisplayModes = {};
+
+    const SEGMENTS = {
+      "0": [true, true, true, true, true, true, false],
+      "1": [false, true, true, false, false, false, false],
+      "2": [true, true, false, true, true, false, true],
+      "3": [true, true, true, true, false, false, true],
+      "4": [false, true, true, false, false, true, true],
+      "5": [true, false, true, true, false, true, true],
+      "6": [true, false, true, true, true, true, true],
+      "7": [true, true, true, false, false, false, false],
+      "8": [true, true, true, true, true, true, true],
+      "9": [true, true, true, true, false, true, true],
+      "A": [true, true, true, false, true, true, true],
+      "B": [false, true, true, true, true, true, true],
+      "C": [true, false, true, true, true, false, false],
+      "D": [false, true, true, true, true, false, true],
+      "E": [true, false, true, true, true, true, true],
+      "F": [true, false, true, false, true, true, true]
+    };
+
+    const SEGMENT_SHAPES = [
+      "M6 3 H22 L24 5 L22 7 H6 L4 5 Z",
+      "M22 7 L24 9 V19 L22 21 L20 19 V9 Z",
+      "M22 21 L24 19 L24 29 L22 31 L20 29 V23 Z",
+      "M6 29 H22 L24 31 L22 33 H6 L4 31 Z",
+      "M4 9 L6 7 L8 9 V19 L6 21 L4 19 Z",
+      "M4 3 L6 5 L8 3 V13 L6 15 L4 13 Z",
+      "M6 16 H22 L24 18 L22 20 H6 L4 18 Z"
+    ];
+
+    function renderSevenSegment(binary) {
+      const hexChar = (parseInt(binary.slice(-4) || "0", 2) || 0).toString(16).toUpperCase();
+      const segs = SEGMENTS[hexChar] || SEGMENTS["0"];
+      let paths = "";
+      for (let i = 0; i < 7; i++) {
+        const on = segs[i];
+        paths += \`<path d="\${SEGMENT_SHAPES[i]}" fill="\${on ? '#d1ff52' : 'rgba(255,255,255,0.06)'}" \${on ? 'filter="drop-shadow(0 0 2px #d1ff52)"' : ''}/>\`;
+      }
+      return \`<svg class="seven-seg-svg" viewBox="0 0 28 36" width="22" height="28">\${paths}</svg><span class="bus-decimal">#\${hexChar}</span>\`;
+    }
+
     function renderInputs(circuit) {
       inputsList.innerHTML = "";
       inputCountBadge.textContent = circuit.inputs.length;
       circuit.inputs.forEach(inp => {
-        const val = model.inputs[inp.name] || "0";
+        let val = model.inputs[inp.name] || "0";
+        if (inp.width > 1 && val.length < inp.width) {
+          val = val.padStart(inp.width, "0");
+        }
         const isHigh = val === "1" || parseInt(val, 2) > 0;
 
         const row = document.createElement("div");
@@ -1112,27 +1302,71 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
         labelGrp.innerHTML = \`<span class="sim-name">\${inp.name}</span><span class="sim-width">\${inp.width}b</span>\`;
         row.appendChild(labelGrp);
 
+        const controlsGrp = document.createElement("div");
+        controlsGrp.className = "sim-controls-group";
+
         if (inp.width === 1) {
           const sw = document.createElement("div");
           sw.className = "switch-btn" + (isHigh ? " high" : "");
           sw.innerHTML = \`<div class="switch-knob">\${isHigh ? "1" : "0"}</div>\`;
+          sw.title = \`Toggle \${inp.name} (currently \${isHigh ? "1" : "0"})\`;
           sw.addEventListener("click", () => {
-            const nextVal = isHigh ? "0" : "1";
             vscode.postMessage({ type: "toggleInput", name: inp.name });
           });
-          row.appendChild(sw);
+          controlsGrp.appendChild(sw);
         } else {
+          const busRow = document.createElement("div");
+          busRow.className = "bus-row";
+
           const inpBox = document.createElement("input");
-          inpBox.className = "circuit-select";
-          inpBox.style.width = "70px";
-          inpBox.style.fontFamily = "var(--sc-font-mono)";
+          inpBox.className = "bus-text-input";
           inpBox.value = val;
+          inpBox.title = "Type binary (e.g. 100000), hex (0x20), or decimal";
           inpBox.addEventListener("change", (e) => {
             vscode.postMessage({ type: "setInput", name: inp.name, value: e.target.value });
           });
-          row.appendChild(inpBox);
+          inpBox.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") {
+              vscode.postMessage({ type: "setInput", name: inp.name, value: e.target.value });
+              inpBox.blur();
+            }
+          });
+
+          let decVal = "";
+          try {
+            decVal = BigInt("0b" + (val.replace(/[^01]/g, "") || "0")).toString(10);
+          } catch {
+            decVal = "0";
+          }
+          const decBadge = document.createElement("span");
+          decBadge.className = "bus-decimal";
+          decBadge.textContent = \`#\${decVal}\`;
+          decBadge.title = \`Decimal: \${decVal}\`;
+
+          busRow.appendChild(inpBox);
+          busRow.appendChild(decBadge);
+          controlsGrp.appendChild(busRow);
+
+          if (inp.width <= 16) {
+            const bitCells = document.createElement("div");
+            bitCells.className = "bit-cells";
+            for (let i = 0; i < inp.width; i++) {
+              const bit = val[i] ?? "0";
+              const bitIdx = inp.width - 1 - i;
+              const cell = document.createElement("button");
+              cell.className = "bit-cell" + (bit === "1" ? " is-on" : "");
+              cell.textContent = bit;
+              cell.title = \`\${inp.name}[\${bitIdx}] = \${bit}. Click to flip.\`;
+              cell.addEventListener("click", () => {
+                vscode.postMessage({ type: "flipBit", name: inp.name, bitIndex: bitIdx });
+              });
+              bitCells.appendChild(cell);
+            }
+            controlsGrp.appendChild(bitCells);
+          }
         }
 
+        row.appendChild(controlsGrp);
         inputsList.appendChild(row);
       });
     }
@@ -1142,8 +1376,14 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
       outputCountBadge.textContent = circuit.outputs.length;
       circuit.outputs.forEach(out => {
         const snap = model.snapshot?.outputs?.[out.name];
-        const val = snap?.binary || "0";
-        const isHigh = val === "1" || parseInt(val, 2) > 0;
+        let val = snap?.binary || "0";
+        if (out.width > 1 && val.length < out.width) {
+          val = val.padStart(out.width, "0");
+        }
+        const isHigh = val === "1" || (parseInt(val, 2) || 0) > 0;
+        const decVal = snap?.decimal ?? (() => {
+          try { return BigInt("0b" + (val.replace(/[^01]/g, "") || "0")).toString(10); } catch { return "0"; }
+        })();
 
         const row = document.createElement("div");
         row.className = "sim-item";
@@ -1153,11 +1393,65 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
         labelGrp.innerHTML = \`<span class="sim-name">\${out.name}</span><span class="sim-width">\${out.width}b</span>\`;
         row.appendChild(labelGrp);
 
-        const pill = document.createElement("div");
-        pill.className = "output-pill" + (isHigh ? " high" : "");
-        pill.textContent = val;
-        row.appendChild(pill);
+        const outContainer = document.createElement("div");
+        outContainer.className = "sim-output-container";
 
+        if (out.width === 1) {
+          const pill = document.createElement("div");
+          pill.className = "output-pill" + (isHigh ? " high" : "");
+          pill.textContent = isHigh ? "1" : "0";
+          pill.title = \`\${out.name} is \${isHigh ? "HIGH (1)" : "LOW (0)"}\`;
+          outContainer.appendChild(pill);
+        } else {
+          const mode = outputDisplayModes[out.name] || "number";
+
+          const displayEl = document.createElement("div");
+          displayEl.className = "output-display-el";
+
+          if (mode === "number") {
+            displayEl.innerHTML = \`<span class="display-bin">\${val}</span><span class="bus-decimal">#\${decVal}</span>\`;
+          } else if (mode === "led") {
+            const leds = document.createElement("div");
+            leds.className = "display-leds";
+            for (let i = 0; i < val.length; i++) {
+              const led = document.createElement("span");
+              led.className = "led-dot" + (val[i] === "1" ? " on" : "");
+              leds.appendChild(led);
+            }
+            displayEl.appendChild(leds);
+          } else if (mode === "seven") {
+            displayEl.innerHTML = renderSevenSegment(val);
+          } else if (mode === "bar") {
+            const max = (1n << BigInt(out.width)) - 1n;
+            const cur = BigInt(decVal || 0);
+            const pct = max > 0n ? Math.min(100, Math.round(Number((cur * 100n) / max))) : 0;
+            displayEl.innerHTML = \`<div class="bar-track"><div class="bar-fill" style="width:\${pct}%"></div></div><span class="bus-decimal">#\${decVal}</span>\`;
+          }
+
+          outContainer.appendChild(displayEl);
+
+          const modeSelect = document.createElement("select");
+          modeSelect.className = "display-mode-select";
+          [
+            { id: "number", label: "Number" },
+            { id: "led", label: "LEDs" },
+            { id: "seven", label: "7-Seg" },
+            { id: "bar", label: "Bar" }
+          ].forEach(opt => {
+            const option = document.createElement("option");
+            option.value = opt.id;
+            option.textContent = opt.label;
+            if (opt.id === mode) option.selected = true;
+            modeSelect.appendChild(option);
+          });
+          modeSelect.addEventListener("change", (e) => {
+            outputDisplayModes[out.name] = e.target.value;
+            renderOutputs(circuit);
+          });
+          outContainer.appendChild(modeSelect);
+        }
+
+        row.appendChild(outContainer);
         outputsList.appendChild(row);
       });
     }

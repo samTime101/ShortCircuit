@@ -11,6 +11,10 @@ import {
   Simulator,
   generateTruthTable,
   runPackageTests,
+  formatSource,
+  parseSimulationInput,
+  formatBinary,
+  binaryToDecimal,
   type CircuitIR,
   type SimulationSnapshot,
 } from "@shortcircuit/engine";
@@ -106,6 +110,37 @@ export function activate(context: vscode.ExtensionContext): void {
       const editor = vscode.window.activeTextEditor;
       if (editor && editor.document.languageId === "logicflow") {
         await runAllTests(editor.document);
+      }
+    }),
+
+    vscode.commands.registerCommand("shortcircuit.formatDocument", async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || editor.document.languageId !== "logicflow") return;
+      const text = editor.document.getText();
+      const formatted = formatSource(text);
+      if (formatted === text) return;
+      const fullRange = new vscode.Range(
+        editor.document.positionAt(0),
+        editor.document.positionAt(text.length)
+      );
+      await editor.edit(editBuilder => {
+        editBuilder.replace(fullRange, formatted);
+      });
+    })
+  );
+
+  // 4. Document Formatting Provider
+  context.subscriptions.push(
+    vscode.languages.registerDocumentFormattingEditProvider("logicflow", {
+      provideDocumentFormattingEdits(document: vscode.TextDocument): vscode.TextEdit[] {
+        const text = document.getText();
+        const formatted = formatSource(text);
+        if (formatted === text) return [];
+        const fullRange = new vscode.Range(
+          document.positionAt(0),
+          document.positionAt(text.length)
+        );
+        return [vscode.TextEdit.replace(fullRange, formatted)];
       }
     })
   );
@@ -230,13 +265,34 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
       this.simulateAndBroadcast();
     } else if (msg.type === "setInput") {
       const name = msg.name as string;
-      const value = msg.value as string;
-      this.currentInputs[name] = value;
+      const rawValue = String(msg.value ?? "");
+      const inputDef = this.activeCircuit?.inputs.find(i => i.name === name);
+      const width = inputDef?.width ?? 1;
+      try {
+        const parsed = parseSimulationInput(rawValue, width);
+        this.currentInputs[name] = formatBinary(parsed, width);
+      } catch {
+        this.currentInputs[name] = rawValue;
+      }
       this.simulateAndBroadcast();
+    } else if (msg.type === "flipBit") {
+      const name = msg.name as string;
+      const bitIndex = Number(msg.bitIndex);
+      const inputDef = this.activeCircuit?.inputs.find(i => i.name === name);
+      const width = inputDef?.width ?? 1;
+      let currentVal = this.currentInputs[name] ?? "0".repeat(width);
+      if (currentVal.length < width) currentVal = currentVal.padStart(width, "0");
+      const bits = currentVal.split("");
+      const arrayIndex = width - 1 - bitIndex;
+      if (arrayIndex >= 0 && arrayIndex < bits.length) {
+        bits[arrayIndex] = bits[arrayIndex] === "1" ? "0" : "1";
+        this.currentInputs[name] = bits.join("");
+        this.simulateAndBroadcast();
+      }
     } else if (msg.type === "resetInputs") {
       if (this.activeCircuit) {
         for (const input of this.activeCircuit.inputs) {
-          this.currentInputs[input.name] = "0";
+          this.currentInputs[input.name] = "0".repeat(input.width);
         }
         this.simulateAndBroadcast();
       }
@@ -299,8 +355,13 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
 
       // Simulate
       const simInputs: Record<string, string | number | bigint> = {};
-      for (const [k, v] of Object.entries(this.currentInputs)) {
-        simInputs[k] = parseInt(v, 2) || 0;
+      for (const input of circuit.inputs) {
+        const raw = this.currentInputs[input.name] ?? "0";
+        try {
+          simInputs[input.name] = parseSimulationInput(raw, input.width);
+        } catch {
+          simInputs[input.name] = 0n;
+        }
       }
       const snapshot = this.activeSimulator.setInputs(simInputs);
 
@@ -397,8 +458,13 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
 
     try {
       const simInputs: Record<string, string | number | bigint> = {};
-      for (const [k, v] of Object.entries(this.currentInputs)) {
-        simInputs[k] = parseInt(v, 2) || 0;
+      for (const input of this.activeCircuit.inputs) {
+        const raw = this.currentInputs[input.name] ?? "0";
+        try {
+          simInputs[input.name] = parseSimulationInput(raw, input.width);
+        } catch {
+          simInputs[input.name] = 0n;
+        }
       }
       const snapshot = this.activeSimulator.setInputs(simInputs);
 

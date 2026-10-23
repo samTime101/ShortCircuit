@@ -12,13 +12,15 @@ import {
   Hover,
   MarkupContent,
   Range,
+  TextEdit,
+  DocumentFormattingParams,
   DidChangeConfigurationNotification,
   HoverParams,
   CompletionParams
 } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { fileURLToPath } from "url";
-import { compile, type Diagnostic as EngineDiagnostic } from "@shortcircuit/engine";
+import { compile, formatSource, type Diagnostic as EngineDiagnostic } from "@shortcircuit/engine";
 import { resolveWorkspaceContext, invalidatePackageCache } from "./packageResolver";
 
 const connection = createConnection(ProposedFeatures.all);
@@ -44,6 +46,7 @@ connection.onInitialize((params: InitializeParams) => {
         triggerCharacters: [".", "(", "@", "\""]
       },
       hoverProvider: true,
+      documentFormattingProvider: true,
     }
   };
   if (hasWorkspaceFolderCapability) {
@@ -282,6 +285,25 @@ connection.onHover(async (params: HoverParams): Promise<Hover | null> => {
     return null;
   } catch {
     return null;
+  }
+});
+
+connection.onDocumentFormatting((params: DocumentFormattingParams): TextEdit[] => {
+  try {
+    const document = documents.get(params.textDocument.uri);
+    if (!document) return [];
+    const text = document.getText();
+    const formatted = formatSource(text);
+    if (formatted === text) return [];
+    const lineCount = document.lineCount;
+    return [
+      TextEdit.replace(
+        Range.create(0, 0, lineCount, 0),
+        formatted
+      )
+    ];
+  } catch {
+    return [];
   }
 });
 

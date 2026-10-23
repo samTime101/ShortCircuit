@@ -1,0 +1,17 @@
+{
+  "iconDefinitions": {
+    "_file": {
+      "iconPath": "../media/file.svg"
+    },
+    "logicflow": {
+      "iconPath": "../media/shortcircuit.svg"
+    }
+  },
+  "file": "_file",
+  "fileExtensions": {
+    "lf": "logicflow"
+  },
+  "languageIds": {
+    "logicflow": "logicflow"
+  }
+}
