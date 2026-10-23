@@ -88,6 +88,7 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
       --yellow: #dcb862;
       --red: #e87878;
       --green: #6cc48f;
+      --lime: #d1ff52;
 
       --fs-2xs: 10.5px;
       --fs-xs: 11.5px;
@@ -179,19 +180,25 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
     .circuit-select {
       height: 24px;
       background: var(--panel-2);
-      border: 1px solid var(--line);
+      border: 1px solid var(--line-strong);
       border-radius: var(--radius-sm);
-      color: var(--text-dim);
+      color: var(--text);
       font-family: var(--font-mono);
       font-size: var(--fs-xs);
       padding: 0 6px;
       cursor: pointer;
-      max-width: 170px;
+      max-width: 180px;
+      outline: none;
+      transition: border-color 0.14s ease;
     }
 
-    .circuit-select:hover {
-      border-color: var(--line-strong);
-      color: var(--text);
+    .circuit-select:hover, .circuit-select:focus {
+      border-color: var(--lime);
+    }
+
+    .circuit-select option {
+      background: #0a0c0f;
+      color: #dee2e9;
     }
 
     .btn-action {
@@ -213,32 +220,6 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
       background: var(--panel-2);
       border-color: var(--line-strong);
       color: var(--text);
-    }
-
-    .live-indicator {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      font-size: var(--fs-2xs);
-      color: var(--accent);
-      padding: 2px 7px;
-      border-radius: 10px;
-      background: var(--accent-soft);
-      border: 1px solid rgba(108, 158, 255, 0.25);
-    }
-
-    .live-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: var(--green);
-      box-shadow: 0 0 6px var(--green);
-      animation: pulse 2.4s ease-in-out infinite;
-    }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.4; transform: scale(0.9); }
     }
 
     /* Diagnostics Banner */
@@ -274,23 +255,155 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
       display: flex;
     }
 
-    /* ---------------- Simulator Dock (Web UI Port) ---------------- */
+    /* ---------------- Simulator Dock (Exact Web Port) ---------------- */
     .sim-dock {
       display: flex;
       flex-direction: column;
-      gap: 12px;
-      padding: 10px 14px;
       background: var(--panel);
       border-bottom: 1px solid var(--line);
-      max-height: 50%;
+      max-height: 52%;
       overflow-y: auto;
       flex-shrink: 0;
+    }
+
+    .sim-dock-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px 10px;
+      min-height: 34px;
+      padding: 5px 12px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .sim-dock-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--text-dim);
+      font-size: var(--fs-sm);
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .live-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 6px var(--green);
+      animation: pulse 2.4s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.9); }
+    }
+
+    .event-chip {
+      padding: 1px 6px;
+      border: 1px solid var(--line-strong);
+      border-radius: 3px;
+      color: var(--text-faint);
+      font-family: var(--font-mono);
+      font-size: var(--fs-2xs);
+    }
+
+    .dock-controls-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 12px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel-2);
+    }
+
+    .dock-controls {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .dock-select {
+      height: 22px;
+      padding: 0 6px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: var(--panel-2);
+      color: var(--text-dim);
+      font-family: var(--font-mono);
+      font-size: var(--fs-xs);
+      cursor: pointer;
+    }
+
+    .dock-select:hover {
+      border-color: var(--line-strong);
+      color: var(--text);
+    }
+
+    .dock-select:focus {
+      border-color: var(--accent);
+      outline: none;
+    }
+
+    .text-button {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      height: 24px;
+      padding: 0 8px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--text-dim);
+      font-size: var(--fs-sm);
+      cursor: pointer;
+      transition: border-color 0.14s ease, color 0.14s ease, background 0.14s ease;
+    }
+
+    .text-button:hover {
+      border-color: var(--line-strong);
+      background: var(--panel-2);
+      color: var(--text);
+    }
+
+    .text-button.compact {
+      height: 22px;
+      font-size: var(--fs-xs);
+    }
+
+    .text-button.is-active {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+      color: var(--accent-strong);
+    }
+
+    .text-button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    .sim-dock-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-left: auto;
+    }
+
+    .sim-clock-hint {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      color: var(--text-faint);
+      font-size: var(--fs-xs);
+      white-space: nowrap;
     }
 
     .sim-columns {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
       gap: 14px;
+      padding: 10px 12px;
     }
 
     .sim-group {
@@ -336,7 +449,7 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
       display: flex;
       flex-direction: column;
       gap: 5px;
-      padding: 8px 10px;
+      padding: 7px 9px;
       border: 1px solid var(--line);
       border-radius: var(--radius-sm);
       background: var(--panel-2);
@@ -679,6 +792,59 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
       font-size: var(--fs-xs);
     }
 
+    /* ---------------- Evaluation Graph Toolbar (Matches Web UI) ---------------- */
+    .graph-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      height: 34px;
+      padding: 0 12px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+      flex-shrink: 0;
+    }
+
+    .graph-toolbar-title {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      min-width: 0;
+      color: var(--text);
+      font-size: var(--fs-sm);
+      font-weight: 600;
+    }
+
+    .graph-toolbar-title > div {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+    }
+
+    .graph-toolbar-title strong {
+      color: var(--text);
+    }
+
+    .graph-toolbar-title span {
+      color: var(--text-faint);
+      font-family: var(--font-mono);
+      font-size: var(--fs-xs);
+      font-weight: 400;
+    }
+
+    .graph-mode {
+      padding: 1px 6px;
+      border: 1px solid var(--line-strong);
+      border-radius: 3px;
+      color: var(--text-faint);
+      font-size: var(--fs-2xs);
+      font-family: var(--font-mono);
+    }
+
+    .graph-mode.sequential {
+      border-color: rgba(157, 141, 251, 0.4);
+      color: var(--violet);
+    }
+
     /* ---------------- Circuit Graph Stage (Web UI CircuitGraph.tsx Port) ---------------- */
     .graph-stage {
       position: relative;
@@ -728,6 +894,22 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
     .graph-layers {
       top: 10px;
       right: 12px;
+    }
+
+    .graph-warning {
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 4px 8px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: rgba(4, 5, 7, 0.92);
+      color: var(--yellow);
+      font-size: var(--fs-xs);
+      z-index: 6;
+      white-space: nowrap;
+      pointer-events: none;
     }
 
     .live-values {
@@ -784,7 +966,7 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
       color: var(--text);
     }
 
-    /* SVG Nodes & Edges (Exact Web UI classes and rules) */
+    /* SVG Nodes & Edges */
     .graph-node {
       cursor: pointer;
       outline: none;
@@ -1218,12 +1400,7 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
 
     <div class="top-actions">
       <select id="circuit-picker" class="circuit-select"></select>
-      <button id="btn-reset" class="btn-action" title="Reset Simulation Inputs to 0">↺ Reset</button>
       <button id="btn-expand" class="btn-action" title="Open in Editor Beside">⤢ Expand</button>
-      <div class="live-indicator">
-        <span class="live-dot"></span>
-        Live
-      </div>
     </div>
   </div>
 
@@ -1238,8 +1415,46 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
 
     <!-- Circuit Tab Content -->
     <div id="tab-circuit" class="tab-content active">
-      <!-- Simulator Dock (Matches Web SimulatorDock) -->
+      <!-- Simulator Dock (Exact Web SimulatorDock Structure) -->
       <div class="sim-dock">
+        <div class="sim-dock-head">
+          <div class="sim-dock-title">
+            <span class="live-dot"></span>
+            <span>Live simulation</span>
+          </div>
+          <div class="sim-dock-actions">
+            <span class="sim-clock-hint" id="sim-clock-hint" style="display: none;">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              0 → 1 fires a rising edge
+            </span>
+            <button class="text-button compact" id="btn-reset" title="Reset all inputs and stored state">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+              Reset
+            </button>
+          </div>
+        </div>
+
+        <!-- Clock Play / Step / Speed Controls Row (Web UI port) -->
+        <div id="dock-controls-row" class="dock-controls-row" style="display: none;">
+          <div class="dock-controls">
+            <select class="dock-select" id="clock-select" aria-label="Clock to drive"></select>
+            <button class="text-button compact" id="btn-clock-step" title="Pulse the clock once: 0 to 1 to 0">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg>
+              Step
+            </button>
+            <button class="text-button compact" id="btn-clock-run" title="Run the clock continuously">
+              <svg id="clock-run-icon" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              <span id="clock-run-text">Run</span>
+            </button>
+            <select class="dock-select" id="clock-speed" aria-label="Clock speed">
+              <option value="1">1 Hz</option>
+              <option value="2" selected>2 Hz</option>
+              <option value="5">5 Hz</option>
+              <option value="10">10 Hz</option>
+            </select>
+          </div>
+        </div>
+
         <div class="sim-columns">
           <div class="sim-group inputs-group">
             <div class="sim-group-title">
@@ -1258,6 +1473,16 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
         </div>
       </div>
 
+      <!-- Evaluation Graph Toolbar (Matches Web UI) -->
+      <div class="graph-toolbar">
+        <div class="graph-toolbar-title">
+          <div>
+            Evaluation graph <strong id="graph-circuit-name">—</strong> <span id="graph-meta">—</span>
+          </div>
+          <span id="graph-mode-badge" class="graph-mode">Combinational</span>
+        </div>
+      </div>
+
       <!-- Evaluation Graph Stage (SVG-native, matches Web CircuitGraph) -->
       <div id="graph-stage" class="graph-stage">
         <div class="graph-overlay graph-legend">
@@ -1266,6 +1491,10 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
           </span>
           <span class="legend-item"><i class="legend-line high"></i> HIGH</span>
           <span class="legend-item"><i class="legend-line low"></i> LOW</span>
+        </div>
+
+        <div id="graph-warning" class="graph-warning" style="display: none;">
+          Large graph · use zoom or inspect a subcircuit
         </div>
 
         <div class="graph-overlay graph-layers">
@@ -1358,6 +1587,12 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
     let selectedNodeId = null;
     let hoveredNodeId = null;
 
+    // Clock Runner State
+    let clockRunning = false;
+    let clockInterval = null;
+    let clockSpeed = 2;
+    let selectedClock = null;
+
     // Elements
     const emptyState = document.getElementById("empty-state");
     const circuitPicker = document.getElementById("circuit-picker");
@@ -1372,6 +1607,19 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
     const outputCountBadge = document.getElementById("output-count-badge");
     const diagBanner = document.getElementById("diagnostics-banner");
     const diagText = document.getElementById("diagnostics-text");
+    const dockControlsRow = document.getElementById("dock-controls-row");
+    const clockSelect = document.getElementById("clock-select");
+    const btnClockStep = document.getElementById("btn-clock-step");
+    const btnClockRun = document.getElementById("btn-clock-run");
+    const clockRunIcon = document.getElementById("clock-run-icon");
+    const clockRunText = document.getElementById("clock-run-text");
+    const clockSpeedSelect = document.getElementById("clock-speed");
+    const simClockHint = document.getElementById("sim-clock-hint");
+    const graphToolbar = document.querySelector(".graph-toolbar");
+    const graphCircuitName = document.getElementById("graph-circuit-name");
+    const graphMeta = document.getElementById("graph-meta");
+    const graphModeBadge = document.getElementById("graph-mode-badge");
+    const graphWarning = document.getElementById("graph-warning");
     const graphStage = document.getElementById("graph-stage");
     const circuitGraphSvg = document.getElementById("circuit-graph");
     const graphWorld = document.getElementById("graph-world");
@@ -1436,11 +1684,13 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
 
     // Circuit Picker Change
     circuitPicker.addEventListener("change", (e) => {
+      stopClock();
       vscode.postMessage({ type: "selectCircuit", name: e.target.value });
     });
 
     // Reset button
     btnReset.addEventListener("click", () => {
+      stopClock();
       vscode.postMessage({ type: "resetInputs" });
     });
 
@@ -1448,6 +1698,58 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
     btnExpand.addEventListener("click", () => {
       vscode.postMessage({ type: "expand" });
     });
+
+    // Clock Step & Run
+    btnClockStep.addEventListener("click", () => {
+      if (selectedClock) {
+        vscode.postMessage({ type: "stepClock", clock: selectedClock });
+      }
+    });
+
+    btnClockRun.addEventListener("click", () => {
+      if (clockRunning) {
+        stopClock();
+      } else {
+        startClock();
+      }
+    });
+
+    clockSelect.addEventListener("change", (e) => {
+      selectedClock = e.target.value;
+    });
+
+    clockSpeedSelect.addEventListener("change", (e) => {
+      clockSpeed = Number(e.target.value);
+      if (clockRunning) {
+        stopClock();
+        startClock();
+      }
+    });
+
+    function startClock() {
+      if (!selectedClock) return;
+      clockRunning = true;
+      btnClockRun.classList.add("is-active");
+      clockRunText.textContent = "Pause";
+      clockRunIcon.innerHTML = '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>';
+      const ms = Math.max(60, Math.round(1000 / clockSpeed));
+      clockInterval = setInterval(() => {
+        if (selectedClock) {
+          vscode.postMessage({ type: "stepClock", clock: selectedClock });
+        }
+      }, ms);
+    }
+
+    function stopClock() {
+      clockRunning = false;
+      if (clockInterval) {
+        clearInterval(clockInterval);
+        clockInterval = null;
+      }
+      btnClockRun.classList.remove("is-active");
+      clockRunText.textContent = "Run";
+      clockRunIcon.innerHTML = '<polygon points="5 3 19 12 5 21 5 3"/>';
+    }
 
     // Zoom and Pan
     let panX = 40;
@@ -1648,8 +1950,63 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
       graphNodesCount.textContent = activeCircuit.stats.nodes + " nodes";
       graphLayersCount.textContent = (model.layout ? model.layout.depth : 0) + " layers";
 
+      // Toolbar info
+      graphCircuitName.textContent = activeCircuit.name;
+      graphMeta.textContent = activeCircuit.stats.nodes + " nodes • " + activeCircuit.stats.maxDepth + " deep • " + (activeCircuit.stats.maxWidth || 1) + "b max width";
+      graphModeBadge.textContent = activeCircuit.sequential ? "Sequential" : "Combinational";
+      if (activeCircuit.sequential) {
+        graphModeBadge.classList.add("sequential");
+      } else {
+        graphModeBadge.classList.remove("sequential");
+      }
+
+      // Large graph warning
+      if (activeCircuit.stats.nodes > 90) {
+        graphWarning.style.display = "block";
+      } else {
+        graphWarning.style.display = "none";
+      }
+
+      // Clocks & Clock Runner
+      const clockNames = [];
+      if (model.ir && Array.isArray(model.ir.events)) {
+        model.ir.events.forEach(e => {
+          if (e && e.clock) {
+            const foundNode = model.ir.nodes && model.ir.nodes.find(n => n.id === e.clock);
+            const clkName = foundNode && foundNode.inputName ? foundNode.inputName : e.clock;
+            if (!clockNames.includes(clkName)) clockNames.push(clkName);
+          }
+        });
+      }
+
+      if (clockNames.length > 0) {
+        dockControlsRow.style.display = "flex";
+        simClockHint.style.display = "inline-flex";
+
+        const currentChoice = clockSelect.value;
+        clockSelect.innerHTML = "";
+        clockNames.forEach(c => {
+          const opt = document.createElement("option");
+          opt.value = c;
+          opt.textContent = c;
+          clockSelect.appendChild(opt);
+        });
+
+        if (currentChoice && clockNames.includes(currentChoice)) {
+          clockSelect.value = currentChoice;
+          selectedClock = currentChoice;
+        } else {
+          selectedClock = clockNames[0];
+          clockSelect.value = selectedClock;
+        }
+      } else {
+        dockControlsRow.style.display = "none";
+        simClockHint.style.display = "none";
+        stopClock();
+      }
+
       // Render Inputs
-      renderInputs(activeCircuit);
+      renderInputs(activeCircuit, clockNames);
 
       // Render Outputs
       renderOutputs(activeCircuit);
@@ -1717,14 +2074,9 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
       return '<svg class="seven-seg-svg" viewBox="0 0 28 36" width="20" height="26">' + paths + '</svg><span class="decimal-value bus-decimal">#' + hexChar + '</span>';
     }
 
-    function renderInputs(circuit) {
+    function renderInputs(circuit, clockNames = []) {
       inputsList.innerHTML = "";
       inputCountBadge.textContent = circuit.inputs.length;
-
-      const clockNames = new Set();
-      if (model.ir && Array.isArray(model.ir.events)) {
-        model.ir.events.forEach(e => { if (e && e.clock) clockNames.add(e.clock); });
-      }
 
       if (circuit.inputs.length === 0) {
         inputsList.innerHTML = '<div class="io-empty">This circuit has no external inputs.</div>';
@@ -1737,7 +2089,7 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
           val = val.padStart(inp.width, "0");
         }
         const isHigh = val === "1" || parseInt(val, 2) > 0;
-        const isClock = clockNames.has(inp.name);
+        const isClock = clockNames.includes(inp.name);
 
         const row = document.createElement("div");
         row.className = "io-control " + (inp.width === 1 ? "bit-control" : "bus-control") + (isClock ? " is-clock" : "");

@@ -294,7 +294,30 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
         for (const input of this.activeCircuit.inputs) {
           this.currentInputs[input.name] = "0".repeat(input.width);
         }
+        this.activeSimulator = new Simulator(this.activeCircuit);
         this.simulateAndBroadcast();
+      }
+    } else if (msg.type === "stepClock") {
+      const clockName = (msg.clock as string) || (this.activeCircuit?.events[0] ? this.activeCircuit.events[0].clock : undefined);
+      if (clockName && this.activeSimulator) {
+        try {
+          this.activeSimulator.setInput(clockName, "0");
+          this.activeSimulator.setInput(clockName, "1");
+          const snap = this.activeSimulator.setInput(clockName, "0");
+          this.currentInputs[clockName] = "0";
+          if (this.lastModel) {
+            this.lastModel.inputs = this.currentInputs;
+            this.lastModel.snapshot = {
+              inputs: snap.inputs,
+              outputs: snap.outputs,
+              nodes: snap.nodes,
+              runtimeError: snap.runtimeError
+            };
+            this.broadcastUpdate();
+          }
+        } catch (err) {
+          console.error("Step clock error:", err);
+        }
       }
     } else if (msg.type === "selectCircuit") {
       this.activeCircuitName = msg.name as string;
