@@ -54,6 +54,20 @@ The command explains MACRO versus CIRCUIT before creating files. With no flags,
 it prompts for the name, export, kind, description, version, license, and
 dependencies.
 
+When the package lives inside an existing project, pass a subdirectory:
+
+```bash
+shortcircuit package init packages/com1bit \
+  --name @shortcircuit/com1bit \
+  --export COM1BIT \
+  --kind circuit \
+  --yes
+shortcircuit package link @shortcircuit/com1bit
+```
+
+`package init` refuses to write package files directly into a project root.
+Likewise, `shortcircuit init` refuses to create a project over a package root.
+
 For scripts and automation:
 
 ```bash

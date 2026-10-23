@@ -291,6 +291,13 @@ async function promptValue(
 
 export async function initPackage(options: PackageInitOptions): Promise<CommandResult> {
   const directory = resolve(options.directory);
+  if (existsSync(join(directory, "shortcircuit.json"))) {
+    throw new Error(
+      `Cannot create a package at the project root ${directory}. ` +
+        "Run shortcircuit package init packages/<name> from the project root, " +
+        "or run this command in a different directory.",
+    );
+  }
   const interactive = options.interactive === true;
   const prompt = interactive ? prompter() : null;
   const output: string[] = [];

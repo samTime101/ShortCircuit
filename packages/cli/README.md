@@ -38,7 +38,9 @@ shortcircuit test src/main.lf
 ```
 
 `init` creates `shortcircuit.json`, `shortcircuit.lock.json`, `src/main.lf`,
-and a `.gitignore` entry for `.shortcircuit/` and `dist/`.
+and a `.gitignore` entry for `.shortcircuit/` and `dist/`. It refuses to run in
+a package root; keep packages under `packages/<name>` when they share a
+repository with a project.
 
 ## Commands
 
@@ -150,8 +152,9 @@ shortcircuit compile circuit.lf --package packages/com16bit
 Package authoring works in any directory. It does not require a checkout of the
 package registry:
 
+From an empty directory:
+
 ```bash
-shortcircuit package init
 shortcircuit package init \
   --name @acme/parity \
   --export PARITY3 \
@@ -159,7 +162,22 @@ shortcircuit package init \
   --description "Three-input parity built from NAND." \
   --dependencies @shortcircuit/gates \
   --yes
+```
 
+From a project root, always give the package a subdirectory:
+
+```bash
+shortcircuit package init packages/com1bit \
+  --name @shortcircuit/com1bit \
+  --export COM1BIT \
+  --kind circuit \
+  --yes
+shortcircuit package link @shortcircuit/com1bit
+```
+
+Then build and test:
+
+```bash
 shortcircuit package build   # validate and write dist/packages.json
 shortcircuit package test    # run the package's .lf tests
 shortcircuit package check   # build and test

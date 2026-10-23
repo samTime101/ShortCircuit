@@ -279,11 +279,24 @@ and engine API all require the same explicit imports.
 Package authoring also works locally and does not require a registry checkout:
 
 ```bash
+# In an empty directory
 shortcircuit package init
 shortcircuit package build
 shortcircuit package test
 shortcircuit package check
 shortcircuit package register --dry-run
+```
+
+When creating a package inside an existing project, pass a subdirectory and
+link it:
+
+```bash
+shortcircuit package init packages/com1bit \
+  --name @shortcircuit/com1bit \
+  --export COM1BIT \
+  --kind circuit \
+  --yes
+shortcircuit package link @shortcircuit/com1bit
 ```
 
 `package register` writes a validated submission bundle under

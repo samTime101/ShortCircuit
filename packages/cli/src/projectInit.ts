@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import type { CommandResult } from "./commands";
 import {
   emptyLock,
+  hasPackageManifest,
   PROJECT_SCHEMA,
   writeJson,
   writeLock,
@@ -54,6 +55,13 @@ function ensureGitignore(directory: string): void {
 
 export function initProject(options: ProjectInitOptions): CommandResult {
   const directory = resolve(options.directory);
+  if (hasPackageManifest(directory)) {
+    throw new Error(
+      `This directory is already a Short Circuit package root (manifest.json). ` +
+        "Create the project in a different directory, or move the package under " +
+        "packages/<name> first.",
+    );
+  }
   const manifestPath = join(directory, "shortcircuit.json");
   if (existsSync(manifestPath) && !options.force) {
     throw new Error(

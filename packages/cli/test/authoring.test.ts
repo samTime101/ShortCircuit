@@ -7,6 +7,7 @@ import {
   readJson,
   tempDir,
   writeDoublePackage,
+  writeProject,
   writeText,
 } from "./helpers";
 
@@ -22,6 +23,18 @@ function runPackage(
   env: Record<string, string | undefined> = process.env,
 ) {
   return run(["package", ...args], noRead, () => undefined, {
+    cwd,
+    env,
+    interactive: false,
+  });
+}
+
+function runCli(
+  args: string[],
+  cwd: string,
+  env: Record<string, string | undefined> = process.env,
+) {
+  return run(args, noRead, () => undefined, {
     cwd,
     env,
     interactive: false,
@@ -227,5 +240,43 @@ describe("package authoring commands", () => {
     const extra = await runPackage(["build", "circuit.lf"], tempDir());
     expect(extra.code).toBe(1);
     expect(extra.stderr).toContain("takes no file");
+  });
+
+  it("refuses to create a package at a project root", async () => {
+    const root = tempDir();
+    writeProject(root);
+
+    const result = await runPackage(
+      ["init", "--name", "@acme/parity", "--export", "PARITY3", "--yes"],
+      root,
+    );
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("project root");
+    expect(existsSync(join(root, "manifest.json"))).toBe(false);
+    expect(existsSync(join(root, "macros/parity3/macro.lf"))).toBe(false);
+  });
+
+  it("refuses to create a project over a package root", async () => {
+    const root = tempDir();
+    await runPackage(["init", "--name", "@acme/parity", "--yes"], root);
+
+    const result = await runCli(["init"], root);
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("package root");
+    expect(existsSync(join(root, "shortcircuit.json"))).toBe(false);
+  });
+
+  it("reports a directory that is both a project and package root", async () => {
+    const root = tempDir();
+    writeProject(root);
+    writeDoublePackage(root);
+
+    const result = await runPackage(["list"], root);
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("contains both a Short Circuit project");
+    expect(result.stderr).toContain("packages/<name>");
   });
 });

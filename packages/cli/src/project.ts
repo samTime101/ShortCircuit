@@ -140,15 +140,31 @@ function isPackageManifestFile(path: string): boolean {
   }
 }
 
+/** True when the directory itself contains a valid package manifest. */
+export function hasPackageManifest(directory: string): boolean {
+  return isPackageManifestFile(join(resolve(directory), "manifest.json"));
+}
+
 /**
  * Find the nearest project (`shortcircuit.json`) or package (`manifest.json`)
- * root. A project root wins when both files are in the same directory.
+ * root. A directory cannot be both at once; report that state explicitly
+ * instead of silently choosing one.
  */
 export function findRoot(start: string): RootContext | null {
   let directory = resolve(start);
   while (true) {
     const projectManifest = join(directory, "shortcircuit.json");
-    if (existsSync(projectManifest)) {
+    const packageManifest = join(directory, "manifest.json");
+    const hasProject = existsSync(projectManifest);
+    const hasPackage = existsSync(packageManifest) && isPackageManifestFile(packageManifest);
+    if (hasProject && hasPackage) {
+      fail(
+        `Directory ${directory} contains both a Short Circuit project ` +
+          "(shortcircuit.json) and a package (manifest.json). " +
+          "Keep them in separate directories and move the package under packages/<name>.",
+      );
+    }
+    if (hasProject) {
       return {
         kind: "project",
         root: directory,
@@ -156,8 +172,7 @@ export function findRoot(start: string): RootContext | null {
         lockPath: join(directory, "shortcircuit.lock.json"),
       };
     }
-    const packageManifest = join(directory, "manifest.json");
-    if (existsSync(packageManifest) && isPackageManifestFile(packageManifest)) {
+    if (hasPackage) {
       return {
         kind: "package",
         root: directory,
