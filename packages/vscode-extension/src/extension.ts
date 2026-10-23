@@ -6,7 +6,7 @@ import {
   TransportKind
 } from "vscode-languageclient/node";
 import * as path from "path";
-import { compileCore, runPackageTestsCore, generateTruthTable, type CompileResult, type TestRunResult, type PackageTestReport, type PackageTestFileResult, type TestSuiteResult, type TestCaseResult, type TestRowResult } from "@shortcircuit/engine/core";
+import { compileCore, runPackageTestsCore, generateTruthTable, Simulator, type CompileResult, type TestRunResult, type PackageTestReport, type PackageTestFileResult, type TestSuiteResult, type TestCaseResult, type TestRowResult } from "@shortcircuit/engine/core";
 
 let client: LanguageClient;
 
@@ -217,6 +217,50 @@ class WaveformPreviewPanel {
   }
 
   private getHtmlForWaveform(source: string): string {
+    let waveformData = "";
+    let error = "";
+
+    try {
+      const result = compileCore(source, { disableDefaultPackages: true });
+      if (result.circuits.length > 0) {
+        const circuit = result.circuits[0];
+        const simulator = new Simulator(circuit);
+        
+        const inputNames = simulator.inputNames;
+        const outputNames = simulator.outputNames;
+        const inputCount = inputNames.length;
+        
+        if (inputCount <= 4) {
+          // Generate all input combinations for waveform
+          const totalCombinations = Math.min(1 << inputCount, 16);
+          const timeSteps: Array<{ inputs: Record<string, string>; outputs: Record<string, string> }> = [];
+          
+          for (let i = 0; i < totalCombinations; i++) {
+            const inputValues: Record<string, string | number | bigint> = {};
+            for (let j = 0; j < inputCount; j++) {
+              const bit = (i >> j) & 1;
+              inputValues[inputNames[j]] = bit;
+            }
+            
+            const snapshot = simulator.setInputs(inputValues);
+            
+            timeSteps.push({
+              inputs: Object.fromEntries(inputNames.map(name => [name, inputValues[name].toString()])),
+              outputs: Object.fromEntries(outputNames.map(name => [name, snapshot.outputs[name]?.binary || "0"]))
+            });
+          }
+          
+          waveformData = JSON.stringify({ timeSteps, inputNames, outputNames }, null, 2);
+        } else {
+          error = "Too many inputs for full waveform simulation (max 4). Showing placeholder.";
+        }
+      } else {
+        error = "No circuits found in source.";
+      }
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err);
+    }
+
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -225,18 +269,52 @@ class WaveformPreviewPanel {
   <title>Waveform Preview</title>
   <style>
     body { font-family: var(--vscode-font-family); padding: 16px; color: var(--vscode-foreground); background: var(--vscode-editor-background); }
+    .container { max-width: 100%; overflow-x: auto; }
+    .error { color: var(--vscode-errorForeground); padding: 16px; background: var(--vscode-inputValidation-errorBackground); border-radius: 4px; }
     .placeholder { text-align: center; padding: 40px; color: var(--vscode-descriptionForeground); }
-    .waveform-container { max-width: 100%; overflow-x: auto; }
+    .waveform-container { font-family: monospace; font-size: 12px; line-height: 1.4; }
+    .signal-row { margin-bottom: 8px; }
+    .signal-name { display: inline-block; width: 80px; font-weight: bold; color: var(--vscode-symbolIcon-foreground); }
+    .signal-value { display: inline-block; font-family: monospace; }
+    .time-step { padding: 2px 0; }
+    .time-label { color: var(--vscode-descriptionForeground); font-size: 11px; margin-bottom: 8px; }
   </style>
 </head>
 <body>
-  <div class="waveform-container">
-    <div class="placeholder">
-      <h2>Waveform Preview</h2>
-      <p>Waveform rendering will be implemented using the engine's simulator output.</p>
-      <p>Source length: ${source.length} characters</p>
-    </div>
+  <div class="container">
+    <h2>Waveform Preview</h2>
+    ${error ? `<div class="error">${error}</div>` : ""}
+    ${waveformData ? `<div class="waveform-container" id="waveform"></div>` : `<div class="placeholder">No waveform data available</div>`}
   </div>
+  <script>
+    const data = ${waveformData || 'null'};
+    if (data) {
+      const container = document.getElementById('waveform');
+      container.innerHTML = '<div class="time-label">Time steps: ' + data.timeSteps.length + '</div>';
+      
+      // Input signals
+      for (const name of data.inputNames) {
+        const row = document.createElement('div');
+        row.className = 'signal-row';
+        row.innerHTML = '<span class="signal-name">' + name + ' (in)</span> ' + 
+          data.timeSteps.map((step: any, i: number) => 
+            '<span class="signal-value" style="margin-right: 4px;">' + step.inputs[name] + '</span>'
+          ).join('');
+        container.appendChild(row);
+      }
+      
+      // Output signals
+      for (const name of data.outputNames) {
+        const row = document.createElement('div');
+        row.className = 'signal-row';
+        row.innerHTML = '<span class="signal-name">' + name + ' (out)</span> ' + 
+          data.timeSteps.map((step: any, i: number) => 
+            '<span class="signal-value" style="margin-right: 4px;">' + step.outputs[name] + '</span>'
+          ).join('');
+        container.appendChild(row);
+      }
+    }
+  </script>
 </body>
 </html>`;
   }
@@ -291,6 +369,60 @@ class TruthTablePreviewPanel {
   }
 
   private getHtmlForTruthTable(source: string): string {
+    let tableHtml = "";
+    let error = "";
+
+    try {
+      const result = compileCore(source, { disableDefaultPackages: true });
+      
+      if (result.circuits.length > 0) {
+        const tables: string[] = [];
+        
+        for (const circuit of result.circuits) {
+          try {
+            const truthTable = generateTruthTable(circuit);
+            
+            let html = `<h3>${circuit.name}</h3>`;
+            html += '<table style="border-collapse: collapse; width: 100%; max-width: 800px; margin: 20px auto;">';
+            
+            // Header
+            html += '<thead><tr>';
+            for (const input of truthTable.inputs) {
+              html += `<th style="border: 1px solid var(--vscode-panel-border); padding: 8px; text-align: center; background: var(--vscode-editor-inactiveSelectionBackground);">${input.name}</th>`;
+            }
+            for (const output of truthTable.outputs) {
+              html += `<th style="border: 1px solid var(--vscode-panel-border); padding: 8px; text-align: center; background: var(--vscode-editor-inactiveSelectionBackground);">${output.name}</th>`;
+            }
+            html += '</tr></thead>';
+            
+            // Rows
+            html += '<tbody>';
+            for (const row of truthTable.rows) {
+              html += '<tr>';
+              for (const input of truthTable.inputs) {
+                html += `<td style="border: 1px solid var(--vscode-panel-border); padding: 8px; text-align: center;">${row.input[input.name]}</td>`;
+              }
+              for (const output of truthTable.outputs) {
+                html += `<td style="border: 1px solid var(--vscode-panel-border); padding: 8px; text-align: center;">${row.output[output.name]}</td>`;
+              }
+              html += '</tr>';
+            }
+            html += '</tbody></table>';
+            
+            tables.push(html);
+          } catch (e) {
+            tables.push(`<p style="color: var(--vscode-errorForeground);">Could not generate truth table for ${circuit.name}: ${e instanceof Error ? e.message : String(e)}</p>`);
+          }
+        }
+        
+        tableHtml = tables.join('<hr style="margin: 30px 0;">');
+      } else {
+        error = "No circuits found in source.";
+      }
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err);
+    }
+
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -299,18 +431,13 @@ class TruthTablePreviewPanel {
   <title>Truth Table Preview</title>
   <style>
     body { font-family: var(--vscode-font-family); padding: 16px; color: var(--vscode-foreground); background: var(--vscode-editor-background); }
+    .error { color: var(--vscode-errorForeground); padding: 16px; background: var(--vscode-inputValidation-errorBackground); border-radius: 4px; }
     .placeholder { text-align: center; padding: 40px; color: var(--vscode-descriptionForeground); }
-    table { border-collapse: collapse; width: 100%; max-width: 600px; margin: 20px auto; }
-    th, td { border: 1px solid var(--vscode-panel-border); padding: 8px; text-align: center; }
-    th { background: var(--vscode-editor-inactiveSelectionBackground); }
   </style>
 </head>
 <body>
-  <div class="placeholder">
-    <h2>Truth Table Preview</h2>
-    <p>Truth table generation will use the engine's \`generateTruthTable\` function.</p>
-    <p>Source length: ${source.length} characters</p>
-  </div>
+  ${error ? `<div class="error">${error}</div>` : ""}
+  ${tableHtml || '<div class="placeholder">No truth table available</div>'}
 </body>
 </html>`;
   }
