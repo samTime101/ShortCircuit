@@ -281,6 +281,7 @@ Package authoring also works locally and does not require a registry checkout:
 ```bash
 # In an empty directory
 shortcircuit package init
+shortcircuit package add-export --export COM2 --kind circuit
 shortcircuit package build
 shortcircuit package test
 shortcircuit package check

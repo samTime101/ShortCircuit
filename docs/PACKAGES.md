@@ -68,6 +68,35 @@ shortcircuit package link @shortcircuit/com1bit
 `package init` refuses to write package files directly into a project root.
 Likewise, `shortcircuit init` refuses to create a project over a package root.
 
+### Add more exports
+
+After creating a package, add additional exports with:
+
+```bash
+shortcircuit package add-export --export COM2 --kind circuit
+```
+
+This updates `manifest.json` and creates the matching source, docs, and test
+files. Run it from the package root directory.
+
+For scripts:
+
+```bash
+shortcircuit package add-export \
+  --export TWICE \
+  --kind macro \
+  --yes
+```
+
+Useful flags:
+
+| Flag | Meaning |
+| --- | --- |
+| `--export <NAME>` | Public macro or circuit name. Required. |
+| `--kind <macro\|circuit>` | Export kind. Default: `macro`. |
+| `--force` | Overwrite existing source file. |
+| `--yes` | Use defaults and never prompt. |
+
 For scripts and automation:
 
 ```bash

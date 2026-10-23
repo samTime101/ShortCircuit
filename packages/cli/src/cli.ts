@@ -7,6 +7,7 @@ import {
   listFlag,
   packageHelpText,
   packageInitHelpText,
+  packageAddExportHelpText,
   packageListHelpText,
   parseArgs,
 } from "./args";
@@ -15,6 +16,7 @@ import {
   buildPackage,
   checkPackage,
   initPackage,
+  addExport,
   registerPackage,
   testPackage,
 } from "./authoring";
@@ -209,9 +211,11 @@ async function runPackageCommand(
       stdout:
         rest[0] === "init"
           ? packageInitHelpText()
-          : rest[0] === "list"
-            ? packageListHelpText()
-            : packageHelpText(),
+          : rest[0] === "add-export"
+            ? packageAddExportHelpText()
+            : rest[0] === "list"
+              ? packageListHelpText()
+              : packageHelpText(),
       stderr: "",
     };
   }
@@ -222,9 +226,11 @@ async function runPackageCommand(
       stdout:
         subcommand === "init"
           ? packageInitHelpText()
-          : subcommand === "list"
-            ? packageListHelpText()
-            : packageHelpText(),
+          : subcommand === "add-export"
+            ? packageAddExportHelpText()
+            : subcommand === "list"
+              ? packageListHelpText()
+              : packageHelpText(),
       stderr: "",
     };
   }
@@ -244,6 +250,27 @@ async function runPackageCommand(
       version: optionValue(parsed.flags, "version"),
       license: optionValue(parsed.flags, "license"),
       dependencies: optionValue(parsed.flags, "dependencies"),
+      force: parsed.flags.force === true,
+      yes: parsed.flags.yes === true,
+      interactive,
+    });
+  }
+
+  if (subcommand === "add-export") {
+    if (rest.length > 0) return failure("package add-export takes no directory.");
+    if (parsed.flags.help !== undefined) {
+      return { code: 0, stdout: packageAddExportHelpText(), stderr: "" };
+    }
+    const interactive =
+      parsed.flags.yes === true
+        ? false
+        : (runOptions.interactive ?? Boolean(process.stdin.isTTY));
+    const kindValue = optionValue(parsed.flags, "kind");
+    const kind = kindValue === "circuit" || kindValue === "macro" ? kindValue : "macro";
+    return addExport({
+      directory: cwd,
+      exportName: optionValue(parsed.flags, "export"),
+      kind,
       force: parsed.flags.force === true,
       yes: parsed.flags.yes === true,
       interactive,

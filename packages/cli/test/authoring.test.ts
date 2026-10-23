@@ -279,4 +279,78 @@ describe("package authoring commands", () => {
     expect(result.stderr).toContain("contains both a Short Circuit project");
     expect(result.stderr).toContain("packages/<name>");
   });
+
+  it("adds a second export to an existing package", async () => {
+    const root = tempDir();
+    await runPackage(
+      ["init", "--name", "@acme/parity", "--export", "PARITY3", "--kind", "macro", "--yes"],
+      root,
+    );
+
+    const result = await runPackage(
+      ["add-export", "--export", "PARITY4", "--kind", "circuit", "--yes"],
+      root,
+    );
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("Added circuit export");
+
+    const manifest = readJson<{ exports: Array<{ name: string; kind: string }> }>(
+      join(root, "manifest.json"),
+    );
+    expect(manifest.exports).toHaveLength(2);
+    expect(manifest.exports[0]).toMatchObject({ name: "PARITY3", kind: "macro" });
+    expect(manifest.exports[1]).toMatchObject({ name: "PARITY4", kind: "circuit" });
+
+    expect(existsSync(join(root, "circuits/parity4/circuit.lf"))).toBe(true);
+    expect(existsSync(join(root, "circuits/parity4/docs.md"))).toBe(true);
+    expect(existsSync(join(root, "tests/parity4.test.lf"))).toBe(true);
+  });
+
+  it("adds a macro export to a circuit package", async () => {
+    const root = tempDir();
+    await runPackage(
+      ["init", "--name", "@acme/buffer", "--export", "BUFFER", "--kind", "circuit", "--yes"],
+      root,
+    );
+
+    const result = await runPackage(
+      ["add-export", "--export", "TWICE", "--kind", "macro", "--yes"],
+      root,
+    );
+
+    expect(result.code).toBe(0);
+    const manifest = readJson<{ exports: Array<{ name: string; kind: string }> }>(
+      join(root, "manifest.json"),
+    );
+    expect(manifest.exports).toHaveLength(2);
+    expect(manifest.exports[1]).toMatchObject({ name: "TWICE", kind: "macro" });
+    expect(existsSync(join(root, "macros/twice/macro.lf"))).toBe(true);
+  });
+
+  it("rejects duplicate export name", async () => {
+    const root = tempDir();
+    await runPackage(
+      ["init", "--name", "@acme/parity", "--export", "PARITY3", "--yes"],
+      root,
+    );
+
+    const result = await runPackage(
+      ["add-export", "--export", "PARITY3", "--yes"],
+      root,
+    );
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("already exists");
+  });
+
+  it("refuses add-export outside a package", async () => {
+    const root = tempDir();
+    const result = await runPackage(
+      ["add-export", "--export", "FOO", "--yes"],
+      root,
+    );
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("No manifest.json found");
+  });
 });

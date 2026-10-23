@@ -233,6 +233,8 @@ Usage:
       Store a path dependency in the manifest. No symlink and no copy.
   shortcircuit package init [flags]
       Create a package, source, docs, and tests locally.
+  shortcircuit package add-export [flags]
+      Add another macro or circuit export to an existing package.
   shortcircuit package build
       Validate the package and write dist/packages.json.
   shortcircuit package test
@@ -242,7 +244,7 @@ Usage:
   shortcircuit package register [--dry-run] [--out <dir>] [--json]
       Validate and prepare a registry submission.
 
-Run "shortcircuit package init --help" for init flags.
+Run "shortcircuit package init --help" or "shortcircuit package add-export --help" for flags.
 `;
 }
 
@@ -266,6 +268,23 @@ Options:
   --help                     Show this message.
 
 The package is created in the current directory (or the directory positional).
+`;
+}
+
+export function packageAddExportHelpText(): string {
+  return `Add an export to an existing package
+
+Usage:
+  shortcircuit package add-export --export COM2 --kind circuit
+
+Options:
+  --export <NAME>            Public macro or circuit name. Required.
+  --kind <macro|circuit>     Export kind. Default: macro.
+  --force                    Overwrite existing source file.
+  --yes                      Use defaults and never prompt.
+  --help                     Show this message.
+
+Run this command from the package root directory (where manifest.json is).
 `;
 }
 

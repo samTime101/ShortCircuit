@@ -175,6 +175,12 @@ shortcircuit package init packages/com1bit \
 shortcircuit package link @shortcircuit/com1bit
 ```
 
+Add more exports to an existing package:
+
+```bash
+shortcircuit package add-export --export COM2 --kind circuit
+```
+
 Then build and test:
 
 ```bash

@@ -13,6 +13,7 @@ import {
 import {
   emptyLock,
   PACKAGE_SCHEMA,
+  readJsonObject,
   readLock,
   readRootState,
   storePackageDirectory,
@@ -427,6 +428,115 @@ export async function initPackage(options: PackageInitOptions): Promise<CommandR
   } finally {
     prompt?.close();
   }
+}
+
+export interface AddExportOptions {
+  directory?: string;
+  exportName?: string;
+  kind?: "macro" | "circuit";
+  interactive?: boolean;
+  force?: boolean;
+  yes?: boolean;
+}
+
+export async function addExport(
+  options: AddExportOptions = {}
+): Promise<CommandResult> {
+  const directory = resolve(options.directory ?? process.cwd());
+  const manifestPath = join(directory, "manifest.json");
+  if (!existsSync(manifestPath)) {
+    throw new Error("No manifest.json found. Run shortcircuit package init first.");
+  }
+  const interactive = options.interactive === true;
+  const prompt = interactive ? prompter() : null;
+  const output: string[] = [];
+
+  const rawManifest = readJsonObject(manifestPath, "Package manifest");
+  if (!rawManifest.name || !rawManifest.version) {
+    throw new Error("Manifest missing name or version.");
+  }
+  const pkgName = String(rawManifest.name);
+  const pkgVersion = String(rawManifest.version);
+
+  let exportName = options.exportName?.trim();
+  if (!exportName) {
+    if (!interactive || !prompt) {
+      throw new Error("Missing --export. Use --export NAME, or run interactively.");
+    }
+    exportName = await prompt.ask("Public export name", defaultExportName(pkgName));
+  }
+  exportName = validateExportName(exportName);
+
+  const existingExports = (rawManifest.exports as Array<Record<string, unknown>>) ?? [];
+  if (existingExports.some((e) => String(e.name) === exportName)) {
+    throw new Error(`Export "${exportName}" already exists in this package.`);
+  }
+
+  let kind = (options.kind ?? "macro").trim().toLowerCase();
+  if (interactive && prompt && options.kind === undefined) {
+    kind = (await prompt.ask("Export kind (macro or circuit)", "macro"))
+      .trim()
+      .toLowerCase();
+  }
+  if (kind !== "macro" && kind !== "circuit") {
+    throw new Error(`Unknown export kind "${kind}". Use macro or circuit.`);
+  }
+
+  const baseDir = kind === "macro" ? "macros" : "circuits";
+  const slug = exportName.toLowerCase().replace(/_/g, "-");
+  const sourcePath = `${baseDir}/${slug}/${kind === "macro" ? "macro" : "circuit"}.lf`;
+  const docsPath = `${baseDir}/${slug}/docs.md`;
+  const testPath = `tests/${slug}.test.lf`;
+
+  if (existsSync(join(directory, sourcePath)) && !options.force) {
+    throw new Error(
+      `Source file ${sourcePath} already exists. Use --force to overwrite.`
+    );
+  }
+
+  const newExport = {
+    kind,
+    name: exportName,
+    source: sourcePath,
+    docs: docsPath,
+    tests: testPath,
+    summary: `A ${kind} export.`,
+    group: kind === "macro" ? "Macros" : "Circuits",
+  };
+  const updatedExports = [...existingExports, newExport];
+  const updatedManifest = { ...rawManifest, exports: updatedExports };
+  writeJson(manifestPath, updatedManifest);
+
+  writePackageFile(
+    directory,
+    sourcePath,
+    kind === "macro" ? macroSource(exportName) : circuitSource(exportName),
+  );
+  writePackageFile(
+    directory,
+    docsPath,
+    kind === "macro" ? macroDocs(exportName) : circuitDocs(exportName),
+  );
+  writePackageFile(
+    directory,
+    testPath,
+    kind === "macro" ? macroTest(exportName) : circuitTest(exportName),
+  );
+
+  output.push(`Added ${kind} export "${exportName}" to ${pkgName}@${pkgVersion}`);
+  output.push(`  ${sourcePath}`);
+  output.push(`  ${docsPath}`);
+  output.push(`  ${testPath}`);
+  output.push("");
+  output.push("Next:");
+  output.push(`  shortcircuit package test`);
+  output.push(`  shortcircuit package check`);
+
+  return {
+    code: 0,
+    stdout: `${output.join("\n")}\n`,
+    stderr: "",
+  };
 }
 
 export interface PackageEnvironment {
