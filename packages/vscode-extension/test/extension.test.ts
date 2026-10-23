@@ -341,9 +341,14 @@ end`;
 });
 
 describe("Bundle Integrity", () => {
-  it("has built extension.js and language-server.js as CommonJS modules", () => {
+  it("has built extension.js and language-server.js as CommonJS modules", async () => {
     const extFile = path.join(__dirname, "..", "out", "extension.js");
     const lsFile = path.join(__dirname, "..", "out", "language-server.js");
+
+    if (!fs.existsSync(extFile) || !fs.existsSync(lsFile)) {
+      const { execSync } = await import("child_process");
+      execSync("node build.js", { cwd: path.join(__dirname, ".."), stdio: "pipe" });
+    }
 
     expect(fs.existsSync(extFile)).toBe(true);
     expect(fs.existsSync(lsFile)).toBe(true);
