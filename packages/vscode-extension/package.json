@@ -1,5 +1,5 @@
 {
-  "name": "@shortcircuit/vscode-extension",
+  "name": "shortcircuit",
   "displayName": "Short Circuit",
   "description": "LogicFlow language support for Short Circuit: syntax highlighting, diagnostics, completions, hovers, waveform/truth-table previews, and test runner.",
   "version": "0.1.0",
