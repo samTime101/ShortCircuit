@@ -3,7 +3,9 @@ import { compile } from "@shortcircuit/engine";
 import { appendSample, sampleFromSnapshot, traceToJson, traceToVcd, TRACE_LIMIT } from "../lib/trace";
 import { Simulator } from "@shortcircuit/engine";
 
-const SOURCE = `CIRCUIT Counter4
+const SOURCE = `IMPORT "@shortcircuit/arithmetic"
+
+CIRCUIT Counter4
 INPUT clock
 STATE count : BUS(4) = 0000
 incremented = ADD4(count, 0, 1)

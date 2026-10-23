@@ -5,6 +5,8 @@
 The language is called **LogicFlow** (`logicflow/0.2`). It is deliberately small and declarative:
 
 ```logicflow
+IMPORT "@shortcircuit/gates"
+
 CIRCUIT HalfAdder
   INPUT a
   INPUT b
@@ -33,11 +35,11 @@ Comments use `//` for a line and `/* ... */` for a block that may span lines. Lo
 ## What works in v0.1
 
 - **Readable hardware expressions** — function-style gates, named signals, comments, no semicolons or braces.
-- **Default packages** — the kernel provides `NAND`; bundled packages add `NOT`, `AND`, `OR`, `BUFFER`, `NOR`, `XOR`, `XNOR`, `MUX`, `HALF_ADDER`, `FULL_ADDER`, `ADD4`, `ADD8`, `COMPARE1`, `COMPARE2`, `COMPARE4`, and `COMPARE8`. Gates, selection, arithmetic, and comparison are package source; the compiler kernel keeps `NAND` and structural wiring.
+- **Packages:** the kernel provides `NAND`; bundled packages add `NOT`, `AND`, `OR`, `BUFFER`, `NOR`, `XOR`, `XNOR`, `MUX`, `HALF_ADDER`, `FULL_ADDER`, `ADD4`, `ADD8`, `COMPARE1`, `COMPARE2`, `COMPARE4`, and `COMPARE8`. Add an `IMPORT` line before using them. Gates, selection, arithmetic, and comparison are package source; the compiler kernel keeps `NAND` and structural wiring.
 - **Static validation first** — undeclared/duplicate signals, width mismatches, missing ports, illegal recursion, combinational loops and clock conflicts are diagnosed before simulation.
 - **Buses** — `BUS(8)` declarations, indexing (`data[3]`), inclusive slices (`data[7:4]`), concatenation, broadcast, sign/zero extension, repetition and reversal.
 - **Composition** — reusable `CIRCUIT` blocks, positional or named instance ports, nested scopes and flattened IR.
-- **Packages and imports** — `IMPORT "@scope/package" AS Alias`, auto-imported recommended packages, and package toggles in the studio. Package implementations are real `.lf` source files.
+- **Packages and imports:** `IMPORT "@scope/package" AS Alias` makes a package available. Exports stay unavailable until that line exists, and the studio package manager adds or removes the same import lines. Package implementations are real `.lf` source files.
 - **Sequential logic** — explicit `STATE`, rising/falling edge blocks, MUX-based next-state logic, atomic edge commits.
 - **Verification** — in-source `TEST` cases, clocked sequences with `STEP`, `CYCLE`, and `LOAD`, plus exhaustive truth-table generation for combinational circuits.
 - **Live studio** — CodeMirror editor with diagnostics, interactive input controls, dependency graph with values, stored-state monitors, test results, and downloadable IR.
@@ -79,8 +81,8 @@ To create and publish your own package, start with the interactive scaffolder:
 npm run package:init
 ```
 
-It asks for the package name, export name, kind, description, dependencies, and
-auto-import setting, then writes the package, tests, docs, and registry entry.
+It asks for the package name, export name, kind, description, and dependencies,
+then writes the package, tests, docs, and registry entry.
 Build and test it with `npm run package:build` and `npm run package:test`. See
 [`docs/PACKAGES.md`](docs/PACKAGES.md) for the full guide, including the
 non-interactive flags and the manual source layout.
@@ -207,34 +209,41 @@ it is available.
 ### Packages
 
 The CLI ships with the bundled package snapshot. `package list` shows every
-package, its export count, and whether it is enabled:
+installed package, its export count, and where it came from:
 
 ```bash
 shortcircuit package list
 shortcircuit package list --json
 ```
 
-Change the active packages on any compile command:
+Activate a package by adding an `IMPORT` line to the source. Every command
+reads the same imports:
 
-```bash
-shortcircuit compile circuit.lf --disable-package @shortcircuit/arithmetic
-shortcircuit compile circuit.lf --only-packages @shortcircuit/gates
-shortcircuit compile circuit.lf --no-default-packages
+```logicflow
+IMPORT "@shortcircuit/gates"
+
+CIRCUIT HalfAdder
+  INPUT a
+  INPUT b
+  sum = XOR(a, b)
+  carry = AND(a, b)
+  OUTPUT sum
+  OUTPUT carry
+END
 ```
 
-Load a local package directory, or point directly at its manifest:
+Load a local package directory, or point directly at its manifest, so the
+source can import it:
 
 ```bash
 shortcircuit compile circuit.lf --package /path/to/package
 shortcircuit package list --package /path/to/package/manifest.json
 ```
 
-`--package`, `--disable-package`, and `--only-packages` are repeatable.
-`--disable-package` and `--only-packages` also accept comma-separated names.
-`--only-packages` is an allowlist, so list a package's dependencies too. Local
-packages must use a name that is not already bundled. The loader inlines the
-package source, docs, and tests, so the same directory layout works with the
-engine API.
+`--package` is repeatable. Local packages must use a name that is not already
+bundled. The loader inlines the package source, docs, and tests, so the same
+directory layout works with the engine API. The CLI, studio, and engine API all
+require the same explicit imports.
 
 ### Releasing
 

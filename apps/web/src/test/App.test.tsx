@@ -9,7 +9,9 @@ const FONT_SIZE_KEY = "shortcircuit.editorFontSize.v1";
 const SIM_DOCK_HEIGHT_KEY = "shortcircuit.simDockHeight.v1";
 const SIM_SPLIT_KEY = "shortcircuit.simSplit.v1";
 
-const HALF_ADDER = `CIRCUIT HalfAdder
+const HALF_ADDER = `IMPORT "@shortcircuit/gates"
+
+CIRCUIT HalfAdder
 INPUT a
 INPUT b
 sum = XOR(a, b)
@@ -27,7 +29,9 @@ CASE "both high"
 END
 END`;
 
-const BROKEN = `CIRCUIT HalfAdder
+const BROKEN = `IMPORT "@shortcircuit/gates"
+
+CIRCUIT HalfAdder
 INPUT a
 sum = XOR(a, missing)
 OUTPUT sum
@@ -66,7 +70,9 @@ describe("studio app", () => {
   });
 
   it("shows each error once and points at the console", async () => {
-    store(`CIRCUIT Demo
+    store(`IMPORT "@shortcircuit/comparison"
+
+CIRCUIT Demo
 INPUT a : BUS(4)
 compared = COMPARE4(a, 1000)
 OUTPUT compared.eq
@@ -93,7 +99,7 @@ END`);
     expect(paused?.textContent).not.toContain("COMPARE4 input b needs");
   });
 
-  it("disables a package from the package manager and recompiles", async () => {
+  it("adds and removes a package import from the package manager", async () => {
     store(HALF_ADDER);
     render(<App />);
 
@@ -104,18 +110,24 @@ END`);
     await userEvent.click(screen.getByRole("button", { name: "Packages" }));
     expect(screen.getByRole("dialog", { name: "Installed packages" })).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("checkbox", { name: "@shortcircuit/gates" }));
+    const gates = screen.getByRole("checkbox", { name: "@shortcircuit/gates" });
+    expect(gates).toBeChecked();
+
+    await userEvent.click(gates);
     await waitFor(() => {
       expect(screen.getByText(/Errors detected/)).toBeInTheDocument();
     });
-    expect(window.localStorage.getItem("shortcircuit.disabledPackages.v1")).toContain(
-      "@shortcircuit/gates",
+    expect(window.localStorage.getItem(STORAGE_KEY)).not.toContain(
+      'IMPORT "@shortcircuit/gates"',
     );
 
-    await userEvent.click(screen.getByRole("checkbox", { name: "@shortcircuit/gates" }));
+    await userEvent.click(gates);
     await waitFor(() => {
       expect(screen.getByText("Evaluation graph")).toBeInTheDocument();
     });
+    expect(window.localStorage.getItem(STORAGE_KEY)).toContain(
+      'IMPORT "@shortcircuit/gates"',
+    );
   });
 
   it("opens the documentation page and returns to the studio", async () => {
@@ -157,7 +169,9 @@ END`);
   });
 
   it("switches the active circuit from the circuit picker", async () => {
-    store(`CIRCUIT First
+    store(`IMPORT "@shortcircuit/gates"
+
+CIRCUIT First
 INPUT a
 INPUT b
 sum = XOR(a, b)
@@ -204,7 +218,9 @@ END`);
   });
 
   it("explains a typo in plain language and fixes it in one click", async () => {
-    store(`CIRCUIT HalfAdder
+    store(`IMPORT "@shortcircuit/gates"
+
+CIRCUIT HalfAdder
 INPUT a
 INPUT b
 sum = XOR(a, b)

@@ -10,7 +10,7 @@ import {
   DEFAULT_PACKAGE_MACROS,
   LANGUAGE_SNIPPETS,
 } from "@shortcircuit/engine";
-import { scanDocument } from "./documentModel";
+import { scanDocument, type DocumentModel } from "./documentModel";
 import { infoCard } from "./infoCard";
 import {
   builtinCard,
@@ -21,8 +21,10 @@ import {
 } from "./cards";
 import { KEYWORDS } from "./keywords";
 
-function packageMacroCompletions(): Completion[] {
-  return DEFAULT_PACKAGE_MACROS.map((macro) => ({
+function packageMacroCompletions(packageNames: Set<string>): Completion[] {
+  return DEFAULT_PACKAGE_MACROS.filter((macro) =>
+    packageNames.has(macro.packageName),
+  ).map((macro) => ({
     label: macro.name,
     type: "function",
     detail: macro.signature,
@@ -31,8 +33,10 @@ function packageMacroCompletions(): Completion[] {
   }));
 }
 
-function packageCircuitCompletions(): Completion[] {
-  return DEFAULT_PACKAGE_CIRCUITS.map(({ circuit }) => ({
+function packageCircuitCompletions(packageNames: Set<string>): Completion[] {
+  return DEFAULT_PACKAGE_CIRCUITS.filter(({ packageName }) =>
+    packageNames.has(packageName),
+  ).map(({ circuit }) => ({
     label: circuit.name,
     type: "class",
     detail: `${circuit.name}(${(circuit.ports?.inputs ?? []).map((port) => port.name).join(", ")})`,
@@ -41,7 +45,14 @@ function packageCircuitCompletions(): Completion[] {
   }));
 }
 
-function functionCompletions(): Completion[] {
+function packageCompletions(packageNames: Set<string>): Completion[] {
+  return [
+    ...packageMacroCompletions(packageNames),
+    ...packageCircuitCompletions(packageNames),
+  ];
+}
+
+function functionCompletions(model: DocumentModel): Completion[] {
   const packageNames = new Set(DEFAULT_PACKAGE_MACROS.map((macro) => macro.name));
   const functions: Completion[] = BUILTINS.filter((spec) => !packageNames.has(spec.name)).map(
     (spec) => ({
@@ -53,7 +64,29 @@ function functionCompletions(): Completion[] {
     }),
   );
 
-  return [...functions, ...packageMacroCompletions(), ...packageCircuitCompletions()];
+  return [...functions, ...packageCompletions(model.unqualifiedPackages)];
+}
+
+function aliasCompletions(model: DocumentModel): Completion[] {
+  return [...model.aliases].map(([alias, packageName]) => ({
+    label: alias,
+    type: "namespace",
+    detail: packageName,
+    boost: 2,
+    info: () =>
+      infoCard({
+        title: alias,
+        badge: "package alias",
+        description: packageName,
+      }),
+  }));
+}
+
+function packageForAlias(model: DocumentModel, alias: string): string | undefined {
+  return (
+    model.aliases.get(alias) ??
+    [...model.aliases].find(([candidate]) => candidate.toUpperCase() === alias.toUpperCase())?.[1]
+  );
 }
 
 function keywordCompletions(): Completion[] {
@@ -88,9 +121,18 @@ export function logicFlowCompletions(context: CompletionContext): CompletionResu
   const before = line.text.slice(0, context.pos - line.from);
   const model = scanDocument(context.state.doc.toString());
 
-  // "instance." -> offer the ports that instance exposes.
+  // "instance." -> offer the ports that instance exposes. An imported package
+  // alias takes priority because it is also a qualified namespace.
   const dotted = /([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)?$/.exec(before);
   if (dotted?.[1]) {
+    const packageName = packageForAlias(model, dotted[1]);
+    if (packageName) {
+      return {
+        from: context.pos - (dotted[2]?.length ?? 0),
+        options: packageCompletions(new Set([packageName])),
+        validFor: /^[A-Za-z_][A-Za-z0-9_]*$/,
+      };
+    }
     const ports = model.instancePorts.get(dotted[1]) ?? [];
     if (ports.length > 0) {
       return {
@@ -128,7 +170,8 @@ export function logicFlowCompletions(context: CompletionContext): CompletionResu
   } else {
     options.push(
       ...signalOptions,
-      ...functionCompletions(),
+      ...functionCompletions(model),
+      ...aliasCompletions(model),
       ...keywordCompletions(),
       ...snippetCompletions(),
     );

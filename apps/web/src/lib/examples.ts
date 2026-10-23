@@ -8,8 +8,9 @@ export interface Example {
   source: string;
 }
 
-const HALF_ADDER = `// Short Circuit — the kernel starts with NAND.
+const HALF_ADDER = `// Short Circuit: the kernel starts with NAND.
 // NOT, AND, XOR and the other gates are package macros built from it.
+IMPORT "@shortcircuit/gates"
 
 CIRCUIT HalfAdder
   INPUT a
@@ -46,6 +47,7 @@ END
 
 const FULL_ADDER = `// A circuit can contain other circuits.
 // HalfAdder is elaborated twice inside FullAdder.
+IMPORT "@shortcircuit/gates"
 
 CIRCUIT HalfAdder
   INPUT a
@@ -100,6 +102,7 @@ END
 
 const ADDER_8 = `// Buses carry several bits. The arithmetic package supplies a
 // fixed-width ADD8 circuit; the language has no implicit + operator.
+IMPORT "@shortcircuit/arithmetic"
 
 CIRCUIT Adder8
   INPUT a : BUS(8)
@@ -131,7 +134,8 @@ END
 `;
 
 const MUX_4 = `// Hardware chooses with multiplexers, not control flow.
-// sel = 00 -> a, 01 -> b, 10 -> c, 11 -> d
+// sel = 00 chooses a, 01 chooses b, 10 chooses c, 11 chooses d.
+IMPORT "@shortcircuit/selection"
 
 CIRCUIT Mux4
   INPUT a
@@ -210,6 +214,7 @@ END
 
 const MAJORITY = `// Every package gate is variadic where that makes sense.
 // Majority is true when at least two of the three inputs are true.
+IMPORT "@shortcircuit/gates"
 
 CIRCUIT MajorityVote
   INPUT a
@@ -249,6 +254,7 @@ END
 
 const BROADCAST_BUS = `// BROADCAST repeats one control bit across a bus. A package MUX
 // uses it to apply a one-bit select to every bit of a value.
+IMPORT "@shortcircuit/gates"
 
 CIRCUIT GatedBus
   INPUT data : BUS(4)
@@ -279,6 +285,7 @@ END
 
 const REGISTER_8 = `// State changes only on a clock edge. MUX computes the next value
 // from the old state; the edge commits it.
+IMPORT "@shortcircuit/selection"
 
 CIRCUIT Register8
   INPUT data : BUS(8)
@@ -318,6 +325,8 @@ END
 
 const COUNTER_4 = `// A stateful counter: combinational logic computes the next value,
 // then the rising edge of clock commits it.
+IMPORT "@shortcircuit/arithmetic"
+IMPORT "@shortcircuit/selection"
 
 CIRCUIT Counter4
   INPUT clock

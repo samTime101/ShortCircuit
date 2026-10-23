@@ -6,7 +6,9 @@ import { cleanupTempDirs, tempDir, writeDoublePackage } from "./helpers";
 
 afterEach(cleanupTempDirs);
 
-const SOURCE = `CIRCUIT HalfAdder
+const SOURCE = `IMPORT "@shortcircuit/gates"
+
+CIRCUIT HalfAdder
 INPUT a
 INPUT b
 
@@ -26,7 +28,9 @@ CASE "both high"
 END
 END`;
 
-const BROKEN = `CIRCUIT Broken
+const BROKEN = `IMPORT "@shortcircuit/gates"
+
+CIRCUIT Broken
 INPUT a
 x = AND(a, missing)
 OUTPUT x
@@ -39,7 +43,9 @@ y = NAND(a, b)
 OUTPUT y
 END`;
 
-const LOCAL_SOURCE = `CIRCUIT LocalDouble
+const LOCAL_SOURCE = `IMPORT "@test/double"
+
+CIRCUIT LocalDouble
 INPUT a
 y = TWICE(a)
 OUTPUT y
@@ -83,41 +89,18 @@ describe("command line", () => {
     const parsed = parseArgs([
       "compile",
       "a.lf",
-      "--disable-package",
-      "@shortcircuit/arithmetic",
-      "--disable-package=@shortcircuit/selection",
-      "--only-packages",
-      "@shortcircuit/gates,@shortcircuit/arithmetic",
       "--package",
       "pkg-a",
       "--package=pkg-b",
-      "--no-default-packages",
     ]);
 
-    expect(parsed.flags["disable-package"]).toEqual([
-      "@shortcircuit/arithmetic",
-      "@shortcircuit/selection",
-    ]);
-    expect(parsed.flags["only-packages"]).toEqual([
-      "@shortcircuit/gates,@shortcircuit/arithmetic",
-    ]);
     expect(parsed.flags.package).toEqual(["pkg-a", "pkg-b"]);
-    expect(parsed.flags["no-default-packages"]).toBe(true);
-    expect(listFlag(parsed.flags, "only-packages", true)).toEqual([
-      "@shortcircuit/gates",
-      "@shortcircuit/arithmetic",
-    ]);
     expect(listFlag(parsed.flags, "package")).toEqual(["pkg-a", "pkg-b"]);
   });
 
   it("rejects a package flag without a value", () => {
     const parsed = parseArgs(["compile", "a.lf", "--package"]);
     expect(() => listFlag(parsed.flags, "package")).toThrow("needs a value");
-  });
-
-  it("rejects an empty package name in a list", () => {
-    const parsed = parseArgs(["compile", "a.lf", "--only-packages", "@shortcircuit/gates,"]);
-    expect(() => listFlag(parsed.flags, "only-packages", true)).toThrow("needs a value");
   });
 
   it("compiles a file and reports a clean result", () => {
@@ -188,54 +171,39 @@ describe("command line", () => {
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("shortcircuit package list");
     expect(result.stdout).toContain("--package <dir>");
-    expect(result.stdout).toContain("--disable-package <name>");
-    expect(result.stdout).toContain("--only-packages <names>");
-    expect(result.stdout).toContain("--no-default-packages");
+    expect(result.stdout).not.toContain("--disable-package");
+    expect(result.stdout).not.toContain("--only-packages");
+    expect(result.stdout).not.toContain("--no-default-packages");
   });
 
-  it("disables a bundled package", () => {
-    const { read, write } = withFile(SOURCE);
-    const result = run(
-      ["compile", "circuit.lf", "--disable-package", "@shortcircuit/gates"],
-      read,
-      write,
-    );
-    expect(result.code).toBe(1);
-    expect(result.stderr).toContain("E210");
-    expect(result.stderr).toContain("XOR");
-  });
-
-  it("honors an only-packages allowlist", () => {
-    const allowed = withFile(SOURCE);
-    const enabled = run(
-      ["compile", "circuit.lf", "--only-packages", "@shortcircuit/gates"],
-      allowed.read,
-      allowed.write,
-    );
-    expect(enabled.code).toBe(0);
-
-    const excluded = withFile(SOURCE);
-    const blocked = run(
-      ["compile", "circuit.lf", "--only-packages", "@shortcircuit/arithmetic"],
-      excluded.read,
-      excluded.write,
-    );
-    expect(blocked.code).toBe(1);
-    expect(blocked.stderr).toContain("XOR");
-  });
-
-  it("removes bundled packages with --no-default-packages", () => {
+  it("requires an explicit import before using package exports", () => {
     const core = withFile(NAND_SOURCE);
-    const ok = run(["compile", "circuit.lf", "--no-default-packages"], core.read, core.write);
-    expect(ok.code).toBe(0);
+    const coreResult = run(["compile", "circuit.lf"], core.read, core.write);
+    expect(coreResult.code).toBe(0);
 
-    const gates = withFile(SOURCE);
-    const blocked = run(
-      ["compile", "circuit.lf", "--no-default-packages"],
-      gates.read,
-      gates.write,
-    );
+    const unimported = withFile(`CIRCUIT HalfAdder
+INPUT a
+INPUT b
+sum = XOR(a, b)
+OUTPUT sum
+END`);
+    const blocked = run(["compile", "circuit.lf"], unimported.read, unimported.write);
     expect(blocked.code).toBe(1);
+    expect(blocked.stderr).toContain("E210");
+    expect(blocked.stderr).toContain("XOR");
+
+    const imported = withFile(SOURCE);
+    const ok = run(["compile", "circuit.lf"], imported.read, imported.write);
+    expect(ok.code).toBe(0);
+  });
+
+  it("reports an import for a package that is not loaded", () => {
+    const missing = withFile(`IMPORT "@missing/package"
+CIRCUIT Empty
+END`);
+    const result = run(["compile", "circuit.lf"], missing.read, missing.write);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("E602");
   });
 
   it("loads a local package directory", () => {
@@ -247,23 +215,11 @@ describe("command line", () => {
     expect(result.stdout).toContain("Compiled 1 circuit");
   });
 
-  it("combines a local package with only-packages and no-default-packages", () => {
+  it("keeps bundled packages available while loading a local package", () => {
     const root = tempDir();
     writeDoublePackage(root);
     const { read, write } = withFile(LOCAL_SOURCE);
-    const result = run(
-      [
-        "compile",
-        "circuit.lf",
-        "--package",
-        root,
-        "--only-packages",
-        "@test/double",
-        "--no-default-packages",
-      ],
-      read,
-      write,
-    );
+    const result = run(["compile", "circuit.lf", "--package", root], read, write);
     expect(result.code).toBe(0);
   });
 
@@ -302,34 +258,9 @@ describe("command line", () => {
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("NAME");
     expect(result.stdout).toContain("@shortcircuit/gates");
-    expect(result.stdout).toContain("enabled");
     expect(result.stdout).toContain("bundled");
-  });
-
-  it("shows disabled and enabled packages", () => {
-    const result = run([
-      "package",
-      "list",
-      "--disable-package",
-      "@shortcircuit/arithmetic",
-    ]);
-    expect(result.code).toBe(0);
-    expect(packageRow(result.stdout, "@shortcircuit/gates")).toContain("enabled");
-    expect(packageRow(result.stdout, "@shortcircuit/arithmetic")).toContain("disabled");
-  });
-
-  it("shows only-packages exclusions", () => {
-    const result = run(["package", "list", "--only-packages", "@shortcircuit/gates"]);
-    expect(result.code).toBe(0);
-    expect(packageRow(result.stdout, "@shortcircuit/gates")).toContain("enabled");
-    expect(packageRow(result.stdout, "@shortcircuit/arithmetic")).toContain("disabled");
-  });
-
-  it("shows bundled packages as disabled with --no-default-packages", () => {
-    const result = run(["package", "list", "--no-default-packages"]);
-    expect(result.code).toBe(0);
-    expect(packageRow(result.stdout, "@shortcircuit/gates")).toContain("disabled");
-    expect(result.stdout).toContain("0 enabled");
+    expect(result.stdout).toContain("Import a package in source");
+    expect(result.stdout).not.toContain("enabled");
   });
 
   it("lists a local package with its origin", () => {
@@ -338,57 +269,24 @@ describe("command line", () => {
     const result = run(["package", "list", "--package", root]);
     expect(result.code).toBe(0);
     const row = packageRow(result.stdout, "@test/double");
-    expect(row).toContain("enabled");
     expect(row).toContain(root);
-  });
-
-  it("can disable a local package", () => {
-    const root = tempDir();
-    writeDoublePackage(root);
-    const result = run([
-      "package",
-      "list",
-      "--package",
-      root,
-      "--disable-package",
-      "@test/double",
-    ]);
-    expect(result.code).toBe(0);
-    expect(packageRow(result.stdout, "@test/double")).toContain("disabled");
+    expect(result.stdout).toContain("4 bundled, 1 local");
   });
 
   it("prints package list JSON", () => {
     const root = tempDir();
     writeDoublePackage(root);
-    const result = run([
-      "package",
-      "list",
-      "--json",
-      "--package",
-      root,
-      "--disable-package",
-      "@shortcircuit/arithmetic",
-    ]);
+    const result = run(["package", "list", "--json", "--package", root]);
     expect(result.code).toBe(0);
     const data = JSON.parse(result.stdout) as {
-      includeDefaultPackages: boolean;
-      packages: Array<{ name: string; enabled: boolean; origin: string }>;
+      packages: Array<{ name: string; origin: string; exports: number }>;
     };
-    expect(data.includeDefaultPackages).toBe(true);
     expect(
-      data.packages.find((pkg) => pkg.name === "@shortcircuit/arithmetic")?.enabled,
-    ).toBe(false);
+      data.packages.find((pkg) => pkg.name === "@shortcircuit/arithmetic")?.origin,
+    ).toBe("bundled");
     expect(data.packages.find((pkg) => pkg.name === "@test/double")).toMatchObject({
-      enabled: true,
       origin: root,
     });
-  });
-
-  it("warns about unknown only-packages names", () => {
-    const result = run(["package", "list", "--only-packages", "@missing/pkg"]);
-    expect(result.code).toBe(0);
-    expect(result.stderr).toContain("warning");
-    expect(result.stderr).toContain("@missing/pkg");
   });
 
   it("rejects a file argument for package list", () => {

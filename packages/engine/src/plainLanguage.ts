@@ -82,7 +82,7 @@ const TEMPLATES: Record<string, Template> = {
   },
   E200: {
     headline: "That name is taken by the language",
-    detail: "Pick a name that is not a keyword, a built-in operation, or an enabled package export.",
+    detail: "Pick a name that is not a keyword, a built-in operation, or an export from an imported package.",
   },
   E201: {
     headline: "There is no signal with that name",
@@ -110,7 +110,7 @@ const TEMPLATES: Record<string, Template> = {
   },
   E210: {
     headline: "There is no function with that name",
-    detail: "Use a built-in operation, or define a CIRCUIT with that name.",
+    detail: "Use a built-in operation, define a CIRCUIT with that name, or import the package that provides it.",
   },
   E212: {
     headline: "This signal has no ports",

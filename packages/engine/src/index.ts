@@ -3,6 +3,7 @@ import { Parser } from "./parser";
 import {
   createPackageCatalog,
   packageCircuitAsts,
+  packageClosure,
   resolvePackageBundle,
   resolvePackageImports,
 } from "./packages";
@@ -109,14 +110,12 @@ export function compile(source: string, options: CompileOptions = {}): CompileRe
     const parserDiagnostics = parser.diagnostics;
     const bundle = resolvePackageBundle(options);
     const packageCatalog = createPackageCatalog([bundle]);
-    const importResolution = resolvePackageImports(
-      packageCatalog,
-      program.imports,
-      options,
-    );
+    const importResolution = resolvePackageImports(packageCatalog, program.imports);
     // Package circuits are appended after the user's circuits so the first
-    // circuit in the result is still the one the user wrote.
-    program.circuits.push(...packageCircuitAsts(packageCatalog));
+    // circuit in the result is still the one the user wrote. Only imported
+    // packages and their declared dependencies take part in the compilation.
+    const loadedPackages = packageClosure(packageCatalog, importResolution.importedPackages);
+    program.circuits.push(...packageCircuitAsts(packageCatalog, loadedPackages));
     const analyzer = new ProgramAnalyzer(
       source,
       program,

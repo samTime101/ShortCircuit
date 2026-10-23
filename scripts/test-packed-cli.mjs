@@ -17,7 +17,9 @@ const tempRoot = mkdtempSync(join(tmpdir(), "shortcircuit-cli-pack-"));
 const tarballDir = join(tempRoot, "tarball");
 const projectDir = join(tempRoot, "project");
 
-const SOURCE = `CIRCUIT HalfAdder
+const SOURCE = `IMPORT "@shortcircuit/gates"
+
+CIRCUIT HalfAdder
   INPUT a
   INPUT b
 
@@ -82,21 +84,20 @@ try {
   if (!help.includes("Usage:") || !help.includes("shortcircuit compile")) {
     throw new Error("the installed binary did not print the command help");
   }
+  if (help.includes("--disable-package") || help.includes("--only-packages")) {
+    throw new Error(`the installed binary still documents package toggles:\n${help}`);
+  }
 
   const listed = run(bin, ["package", "list"], projectDir);
   const gatesRow = listed
     .split("\n")
     .find((line) => line.startsWith("@shortcircuit/gates"));
-  if (!gatesRow || !gatesRow.includes("enabled")) {
+  if (!gatesRow || !gatesRow.includes("bundled")) {
     throw new Error(`unexpected package list output:\n${listed}`);
   }
 
   writeFileSync(join(projectDir, "half-adder.lf"), SOURCE);
-  const compiled = run(
-    bin,
-    ["compile", "half-adder.lf", "--only-packages", "@shortcircuit/gates"],
-    projectDir,
-  );
+  const compiled = run(bin, ["compile", "half-adder.lf"], projectDir);
   if (!compiled.includes("Compiled 1 circuit")) {
     throw new Error(`unexpected compile output:\n${compiled}`);
   }
@@ -133,7 +134,9 @@ try {
   );
   writeFileSync(
     join(projectDir, "local.lf"),
-    `CIRCUIT Local
+    `IMPORT "@test/double"
+
+CIRCUIT Local
   INPUT a
   y = TWICE(a)
   OUTPUT y
@@ -142,15 +145,7 @@ END
   );
   const localCompiled = run(
     bin,
-    [
-      "compile",
-      "local.lf",
-      "--package",
-      localDir,
-      "--only-packages",
-      "@test/double",
-      "--no-default-packages",
-    ],
+    ["compile", "local.lf", "--package", localDir],
     projectDir,
   );
   if (!localCompiled.includes("Compiled 1 circuit")) {

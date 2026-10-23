@@ -35,7 +35,7 @@ export interface PackageTestReport {
 }
 
 /**
- * Compile and run every test embedded in the enabled package bundles.
+ * Compile and run every test embedded in the loaded package bundles.
  *
  * Package tests use the same compiler and simulator as user tests. Each test
  * source is compiled with its package and dependencies explicitly imported so

@@ -22,6 +22,8 @@ function combinational(source: string, circuitName?: string) {
 }
 
 const HALF_ADDER = `// A one-bit half adder made from package gates.
+IMPORT "@shortcircuit/gates"
+
 CIRCUIT HalfAdder
   INPUT a
   INPUT b
@@ -75,7 +77,8 @@ describe("combinational core", () => {
   });
 
   it("supports variadic package gates and nested expressions", () => {
-    const { circuit } = combinational(`CIRCUIT Gates
+    const { circuit } = combinational(`IMPORT "@shortcircuit/gates"
+CIRCUIT Gates
 INPUT a
 INPUT b
 INPUT c
@@ -153,7 +156,8 @@ END`,
   });
 
   it("elaborates package circuit-shaped components into the NAND kernel", () => {
-    const { circuit } = combinational(`CIRCUIT Intrinsic
+    const { circuit } = combinational(`IMPORT "@shortcircuit/arithmetic"
+CIRCUIT Intrinsic
 INPUT a
 INPUT b
 INPUT c
@@ -186,7 +190,8 @@ END`);
 });
 
 describe("buses, structural wiring, and package selection", () => {
-  const ADDER8 = `CIRCUIT Adder8
+  const ADDER8 = `IMPORT "@shortcircuit/arithmetic"
+CIRCUIT Adder8
 INPUT a : BUS(8)
 INPUT b : BUS(8)
 added = ADD8(a, b, 0)
@@ -222,7 +227,8 @@ END`;
   });
 
   it("supports structural wiring and package MUX", () => {
-    const { circuit } = combinational(`CIRCUIT BusOps
+    const { circuit } = combinational(`IMPORT "@shortcircuit/selection"
+CIRCUIT BusOps
 INPUT data : BUS(8)
 INPUT small : BUS(4)
 INPUT pick
@@ -297,7 +303,8 @@ END`);
 
 describe("sequential simulation", () => {
   it("captures data on a rising edge and holds it", () => {
-    const { circuit } = combinational(`CIRCUIT Register8
+    const { circuit } = combinational(`IMPORT "@shortcircuit/selection"
+CIRCUIT Register8
 INPUT data : BUS(8)
 INPUT clock
 INPUT enable
@@ -348,7 +355,8 @@ END`);
   });
 
   it("updates a counter from its previous state", () => {
-    const { circuit } = combinational(`CIRCUIT Counter4
+    const { circuit } = combinational(`IMPORT "@shortcircuit/arithmetic"
+CIRCUIT Counter4
 INPUT clock
 STATE count : BUS(4) = 0000
 incremented = ADD4(count, 0, 1)
@@ -369,7 +377,9 @@ END`);
   });
 
   it("runs clocked suites with CYCLE and MUX reset logic", () => {
-    const result = compile(`CIRCUIT Counter4
+    const result = compile(`IMPORT "@shortcircuit/arithmetic"
+IMPORT "@shortcircuit/selection"
+CIRCUIT Counter4
 INPUT clock
 INPUT reset
 STATE count : BUS(4) = 0000
@@ -406,7 +416,8 @@ END`);
   });
 
   it("groups input changes with STEP", () => {
-    const result = compile(`CIRCUIT Register8
+    const result = compile(`IMPORT "@shortcircuit/selection"
+CIRCUIT Register8
 INPUT data : BUS(8)
 INPUT clock
 INPUT enable
@@ -441,7 +452,8 @@ END`);
   });
 
   it("loads a state at the start of a case", () => {
-    const result = compile(`CIRCUIT Shift
+    const result = compile(`IMPORT "@shortcircuit/arithmetic"
+CIRCUIT Shift
 INPUT clock
 STATE q : BUS(4) = 0000
 incremented = ADD4(q, 0, 1)
@@ -463,7 +475,8 @@ END`);
   });
 
   it("reports the failing step of a clocked case", () => {
-    const result = compile(`CIRCUIT Shift
+    const result = compile(`IMPORT "@shortcircuit/arithmetic"
+CIRCUIT Shift
 INPUT clock
 STATE q : BUS(4) = 0000
 incremented = ADD4(q, 0, 1)
@@ -487,7 +500,8 @@ END`);
   });
 
   it("rejects a LOAD on a signal that is not state", () => {
-    const result = compile(`CIRCUIT Reg
+    const result = compile(`IMPORT "@shortcircuit/gates"
+CIRCUIT Reg
 INPUT clock
 STATE q = 0
 ON RISING_EDGE(clock):
@@ -506,7 +520,8 @@ END`);
   });
 
   it("rejects a CYCLE on a bus", () => {
-    const result = compile(`CIRCUIT Wide
+    const result = compile(`IMPORT "@shortcircuit/gates"
+CIRCUIT Wide
 INPUT bus : BUS(4)
 STATE q = 0
 ON RISING_EDGE(bus):
@@ -525,7 +540,8 @@ END`);
   });
 
   it("forces a state value from the simulator", () => {
-    const { circuit } = combinational(`CIRCUIT Reg
+    const { circuit } = combinational(`IMPORT "@shortcircuit/arithmetic"
+CIRCUIT Reg
 INPUT clock
 STATE q : BUS(4) = 0000
 incremented = ADD4(q, 0, 1)
@@ -546,14 +562,16 @@ END`);
 
 describe("diagnostics", () => {
   it("suggests a signal typo", () => {
-    const result = compile(`CIRCUIT Typo
+    const result = compile(`IMPORT "@shortcircuit/gates"
+CIRCUIT Typo
 INPUT a
 INPUT b
 sum = XOR(a, b)
 OUTPUT sum
 END`);
     expect(result.ok).toBe(true);
-    const bad = compile(`CIRCUIT Typo
+    const bad = compile(`IMPORT "@shortcircuit/gates"
+CIRCUIT Typo
 INPUT a
 INPUT b
 sum = XOR(a, b)
@@ -568,7 +586,8 @@ END`);
   });
 
   it("detects width mismatches with useful context", () => {
-    const result = compile(`CIRCUIT Widths
+    const result = compile(`IMPORT "@shortcircuit/gates"
+CIRCUIT Widths
 INPUT a : BUS(8)
 INPUT b
 bad = AND(a, b)
@@ -591,7 +610,8 @@ END`);
   });
 
   it("rejects empty gate calls", () => {
-    const result = compile(`CIRCUIT Empty
+    const result = compile(`IMPORT "@shortcircuit/gates"
+CIRCUIT Empty
 INPUT a
 x = AND()
 OUTPUT x
@@ -601,7 +621,8 @@ END`);
   });
 
   it("suggests a gate name typo", () => {
-    const result = compile(`CIRCUIT Typos
+    const result = compile(`IMPORT "@shortcircuit/gates"
+CIRCUIT Typos
 INPUT a
 INPUT b
 x = XORR(a, b)
@@ -612,7 +633,8 @@ END`);
   });
 
   it("explains diagnostics in plain language and offers a fix", () => {
-    const result = compile(`CIRCUIT Typo
+    const result = compile(`IMPORT "@shortcircuit/gates"
+CIRCUIT Typo
 INPUT a
 INPUT b
 sum = XOR(a, b)
@@ -629,7 +651,8 @@ END`);
   });
 
   it("explains width mismatches without offering a blind fix", () => {
-    const result = compile(`CIRCUIT Widths
+    const result = compile(`IMPORT "@shortcircuit/gates"
+CIRCUIT Widths
 INPUT a : BUS(8)
 INPUT b
 bad = AND(a, b)
@@ -649,7 +672,8 @@ END`);
   });
 
   it("reports an error in a circuit once even when another circuit instantiates it", () => {
-    const result = compile(`CIRCUIT Inner
+    const result = compile(`IMPORT "@shortcircuit/comparison"
+CIRCUIT Inner
 INPUT a : BUS(4)
 compared = COMPARE4(a, 1000)
 OUTPUT compared.eq
@@ -662,7 +686,7 @@ OUTPUT inner.compared.eq
 END`);
     const errors = result.diagnostics.filter((entry) => entry.code === "E305");
     expect(errors).toHaveLength(1);
-    expect(errors[0]?.line).toBe(3);
+    expect(errors[0]?.line).toBe(4);
   });
 });
 
@@ -733,7 +757,8 @@ END`);
 
 describe("literal clarity", () => {
   it("warns when a bare number could be read two ways", () => {
-    const result = compile(`CIRCUIT Ambiguous
+    const result = compile(`IMPORT "@shortcircuit/gates"
+CIRCUIT Ambiguous
 INPUT a : BUS(4)
 value = AND(a, 10)
 OUTPUT value
@@ -761,7 +786,8 @@ END`);
   });
 
   it("does not warn when both readings agree", () => {
-    const result = compile(`CIRCUIT Clear
+    const result = compile(`IMPORT "@shortcircuit/gates"
+CIRCUIT Clear
 INPUT a : BUS(4)
 value = AND(a, 0010)
 OUTPUT value
@@ -772,7 +798,8 @@ END`);
 
 describe("verilog export", () => {
   it("writes a module with continuous assignments", () => {
-    const result = compile(`CIRCUIT HalfAdder
+    const result = compile(`IMPORT "@shortcircuit/gates"
+CIRCUIT HalfAdder
 INPUT a
 INPUT b
 sum = XOR(a, b)
@@ -790,7 +817,8 @@ END`);
   });
 
   it("gives each literal constant a unique Verilog localparam", () => {
-    const result = compile(`CIRCUIT Masks
+    const result = compile(`IMPORT "@shortcircuit/gates"
+CIRCUIT Masks
 INPUT a : BUS(4)
 high = AND(a, 0b1100)
 low = AND(a, 0b0011)
@@ -822,7 +850,8 @@ END`);
   });
 
   it("can generate a testbench", () => {
-    const result = compile(`CIRCUIT HalfAdder
+    const result = compile(`IMPORT "@shortcircuit/gates"
+CIRCUIT HalfAdder
 INPUT a
 INPUT b
 sum = XOR(a, b)

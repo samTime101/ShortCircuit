@@ -111,8 +111,7 @@ npm run package:init -- \
   --export PARITY3 \
   --kind macro \
   --description "Three-input parity built from NAND." \
-  --dependencies @shortcircuit/gates \
-  --auto-import
+  --dependencies @shortcircuit/gates
 ```
 
 | Flag | Meaning |
@@ -124,7 +123,6 @@ npm run package:init -- \
 | `--version <semver>` | Package version. Default: `0.1.0`. |
 | `--license <id>` | License identifier. Default: `MIT`. |
 | `--dependencies <list>` | Comma-separated package names. |
-| `--auto-import` | Set `recommendedAutoImport` to `true`. |
 | `--no-registry` | Do not edit `registry.json`. |
 | `--force` | Replace an existing package directory and registry entry. |
 | `--yes` | Accept defaults and never prompt. `--name` is still required. |
@@ -224,7 +222,6 @@ Create `packages/parity/manifest.json`:
   "name": "@acme/parity",
   "version": "0.1.0",
   "engine": "^0.1.0",
-  "recommendedAutoImport": true,
   "description": "Three-input parity built from NAND-derived gates.",
   "dependencies": {
     "@shortcircuit/gates": "^0.1.0"
@@ -253,7 +250,7 @@ Important fields:
 | --- | --- |
 | `name`, `version` | Must match `package.json`. |
 | `engine` | Compatible engine version. |
-| `recommendedAutoImport` | `true` makes the package available without an explicit `IMPORT` in the bundled app. |
+| `recommendedAutoImport` | Optional legacy metadata kept for package compatibility. It does not activate the package; every source still needs an explicit `IMPORT`. |
 | `dependencies` | Package names whose exports this package may use. |
 | `tests` | Package-wide tests. Per-circuit tests can also use an export's `tests` field. |
 | `exports` | Public macros and circuits. Each entry points at a real source file. |
@@ -452,10 +449,11 @@ console.log(report.ok, report.passed, report.failed);
 
 ## 11. Use the package in a circuit
 
-Because this example sets `recommendedAutoImport: true`, the export is available
-without an import:
+The export is available only after an explicit import:
 
 ```logicflow
+IMPORT "@acme/parity"
+
 CIRCUIT Odd
   INPUT a
   INPUT b
@@ -467,7 +465,7 @@ CIRCUIT Odd
 END
 ```
 
-An explicit import is also valid. Use an alias for qualified access:
+Use an alias for qualified access:
 
 ```logicflow
 IMPORT "@acme/parity" AS parity
@@ -483,10 +481,8 @@ CIRCUIT Odd
 END
 ```
 
-If `recommendedAutoImport` is `false`, the explicit import is required.
-
-Missing or disabled packages report `E602`. Reusing an alias for two packages
-reports `E603`.
+Missing packages report `E602`. Reusing an alias for two packages reports
+`E603`.
 
 ---
 
@@ -529,10 +525,9 @@ shortcircuit package list --package /path/to/package
 ```
 
 `--package` accepts a directory or a `manifest.json` path and can be repeated.
-Use `--no-default-packages` to load only the local packages, or
-`--only-packages @acme/parity,@shortcircuit/gates` to keep the parity package
-and its dependency active. `--only-packages` is an allowlist. Local package
-names must not collide with the bundled snapshot.
+It makes the package available to the source; the source still needs an
+`IMPORT "@acme/parity"` line before using its exports. Local package names must
+not collide with the bundled snapshot.
 
 The studio package manager lists packages from the bundled snapshot. A host can
 also load a different bundle through the compiler API:
@@ -582,18 +577,20 @@ The `name` or `version` fields differ between `package.json` and
 
 ### `E601` or a duplicate export error
 
-Export names must be unique across the enabled catalog. Two packages cannot
+Export names must be unique across the loaded catalog. Two packages cannot
 export the same macro name.
 
 ### `E602 Cannot import ...`
 
-The package is not installed, disabled, or not enabled for the project. Enable
-it in the studio **Packages** manager or add the correct `IMPORT`.
+The package is not installed in the project. Check the package name, or load a
+local package with `--package` in the CLI. If the package is installed, use the
+same name in the source `IMPORT`.
 
 ### `E200 ... is reserved`
 
-Package macro and circuit export names are reserved while the package is
-enabled. Rename the user circuit or signal, or disable the package.
+Package macro and circuit export names are reserved while their package is
+imported. Rename the user circuit or signal, or remove the import if the
+package is not needed.
 
 ### A package source compiles but the test wrapper does not
 

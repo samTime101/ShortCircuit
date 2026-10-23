@@ -25,18 +25,10 @@ export interface CommandOptions {
   write?: boolean;
   packages?: PackageBundle;
   packageOrigins?: Map<string, string>;
-  disableDefaultPackages?: boolean;
-  enabledPackages?: string[];
-  disabledPackages?: string[];
 }
 
 function compileOptions(options: CommandOptions): CompileOptions {
-  return {
-    ...(options.packages ? { packages: options.packages } : {}),
-    ...(options.disableDefaultPackages ? { disableDefaultPackages: true } : {}),
-    ...(options.enabledPackages ? { enabledPackages: options.enabledPackages } : {}),
-    ...(options.disabledPackages ? { disabledPackages: options.disabledPackages } : {}),
-  };
+  return options.packages ? { packages: options.packages } : {};
 }
 
 function compileSource(source: string, options: CommandOptions): CompileResult {
@@ -197,7 +189,6 @@ export function formatCommand(source: string, options: CommandOptions = {}): Com
 
 interface PackageListRow {
   manifest: PackageManifest;
-  enabled: boolean;
   origin: string;
 }
 
@@ -210,42 +201,25 @@ export function packageListCommand(options: CommandOptions = {}): CommandResult 
   const defaultSet = new Set(defaultPackages);
   const customPackages = options.packages?.packages ?? [];
   const allPackages = [...defaultPackages, ...customPackages];
-  const disabled = new Set(options.disabledPackages ?? []);
-  const enabled = options.enabledPackages ? new Set(options.enabledPackages) : null;
   const origins = options.packageOrigins ?? new Map<string, string>();
 
   const rows: PackageListRow[] = allPackages.map((manifest) => {
     const isDefault = defaultSet.has(manifest);
     return {
       manifest,
-      enabled:
-        !disabled.has(manifest.name) &&
-        (!enabled || enabled.has(manifest.name)) &&
-        !(isDefault && options.disableDefaultPackages),
       origin: isDefault ? "bundled" : (origins.get(manifest.name) ?? "local"),
     };
   });
-
-  const known = new Set(allPackages.map((manifest) => manifest.name));
-  const unknown = (options.enabledPackages ?? []).filter((name) => !known.has(name));
-  const stderr =
-    unknown.length > 0
-      ? `warning: No ${unknown.length === 1 ? "package" : "packages"} named ${unknown
-          .map((name) => `"${name}"`)
-          .join(", ")} for --only-packages.\n`
-      : "";
 
   if (options.json) {
     return {
       code: 0,
       stdout: `${JSON.stringify(
         {
-          includeDefaultPackages: !options.disableDefaultPackages,
           packages: rows.map((row) => ({
             name: row.manifest.name,
             version: row.manifest.version,
             description: row.manifest.description,
-            enabled: row.enabled,
             origin: row.origin,
             exports: row.manifest.exports.length,
           })),
@@ -253,16 +227,15 @@ export function packageListCommand(options: CommandOptions = {}): CommandResult 
         null,
         2,
       )}\n`,
-      stderr,
+      stderr: "",
     };
   }
 
-  const headers = ["NAME", "VERSION", "EXPORTS", "STATUS", "ORIGIN"];
+  const headers = ["NAME", "VERSION", "EXPORTS", "ORIGIN"];
   const values = rows.map((row) => [
     row.manifest.name,
     row.manifest.version,
     String(row.manifest.exports.length),
-    row.enabled ? "enabled" : "disabled",
     row.origin,
   ]);
   const widths = headers.map((header, column) =>
@@ -273,14 +246,14 @@ export function packageListCommand(options: CommandOptions = {}): CommandResult 
       .map((cell, column) => (column === cells.length - 1 ? cell : pad(cell, widths[column]!)))
       .join("  ");
   const lines = [formatRow(headers), ...values.map(formatRow)];
-  const enabledCount = rows.filter((row) => row.enabled).length;
-  const disabledCount = rows.length - enabledCount;
+  const bundledCount = rows.filter((row) => row.origin === "bundled").length;
+  const localCount = rows.length - bundledCount;
   lines.push("");
   lines.push(
-    `${rows.length} package${rows.length === 1 ? "" : "s"}, ${enabledCount} enabled, ${disabledCount} disabled.`,
+    `${rows.length} package${rows.length === 1 ? "" : "s"}, ${bundledCount} bundled, ${localCount} local. Import a package in source to use its exports.`,
   );
 
-  return { code: 0, stdout: `${lines.join("\n")}\n`, stderr };
+  return { code: 0, stdout: `${lines.join("\n")}\n`, stderr: "" };
 }
 
 export function exportIrCommand(source: string, options: CommandOptions = {}): CommandResult {

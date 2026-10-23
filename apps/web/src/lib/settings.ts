@@ -6,7 +6,6 @@ export type StudioMode = "beginner" | "advanced";
 
 const MODE_KEY = "shortcircuit.mode.v1";
 const EDITOR_FONT_SIZE_KEY = "shortcircuit.editorFontSize.v1";
-const DISABLED_PACKAGES_KEY = "shortcircuit.disabledPackages.v1";
 const SIM_DOCK_HEIGHT_KEY = "shortcircuit.simDockHeight.v1";
 const SIM_SPLIT_KEY = "shortcircuit.simSplit.v1";
 
@@ -117,26 +116,5 @@ export function writeSimSplit(split: number): void {
     window.localStorage.setItem(SIM_SPLIT_KEY, String(Math.round(clamped * 10) / 10));
   } catch {
     // The split is a convenience; a browser that refuses writes still works.
-  }
-}
-
-/** Package names the user has switched off in the package manager. */
-export function readDisabledPackages(): string[] {
-  try {
-    const raw = window.localStorage.getItem(DISABLED_PACKAGES_KEY);
-    if (raw === null) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return [...new Set(parsed.filter((entry): entry is string => typeof entry === "string" && entry.length > 0))];
-  } catch {
-    return [];
-  }
-}
-
-export function writeDisabledPackages(names: string[]): void {
-  try {
-    window.localStorage.setItem(DISABLED_PACKAGES_KEY, JSON.stringify([...new Set(names)]));
-  } catch {
-    // Package choices are a convenience; a browser that refuses writes still works.
   }
 }

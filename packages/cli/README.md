@@ -48,7 +48,7 @@ so it runs offline after installation.
 ## Packages
 
 `package list` shows the bundled packages and any local packages you load,
-along with their export counts, enabled state, and origin:
+along with their export counts and origin:
 
 ```bash
 shortcircuit package list
@@ -56,20 +56,30 @@ shortcircuit package list --json
 shortcircuit package list --package /path/to/package
 ```
 
-Change the active packages on any compile command:
+Activate a package by adding an `IMPORT` line to the source:
 
-```bash
-shortcircuit compile circuit.lf --disable-package @shortcircuit/arithmetic
-shortcircuit compile circuit.lf --only-packages @shortcircuit/gates
-shortcircuit compile circuit.lf --package /path/to/package --no-default-packages
+```logicflow
+IMPORT "@shortcircuit/gates"
+
+CIRCUIT HalfAdder
+  INPUT a
+  INPUT b
+  sum = XOR(a, b)
+  carry = AND(a, b)
+  OUTPUT sum
+  OUTPUT carry
+END
 ```
 
-`--package`, `--disable-package`, and `--only-packages` are repeatable.
-`--disable-package` and `--only-packages` also accept comma-separated names.
-`--only-packages` is an allowlist, so list a package's dependencies too.
-`--package` accepts a package directory or a `manifest.json` path. Local
-packages must use a name that is not already bundled. The loader inlines the
-package source, docs, and tests.
+The CLI, studio, and engine API all read the same imports. Load a local package
+directory or a `manifest.json` path with `--package`:
+
+```bash
+shortcircuit compile circuit.lf --package /path/to/package
+```
+
+`--package` is repeatable. Local packages must use a name that is not already
+bundled. The loader inlines the package source, docs, and tests.
 
 ## Source
 

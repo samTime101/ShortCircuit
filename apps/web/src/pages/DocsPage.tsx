@@ -293,7 +293,9 @@ export function DocsPage({ onBack, beginner }: DocsPageProps) {
           >
             <CodeBlock
               caption="half-adder.lf"
-              code={`CIRCUIT HalfAdder
+              code={`IMPORT "@shortcircuit/gates"
+
+CIRCUIT HalfAdder
 
 INPUT a
 INPUT b
@@ -928,15 +930,14 @@ STATE armed = 1`}
             index="08"
             eyebrow="Language"
             title="Imports and packages"
-            lead="Gates and reusable circuits are packages, not hard-coded language operators. Recommended packages load automatically; explicit imports control everything else."
+            lead="Gates and reusable circuits are packages, not hard-coded language operators. A package is active only when the source imports it."
           >
             <div className="docs-columns">
               <div>
-                <h4>Use the defaults</h4>
+                <h4>Import what you use</h4>
                 <CodeBlock
-                  code={`// @shortcircuit/gates, @shortcircuit/selection,
-// @shortcircuit/arithmetic, and @shortcircuit/comparison
-// load automatically.
+                  code={`IMPORT "@shortcircuit/selection"
+
 CIRCUIT Blink
   INPUT a
   INPUT b
@@ -947,7 +948,7 @@ CIRCUIT Blink
 END`}
                 />
                 <ul className="docs-list">
-                  <li>Default packages are still package-provided and can be toggled off.</li>
+                  <li>Only imported packages expose their macros and circuits to the source.</li>
                   <li>
                     Each package implements its circuits in real <code>.lf</code> source.
                   </li>
@@ -955,7 +956,7 @@ END`}
                 </ul>
               </div>
               <div>
-                <h4>Import explicitly</h4>
+                <h4>Import with an alias</h4>
                 <CodeBlock
                   code={`IMPORT "@acme/display" AS display
 
@@ -974,9 +975,9 @@ END`}
                   </li>
                   <li>An explicit import without an alias is available unqualified.</li>
                   <li>
-                    Use the <strong>Packages</strong> button in the studio header to enable or
-                    disable installed packages. Hosts can pass the same choices through the{" "}
-                    <code>enabledPackages</code> and <code>disabledPackages</code> compile options.
+                    Use the <strong>Packages</strong> button in the studio header to add or remove
+                    the matching <code>IMPORT</code> line. The source remains the single source of
+                    truth.
                   </li>
                   <li>Imports are resolved before analysis, so missing packages fail early.</li>
                 </ul>
@@ -992,7 +993,10 @@ END`}
             lead="Arithmetic and selection are package circuits with declared widths. Nothing widens or narrows implicitly."
           >
             <CodeBlock
-              code={`CIRCUIT AddAndSelect
+              code={`IMPORT "@shortcircuit/arithmetic"
+IMPORT "@shortcircuit/selection"
+
+CIRCUIT AddAndSelect
   INPUT a : BUS(8)
   INPUT b : BUS(8)
   INPUT choose_b
@@ -1033,7 +1037,9 @@ END`}
           >
             <CodeBlock
               caption="half adder + full adder"
-              code={`CIRCUIT HalfAdder
+              code={`IMPORT "@shortcircuit/gates"
+
+CIRCUIT HalfAdder
   INPUT a
   INPUT b
 
@@ -1094,7 +1100,9 @@ END`}
           >
             <CodeBlock
               caption="register with enable"
-              code={`CIRCUIT Register8
+              code={`IMPORT "@shortcircuit/selection"
+
+CIRCUIT Register8
   INPUT data : BUS(8)
   INPUT clock
   INPUT enable

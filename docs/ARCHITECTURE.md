@@ -198,11 +198,14 @@ packages. Macro exports point at real `.lf` files; `packages.ts` parses their
 body/fold. A macro body is never stored in JSON.
 
 `resolvePackageImports` applies source-level `IMPORT` declarations to the
-enabled catalog. Recommended packages are unqualified by default; an explicit
-alias adds qualified access, and an explicit import without an alias adds
-unqualified access. Hosts can remove packages with `disabledPackages` or
-restrict the catalog with `enabledPackages`; missing and duplicate-alias cases
-are `E602` and `E603`.
+loaded catalog. Only imported packages expose exports to user code. An import
+without an alias adds unqualified access; an alias adds qualified access.
+`packageClosure` then loads those packages plus their declared dependencies so
+package implementations can resolve their own calls, while dependency exports
+stay out of the user namespace and completions. Missing packages and duplicate
+aliases are `E602` and `E603`. Hosts can add bundles with `packages` and omit
+the bundled snapshot with `disableDefaultPackages`, but no host option bypasses
+the source import requirement.
 
 Package circuits are parsed from their `.lf` sources and registered as internal
 structures. They can be instantiated by user circuits and by other package

@@ -1,4 +1,8 @@
 import type { EditorState } from "@codemirror/state";
+import {
+  readPackageImports,
+  type PackageImportLine,
+} from "../lib/packageImports";
 
 /**
  * A light, editor-side model of the current LogicFlow source.
@@ -21,6 +25,11 @@ export interface DocumentModel {
   /** Instance name to the ports exposed through `OUTPUT instance.port`. */
   instancePorts: Map<string, string[]>;
   circuits: string[];
+  imports: PackageImportLine[];
+  /** Packages imported without an alias, so their exports are unqualified. */
+  unqualifiedPackages: Set<string>;
+  /** Alias to package name, for qualified access. */
+  aliases: Map<string, string>;
 }
 
 const DECLARATION = /^\s*(INPUT|STATE)\s+([A-Za-z_][A-Za-z0-9_]*)/i;
@@ -61,6 +70,13 @@ export function scanDocument(source: string): DocumentModel {
   const signals = new Map<string, SignalSummary>();
   const instancePorts = new Map<string, string[]>();
   const circuits: string[] = [];
+  const imports = readPackageImports(source);
+  const unqualifiedPackages = new Set<string>();
+  const aliases = new Map<string, string>();
+  for (const entry of imports) {
+    if (entry.alias) aliases.set(entry.alias, entry.packageName);
+    else unqualifiedPackages.add(entry.packageName);
+  }
   const lines = source.split("\n");
 
   lines.forEach((raw, index) => {
@@ -110,7 +126,7 @@ export function scanDocument(source: string): DocumentModel {
     }
   });
 
-  return { signals, instancePorts, circuits };
+  return { signals, instancePorts, circuits, imports, unqualifiedPackages, aliases };
 }
 
 export interface WordAt {

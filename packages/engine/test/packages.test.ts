@@ -107,7 +107,8 @@ describe("package catalog", () => {
       ],
     };
     const result = compile(
-      `CIRCUIT Wire
+      `IMPORT "@test/double-not"
+CIRCUIT Wire
 INPUT a
 y = TWICE(a)
 OUTPUT y
@@ -121,32 +122,37 @@ END`,
     expect(new Simulator(circuit).setInputs({ a: "1" }).outputs.y?.binary).toBe("1");
   });
 
-  it("reserves package macro names as signal names", () => {
-    const result = compile(`CIRCUIT Reserved
-INPUT AND
-OUTPUT AND
-END`);
-    expect(result.diagnostics.some((entry) => entry.code === "E200")).toBe(true);
-  });
-
-  it("reserves enabled package circuit names", () => {
-    const result = compile(`CIRCUIT ADD4
+  it("reserves an imported package macro name but not an unimported one", () => {
+    const allowed = compile(`CIRCUIT AND
 INPUT a
 OUTPUT a
 END`);
-    expect(result.diagnostics.some((entry) => entry.code === "E200")).toBe(true);
+    expect(allowed.diagnostics.some((entry) => entry.code === "E200")).toBe(false);
 
-    const disabled = compile(
-      `CIRCUIT ADD4
+    const reserved = compile(`IMPORT "@shortcircuit/gates"
+CIRCUIT AND
 INPUT a
 OUTPUT a
-END`,
-      { disabledPackages: ["@shortcircuit/arithmetic"] },
-    );
-    expect(disabled.diagnostics.some((entry) => entry.code === "E200")).toBe(false);
+END`);
+    expect(reserved.diagnostics.some((entry) => entry.code === "E200")).toBe(true);
   });
 
-  it("does not fall back to gate builtins when packages are disabled", () => {
+  it("reserves an imported package circuit name but not an unimported one", () => {
+    const allowed = compile(`CIRCUIT ADD4
+INPUT a
+OUTPUT a
+END`);
+    expect(allowed.diagnostics.some((entry) => entry.code === "E200")).toBe(false);
+
+    const reserved = compile(`IMPORT "@shortcircuit/arithmetic"
+CIRCUIT ADD4
+INPUT a
+OUTPUT a
+END`);
+    expect(reserved.diagnostics.some((entry) => entry.code === "E200")).toBe(true);
+  });
+
+  it("does not expose package gates without an import", () => {
     const result = compile(
       `CIRCUIT NoPackages
 INPUT a
@@ -154,13 +160,13 @@ INPUT b
 y = AND(a, b)
 OUTPUT y
 END`,
-      { disableDefaultPackages: true },
     );
     expect(result.diagnostics.some((entry) => entry.code === "E210")).toBe(true);
   });
 
   it("keeps package circuits internal to the result", () => {
-    const result = compile(`CIRCUIT Use
+    const result = compile(`IMPORT "@shortcircuit/arithmetic"
+CIRCUIT Use
 INPUT a
 INPUT b
 h = HALF_ADDER(a, b)
@@ -191,61 +197,85 @@ END`);
     expect(simulator.outputs["h.sum"]?.binary).toBe("0");
   });
 
-  it("reports a missing or disabled import", () => {
+  it("reports an import for a package that is not loaded", () => {
     const missing = compile(`IMPORT "@missing/package"
 CIRCUIT Empty
 END`);
     expect(missing.diagnostics.some((entry) => entry.code === "E602")).toBe(true);
 
-    const disabled = compile(
+    const notLoaded = compile(
       `IMPORT "@shortcircuit/gates"
 CIRCUIT Empty
 END`,
-      { disabledPackages: ["@shortcircuit/gates"] },
+      { disableDefaultPackages: true },
     );
-    expect(disabled.diagnostics.some((entry) => entry.code === "E602")).toBe(true);
+    expect(notLoaded.diagnostics.some((entry) => entry.code === "E602")).toBe(true);
   });
 
-  it("removes disabled package exports from compilation", () => {
-    const result = compile(
+  it("only makes imported package exports available", () => {
+    const unimported = compile(
       `CIRCUIT NoGates
 INPUT a
 INPUT b
 y = AND(a, b)
 OUTPUT y
 END`,
-      { disabledPackages: ["@shortcircuit/gates"] },
     );
-    expect(result.diagnostics.some((entry) => entry.code === "E210")).toBe(true);
-  });
+    expect(unimported.diagnostics.some((entry) => entry.code === "E210")).toBe(true);
 
-  it("restricts the catalog to enabledPackages", () => {
-    const result = compile(
-      `CIRCUIT NoGates
+    const imported = compile(
+      `IMPORT "@shortcircuit/gates"
+CIRCUIT WithGates
 INPUT a
 INPUT b
 y = AND(a, b)
 OUTPUT y
 END`,
-      { enabledPackages: ["@shortcircuit/selection"] },
+    );
+    expect(imported.diagnostics.filter((entry) => entry.severity === "error")).toEqual([]);
+  });
+
+  it("requires an alias to be used when the import has one", () => {
+    const result = compile(
+      `IMPORT "@shortcircuit/gates" AS Gates
+CIRCUIT AliasOnly
+INPUT a
+INPUT b
+y = AND(a, b)
+OUTPUT y
+END`,
     );
     expect(result.diagnostics.some((entry) => entry.code === "E210")).toBe(true);
+  });
 
-    const selectionOnly = compile(
-      `CIRCUIT Choose
+  it("does not load exports from an unimported package", () => {
+    const result = compile(
+      `IMPORT "@shortcircuit/selection"
+CIRCUIT Choose
 INPUT low
 INPUT high
 INPUT select
 y = MUX(low, high, select)
 OUTPUT y
 END`,
-      { enabledPackages: ["@shortcircuit/selection"] },
     );
-    expect(selectionOnly.diagnostics.some((entry) => entry.code === "E210")).toBe(true);
+    expect(result.diagnostics.filter((entry) => entry.severity === "error")).toEqual([]);
+
+    const arithmetic = compile(
+      `IMPORT "@shortcircuit/selection"
+CIRCUIT Add
+INPUT a : BUS(4)
+INPUT b : BUS(4)
+sum = ADD4(a, b, 0)
+OUTPUT sum.sum
+END`,
+    );
+    expect(arithmetic.diagnostics.some((entry) => entry.code === "E210")).toBe(true);
   });
 
   it("expands the package MUX and broadcasts its select bit", () => {
-    const result = compile(`CIRCUIT Choose
+    const result = compile(`IMPORT "@shortcircuit/selection"
+CIRCUIT Choose
 INPUT low : BUS(4)
 INPUT high : BUS(4)
 INPUT select
@@ -271,7 +301,8 @@ END`);
       ["COMPARE4", 4],
       ["COMPARE8", 8],
     ] as const) {
-      const result = compile(`CIRCUIT Check
+      const result = compile(`IMPORT "@shortcircuit/comparison"
+CIRCUIT Check
 INPUT a : BUS(${width})
 INPUT b : BUS(${width})
 compared = ${exportName}(a, b)

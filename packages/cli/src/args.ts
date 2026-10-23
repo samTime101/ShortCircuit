@@ -14,12 +14,10 @@ const VALUE_FLAGS = new Set([
   "width",
   "rows",
   "package",
-  "disable-package",
-  "only-packages",
 ]);
 
 /** Value flags that can be passed more than once. */
-const REPEATABLE_VALUE_FLAGS = new Set(["package", "disable-package", "only-packages"]);
+const REPEATABLE_VALUE_FLAGS = new Set(["package"]);
 
 function appendFlag(flags: Record<string, FlagValue>, name: string, value: string): void {
   const current = flags[name];
@@ -78,13 +76,12 @@ export function parseArgs(argv: string[]): ParsedArgs {
 }
 
 /**
- * Read a repeatable flag as a list. Package names may be comma-separated;
- * package paths are kept whole because a path can contain a comma.
+ * Read a repeatable flag as a list. Values are kept whole because a package
+ * path can contain a comma.
  */
 export function listFlag(
   flags: Record<string, FlagValue>,
   name: string,
-  splitCommas = false,
 ): string[] | undefined {
   if (!Object.hasOwn(flags, name)) return undefined;
   const value = flags[name];
@@ -92,9 +89,7 @@ export function listFlag(
     throw new Error(`Option --${name} needs a value.`);
   }
   const raw = Array.isArray(value) ? value : [value];
-  const values = raw
-    .flatMap((entry) => (splitCommas ? entry.split(",") : [entry]))
-    .map((entry) => entry.trim());
+  const values = raw.map((entry) => entry.trim());
   if (values.length === 0 || values.some((entry) => entry === "")) {
     throw new Error(`Option --${name} needs a value.`);
   }
@@ -121,7 +116,7 @@ export const HELP: HelpEntry[] = [
   },
   {
     usage: "shortcircuit package list [--json]",
-    description: "List bundled and local packages with their status.",
+    description: "List bundled and local packages with their origin.",
   },
 ];
 
@@ -138,9 +133,6 @@ export function helpText(): string {
   lines.push("  --out <file>               Write to a file instead of standard output.");
   lines.push("  --circuit <name>           Choose a circuit (truth-table).");
   lines.push("  --package <dir>            Load a local package directory or manifest. Repeatable.");
-  lines.push("  --disable-package <name>   Disable a package. Repeatable or comma-separated.");
-  lines.push("  --only-packages <names>    Enable only these packages. Repeatable or comma-separated.");
-  lines.push("  --no-default-packages      Do not load the bundled packages.");
   lines.push("");
   return lines.join("\n");
 }

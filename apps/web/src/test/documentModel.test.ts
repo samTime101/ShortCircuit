@@ -45,4 +45,19 @@ CASE "a // b"
 END`);
     expect([...model.signals.keys()]).toEqual(["a"]);
   });
+
+  it("tracks unqualified imports and aliases", () => {
+    const model = scanDocument(`IMPORT "@shortcircuit/gates"
+IMPORT "@shortcircuit/selection" AS selection
+
+CIRCUIT Demo
+END`);
+
+    expect([...model.unqualifiedPackages]).toEqual(["@shortcircuit/gates"]);
+    expect([...model.aliases]).toEqual([["selection", "@shortcircuit/selection"]]);
+    expect(model.imports.map((entry) => entry.packageName)).toEqual([
+      "@shortcircuit/gates",
+      "@shortcircuit/selection",
+    ]);
+  });
 });

@@ -157,8 +157,6 @@ const DEFAULT_OPTIONS: Required<CompileOptions> = {
   maxDiagnostics: 100,
   packages: [],
   disableDefaultPackages: false,
-  enabledPackages: [],
-  disabledPackages: [],
 };
 
 const EMPTY_IMPORT_RESOLUTION: ImportResolution = {
@@ -217,6 +215,7 @@ export class ProgramAnalyzer {
   private readonly circuits: CircuitIR[] = [];
   private readonly tests: TestSuiteIR[] = [];
   private readonly internalCircuitNames: Set<string>;
+  private readonly importedMacroNames: Set<string>;
   private instanceCounter = 0;
   private nodeLimitReported = false;
 
@@ -235,7 +234,16 @@ export class ProgramAnalyzer {
   ) {
     this.options = { ...DEFAULT_OPTIONS, ...options };
     this.bag = new DiagnosticBag(this.options.maxDiagnostics);
-    this.internalCircuitNames = new Set(packageCatalog.circuits.map((entry) => entry.circuit.name));
+    this.internalCircuitNames = new Set(
+      program.circuits
+        .filter((circuit) => circuit.packageName)
+        .map((circuit) => circuit.name),
+    );
+    this.importedMacroNames = new Set(
+      [...packageCatalog.macros.values()]
+        .filter((macro) => importResolution.importedPackages.has(macro.packageName))
+        .map((macro) => macro.name.toUpperCase()),
+    );
     for (const diagnostic of parserDiagnostics) this.bag.add(diagnostic);
     for (const diagnostic of packageCatalog.diagnostics) this.bag.add(diagnostic);
     for (const diagnostic of importResolution.diagnostics) this.bag.add(diagnostic);
@@ -1179,13 +1187,15 @@ export class ProgramAnalyzer {
   isReservedName(name: string, allowPackageNames = false): boolean {
     return (
       isCoreReservedName(name) ||
-      this.packageCatalog.macros.has(name.toUpperCase()) ||
+      this.importedMacroNames.has(name.toUpperCase()) ||
       (!allowPackageNames && this.internalCircuitNames.has(name))
     );
   }
 
   getPackageMacros(): Iterable<ResolvedPackageMacro> {
-    return this.packageCatalog.macros.values();
+    return [...this.packageCatalog.macros.values()].filter((macro) =>
+      this.importResolution.unqualifiedPackages.has(macro.packageName),
+    );
   }
 
   getStructures(): Iterable<CircuitStructure> {
@@ -1578,6 +1588,7 @@ class ScopeBuilder {
     expr: ExpressionAst,
     preferredLabel?: string,
     macroBindings?: Map<string, ValueRef>,
+    requesterPackage: string | undefined = this.packageName,
   ): ValueRef {
     switch (expr.kind) {
       case "Literal": {
@@ -1593,17 +1604,33 @@ class ScopeBuilder {
       case "Reference":
         return this.resolveReference(expr, macroBindings);
       case "Call":
-        return this.compileCall(expr, preferredLabel, macroBindings);
+        return this.compileCall(expr, preferredLabel, macroBindings, requesterPackage);
       case "Index": {
         const index = this.analyzer.constNumber(expr.index, "Bit index");
         if (index === null) return this.fallbackRef(expr.span.line, expr.span.column);
-        return this.compileSlice(expr.target, index, index, expr.span, preferredLabel, macroBindings);
+        return this.compileSlice(
+          expr.target,
+          index,
+          index,
+          expr.span,
+          preferredLabel,
+          macroBindings,
+          requesterPackage,
+        );
       }
       case "Slice": {
         const hi = this.analyzer.constNumber(expr.hi, "Slice bound");
         const lo = this.analyzer.constNumber(expr.lo, "Slice bound");
         if (hi === null || lo === null) return this.fallbackRef(expr.span.line, expr.span.column);
-        return this.compileSlice(expr.target, hi, lo, expr.span, preferredLabel, macroBindings);
+        return this.compileSlice(
+          expr.target,
+          hi,
+          lo,
+          expr.span,
+          preferredLabel,
+          macroBindings,
+          requesterPackage,
+        );
       }
     }
   }
@@ -1615,8 +1642,9 @@ class ScopeBuilder {
     span: SourceSpan,
     preferredLabel?: string,
     macroBindings?: Map<string, ValueRef>,
+    requesterPackage: string | undefined = this.packageName,
   ): ValueRef {
-    const ref = this.resolveExpression(target, undefined, macroBindings);
+    const ref = this.resolveExpression(target, undefined, macroBindings, requesterPackage);
     if (!Number.isInteger(hi) || !Number.isInteger(lo) || hi < 0 || lo < 0) {
       this.analyzer.error(
         "E214",
@@ -1666,10 +1694,17 @@ class ScopeBuilder {
     call: CallAst,
     preferredLabel?: string,
     macroBindings?: Map<string, ValueRef>,
+    requesterPackage: string | undefined = this.packageName,
   ): ValueRef {
-    const packageMacro = this.analyzer.getPackageMacro(call.name, this.packageName);
+    const packageMacro = this.analyzer.getPackageMacro(call.name, requesterPackage);
     if (packageMacro) {
-      return this.compileMacroCall(call, packageMacro, preferredLabel, macroBindings);
+      return this.compileMacroCall(
+        call,
+        packageMacro,
+        preferredLabel,
+        macroBindings,
+        requesterPackage,
+      );
     }
     if (this.isBundleCall(call.name)) {
       this.analyzer.error(
@@ -1716,7 +1751,9 @@ class ScopeBuilder {
       );
     }
 
-    const refs = call.args.map((arg) => this.resolveExpression(arg.value, undefined, macroBindings));
+    const refs = call.args.map((arg) =>
+      this.resolveExpression(arg.value, undefined, macroBindings, requesterPackage),
+    );
     const argExprs = call.args.map((arg) => arg.value);
     if (call.args.length < spec.minArgs || call.args.length > spec.maxArgs) {
       this.analyzer.error(
@@ -1894,6 +1931,7 @@ class ScopeBuilder {
     macro: ResolvedPackageMacro,
     preferredLabel?: string,
     outerBindings?: Map<string, ValueRef>,
+    requesterPackage: string | undefined = this.packageName,
   ): ValueRef {
     if (call.args.some((arg) => arg.name !== null)) {
       this.analyzer.error(
@@ -1905,7 +1943,7 @@ class ScopeBuilder {
       );
     }
     const refs = call.args.map((arg) =>
-      this.resolveExpression(arg.value, undefined, outerBindings),
+      this.resolveExpression(arg.value, undefined, outerBindings, requesterPackage),
     );
     return this.compileMacroWithRefs(macro, refs, call.span, preferredLabel);
   }
@@ -1937,7 +1975,7 @@ class ScopeBuilder {
     }
 
     if (macro.fold) {
-      const foldMacro = this.analyzer.getPackageMacro(macro.fold, this.packageName);
+      const foldMacro = this.analyzer.getPackageMacro(macro.fold, macro.packageName);
       if (!foldMacro) {
         this.analyzer.error(
           "E999",
@@ -1979,7 +2017,12 @@ class ScopeBuilder {
       const ref = refs[macro.args.length + index];
       if (ref) bindings.set(body.restNames[index]!, ref);
     }
-    return this.resolveExpression(body.ast, preferredLabel ?? macro.name, bindings);
+    return this.resolveExpression(
+      body.ast,
+      preferredLabel ?? macro.name,
+      bindings,
+      macro.packageName,
+    );
   }
 
   private constantArgument(call: CallAst, expr: ExpressionAst | undefined, context: string): number | null {

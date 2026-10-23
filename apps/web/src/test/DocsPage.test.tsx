@@ -24,7 +24,7 @@ describe("documentation page", () => {
     }
   });
 
-  it("documents the gates and circuits included by default", () => {
+  it("documents the bundled gates and circuits", () => {
     const { container } = render(<DocsPage onBack={() => {}} />);
     const defaults = container.querySelector(".docs-defaults");
     const text = defaults?.textContent ?? "";

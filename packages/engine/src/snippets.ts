@@ -25,8 +25,10 @@ export const LANGUAGE_SNIPPETS: LanguageSnippet[] = [
     title: "Circuit",
     category: "structure",
     description: "A complete circuit with one input, one assignment, and one output.",
-    template: "CIRCUIT ${name}\n  INPUT ${signal}\n\n  ${signal} = ${expression}\n\n  OUTPUT ${signal}\nEND",
-    preview: "CIRCUIT Blink\n  INPUT enable\n\n  blink = AND(enable, enable)\n\n  OUTPUT blink\nEND",
+    template:
+      "IMPORT \"@shortcircuit/gates\"\n\nCIRCUIT ${name}\n  INPUT ${signal}\n\n  ${signal} = ${expression}\n\n  OUTPUT ${signal}\nEND",
+    preview:
+      "IMPORT \"@shortcircuit/gates\"\n\nCIRCUIT Blink\n  INPUT enable\n\n  blink = AND(enable, enable)\n\n  OUTPUT blink\nEND",
   },
   {
     id: "input",
@@ -88,7 +90,8 @@ export const LANGUAGE_SNIPPETS: LanguageSnippet[] = [
     id: "mux",
     title: "Multiplexer",
     category: "pattern",
-    description: "Select between two values with a one-bit control.",
+    description:
+      "Select between two values with a one-bit control. Import @shortcircuit/selection to use MUX.",
     template: "${name} = MUX(${when_zero}, ${when_one}, ${select})",
     preview: "chosen = MUX(a, b, sel)",
   },
@@ -133,8 +136,9 @@ export const LANGUAGE_SNIPPETS: LanguageSnippet[] = [
     category: "pattern",
     description: "One-bit adder built from two gates.",
     template:
-      "CIRCUIT HalfAdder\n  INPUT a\n  INPUT b\n\n  sum = XOR(a, b)\n  carry = AND(a, b)\n\n  OUTPUT sum\n  OUTPUT carry\nEND",
-    preview: "CIRCUIT HalfAdder\n  INPUT a\n  INPUT b\n\n  sum = XOR(a, b)\n  carry = AND(a, b)\n\n  OUTPUT sum\n  OUTPUT carry\nEND",
+      "IMPORT \"@shortcircuit/gates\"\n\nCIRCUIT HalfAdder\n  INPUT a\n  INPUT b\n\n  sum = XOR(a, b)\n  carry = AND(a, b)\n\n  OUTPUT sum\n  OUTPUT carry\nEND",
+    preview:
+      "IMPORT \"@shortcircuit/gates\"\n\nCIRCUIT HalfAdder\n  INPUT a\n  INPUT b\n\n  sum = XOR(a, b)\n  carry = AND(a, b)\n\n  OUTPUT sum\n  OUTPUT carry\nEND",
   },
   {
     id: "mux4",
@@ -142,9 +146,9 @@ export const LANGUAGE_SNIPPETS: LanguageSnippet[] = [
     category: "pattern",
     description: "Select one of four values with a two-bit selector.",
     template:
-      "CIRCUIT Mux4\n  INPUT a\n  INPUT b\n  INPUT c\n  INPUT d\n  INPUT sel : BUS(2)\n\n  low = MUX(a, b, sel[0])\n  high = MUX(c, d, sel[0])\n  result = MUX(low, high, sel[1])\n\n  OUTPUT result\nEND",
+      "IMPORT \"@shortcircuit/selection\"\n\nCIRCUIT Mux4\n  INPUT a\n  INPUT b\n  INPUT c\n  INPUT d\n  INPUT sel : BUS(2)\n\n  low = MUX(a, b, sel[0])\n  high = MUX(c, d, sel[0])\n  result = MUX(low, high, sel[1])\n\n  OUTPUT result\nEND",
     preview:
-      "CIRCUIT Mux4\n  INPUT a\n  INPUT b\n  INPUT c\n  INPUT d\n  INPUT sel : BUS(2)\n\n  low = MUX(a, b, sel[0])\n  high = MUX(c, d, sel[0])\n  result = MUX(low, high, sel[1])\n\n  OUTPUT result\nEND",
+      "IMPORT \"@shortcircuit/selection\"\n\nCIRCUIT Mux4\n  INPUT a\n  INPUT b\n  INPUT c\n  INPUT d\n  INPUT sel : BUS(2)\n\n  low = MUX(a, b, sel[0])\n  high = MUX(c, d, sel[0])\n  result = MUX(low, high, sel[1])\n\n  OUTPUT result\nEND",
   },
   {
     id: "register",
@@ -152,9 +156,9 @@ export const LANGUAGE_SNIPPETS: LanguageSnippet[] = [
     category: "pattern",
     description: "An 8-bit register that latches data on a rising edge.",
     template:
-      "CIRCUIT Register8\n  INPUT data : BUS(8)\n  INPUT clock\n  INPUT enable\n\n  STATE stored : BUS(8) = 0\n\n  next = MUX(stored, data, enable)\n\n  ON RISING_EDGE(clock):\n    stored = next\n  END\n\n  OUTPUT stored\nEND",
+      "IMPORT \"@shortcircuit/selection\"\n\nCIRCUIT Register8\n  INPUT data : BUS(8)\n  INPUT clock\n  INPUT enable\n\n  STATE stored : BUS(8) = 0\n\n  next = MUX(stored, data, enable)\n\n  ON RISING_EDGE(clock):\n    stored = next\n  END\n\n  OUTPUT stored\nEND",
     preview:
-      "CIRCUIT Register8\n  INPUT data : BUS(8)\n  INPUT clock\n  INPUT enable\n\n  STATE stored : BUS(8) = 0\n\n  next = MUX(stored, data, enable)\n\n  ON RISING_EDGE(clock):\n    stored = next\n  END\n\n  OUTPUT stored\nEND",
+      "IMPORT \"@shortcircuit/selection\"\n\nCIRCUIT Register8\n  INPUT data : BUS(8)\n  INPUT clock\n  INPUT enable\n\n  STATE stored : BUS(8) = 0\n\n  next = MUX(stored, data, enable)\n\n  ON RISING_EDGE(clock):\n    stored = next\n  END\n\n  OUTPUT stored\nEND",
   },
   {
     id: "counter",
@@ -162,9 +166,9 @@ export const LANGUAGE_SNIPPETS: LanguageSnippet[] = [
     category: "pattern",
     description: "A 4-bit counter with a synchronous reset.",
     template:
-      "CIRCUIT Counter4\n  INPUT clock\n  INPUT reset\n\n  STATE count : BUS(4) = 0000\n\n  incremented = ADD4(count, 0, 1)\n  next = MUX(incremented.sum, 0, reset)\n\n  ON RISING_EDGE(clock):\n    count = next\n  END\n\n  OUTPUT count\nEND",
+      "IMPORT \"@shortcircuit/arithmetic\"\nIMPORT \"@shortcircuit/selection\"\n\nCIRCUIT Counter4\n  INPUT clock\n  INPUT reset\n\n  STATE count : BUS(4) = 0000\n\n  incremented = ADD4(count, 0, 1)\n  next = MUX(incremented.sum, 0, reset)\n\n  ON RISING_EDGE(clock):\n    count = next\n  END\n\n  OUTPUT count\nEND",
     preview:
-      "CIRCUIT Counter4\n  INPUT clock\n  INPUT reset\n\n  STATE count : BUS(4) = 0000\n\n  incremented = ADD4(count, 0, 1)\n  next = MUX(incremented.sum, 0, reset)\n\n  ON RISING_EDGE(clock):\n    count = next\n  END\n\n  OUTPUT count\nEND",
+      "IMPORT \"@shortcircuit/arithmetic\"\nIMPORT \"@shortcircuit/selection\"\n\nCIRCUIT Counter4\n  INPUT clock\n  INPUT reset\n\n  STATE count : BUS(4) = 0000\n\n  incremented = ADD4(count, 0, 1)\n  next = MUX(incremented.sum, 0, reset)\n\n  ON RISING_EDGE(clock):\n    count = next\n  END\n\n  OUTPUT count\nEND",
   },
 ];
 

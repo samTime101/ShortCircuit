@@ -56,6 +56,7 @@ export interface PackageManifest {
   version: string;
   engine?: string;
   description?: string;
+  /** Legacy manifest hint. Packages are available only through an explicit IMPORT. */
   recommendedAutoImport?: boolean;
   dependencies?: Record<string, string>;
   /** Package-relative path to package-wide tests. */
@@ -566,21 +567,9 @@ export function resolvePackageBundle(options: CompileOptions): PackageBundle {
   const custom = normalizeBundle(options.packages);
   if (custom.packages.length > 0) bundles.push(custom);
 
-  const enabled = options.enabledPackages
-    ? new Set(options.enabledPackages)
-    : null;
-  const disabled = new Set(options.disabledPackages ?? []);
-  const packages = bundles
-    .flatMap((bundle) => bundle.packages)
-    .filter((manifest) => {
-      if (disabled.has(manifest.name)) return false;
-      if (enabled && !enabled.has(manifest.name)) return false;
-      return true;
-    });
-
   return {
     schema: "shortcircuit.packages/v1",
-    packages,
+    packages: bundles.flatMap((bundle) => bundle.packages),
   };
 }
 
@@ -603,63 +592,37 @@ export interface ImportResolution {
 }
 
 /**
- * Resolve the source-level import list against the enabled package catalog.
+ * Resolve the source-level import list against the loaded package catalog.
  *
- * Default/recommended packages are auto-imported. An explicit import adds a
- * package to the unqualified set, or registers an alias for qualified use.
+ * Only packages named by an IMPORT are available to the source. An import
+ * without an alias makes the package's exports available unqualified; an
+ * import with an alias makes them available through that alias.
  */
 export function resolvePackageImports(
   catalog: PackageCatalog,
   imports: ImportAst[],
-  options: CompileOptions = {},
 ): ImportResolution {
   const aliases = new Map<string, string>();
-  const customPackages = new Set(
-    normalizeBundle(options.packages).packages.map((manifest) => manifest.name),
-  );
-  const unqualifiedPackages = new Set(
-    catalog.packages
-      .filter(
-        (manifest) =>
-          manifest.recommendedAutoImport !== false &&
-          (manifest.recommendedAutoImport || customPackages.has(manifest.name)),
-      )
-      .map((manifest) => manifest.name),
-  );
+  const unqualifiedPackages = new Set<string>();
   const importedPackages = new Set<string>();
   const resolved: ResolvedPackageImport[] = [];
   const diagnostics: Diagnostic[] = [];
   const byName = new Map(catalog.packages.map((manifest) => [manifest.name, manifest]));
-  const disabled = new Set(options.disabledPackages ?? []);
-  const enabled = options.enabledPackages ? new Set(options.enabledPackages) : null;
 
   for (const declaration of imports) {
     const packageName = declaration.packageName;
     const manifest = byName.get(packageName);
     if (!manifest) {
-      const why = disabled.has(packageName)
-        ? "It is disabled in the package toggles."
-        : enabled && !enabled.has(packageName)
-          ? "It is not enabled for this project."
-          : "It is not installed in this project.";
       diagnostics.push({
         code: "E602",
         severity: "error",
-        message: `Cannot import "${packageName}". ${why}`,
+        message: `Cannot import "${packageName}". It is not installed in this project.`,
         line: declaration.span.line,
         column: declaration.span.column,
         length: declaration.span.length,
-        hint: "Enable the package in the package manager or install it in the project.",
+        hint: "Check the package name, or load a local package with --package in the CLI.",
       });
       continue;
-    }
-
-    if (
-      !manifest.recommendedAutoImport &&
-      !unqualifiedPackages.has(packageName)
-    ) {
-      // An explicit import is enough to enable a non-default package.
-      if (!declaration.alias) unqualifiedPackages.add(packageName);
     }
 
     importedPackages.add(packageName);
@@ -678,6 +641,8 @@ export function resolvePackageImports(
         continue;
       }
       aliases.set(declaration.alias, packageName);
+    } else {
+      unqualifiedPackages.add(packageName);
     }
     resolved.push({
       packageName,
@@ -696,6 +661,30 @@ export function resolvePackageImports(
   };
 }
 
+/**
+ * The imported packages plus the dependencies their manifests declare. Package
+ * internals may call those dependencies by name, but only the packages named by
+ * the source are exposed to user code.
+ */
+export function packageClosure(
+  catalog: PackageCatalog,
+  importedPackages: Set<string>,
+): Set<string> {
+  const byName = new Map(catalog.packages.map((manifest) => [manifest.name, manifest]));
+  const closure = new Set<string>();
+  const queue = [...importedPackages];
+  while (queue.length > 0) {
+    const name = queue.pop()!;
+    if (closure.has(name)) continue;
+    closure.add(name);
+    const manifest = byName.get(name);
+    for (const dependency of Object.keys(manifest?.dependencies ?? {})) {
+      if (byName.has(dependency)) queue.push(dependency);
+    }
+  }
+  return closure;
+}
+
 export function findPackageMacro(
   catalog: PackageCatalog,
   name: string,
@@ -703,12 +692,17 @@ export function findPackageMacro(
   return catalog.macros.get(name.toUpperCase());
 }
 
-export function packageCircuitAsts(catalog: PackageCatalog): CircuitAst[] {
-  return catalog.circuits.map((entry) => ({
-    ...entry.ast,
-    packageName: entry.packageName,
-    packageVersion: entry.packageVersion,
-  }));
+export function packageCircuitAsts(
+  catalog: PackageCatalog,
+  packageNames?: Set<string>,
+): CircuitAst[] {
+  return catalog.circuits
+    .filter((entry) => !packageNames || packageNames.has(entry.packageName))
+    .map((entry) => ({
+      ...entry.ast,
+      packageName: entry.packageName,
+      packageVersion: entry.packageVersion,
+    }));
 }
 
 

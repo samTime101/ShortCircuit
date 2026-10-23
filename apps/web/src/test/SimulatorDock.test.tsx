@@ -4,7 +4,10 @@ import userEvent from "@testing-library/user-event";
 import { Simulator, compile } from "@shortcircuit/engine";
 import { SimulatorDock } from "../components/SimulatorDock";
 
-const SOURCE = `CIRCUIT Counter4
+const SOURCE = `IMPORT "@shortcircuit/arithmetic"
+IMPORT "@shortcircuit/selection"
+
+CIRCUIT Counter4
 INPUT clock
 INPUT reset
 STATE count : BUS(4) = 0000
@@ -92,7 +95,9 @@ describe("simulator dock", () => {
   });
 
   it("hides the clock controls for a combinational circuit", () => {
-    const result = compile("CIRCUIT Wire\nINPUT a\nOUTPUT b\nb = NOT(a)\nEND");
+    const result = compile(
+      'IMPORT "@shortcircuit/gates"\nCIRCUIT Wire\nINPUT a\nOUTPUT b\nb = NOT(a)\nEND',
+    );
     const circuit = result.circuits[0]!;
     const simulator = new Simulator(circuit);
     render(

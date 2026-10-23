@@ -28,6 +28,8 @@ The compiler parses and validates the whole file before simulation. A design
 with an error does not produce a partial IR.
 
 ```logicflow
+IMPORT "@shortcircuit/gates"
+
 CIRCUIT HalfAdder
   INPUT a
   INPUT b
@@ -40,7 +42,7 @@ CIRCUIT HalfAdder
 END
 ```
 
-`XOR` and `AND` above are package macros. They expand to NAND and structural
+`XOR` and `AND` above are package macros from the imported gates package. They expand to NAND and structural
 wiring during analysis; they are not extra kernel operations.
 
 ---
@@ -165,20 +167,27 @@ CIRCUIT Panel
 END
 ```
 
-Packages are auto-imported unless their manifest sets
-`recommendedAutoImport: false`. Bundled `@shortcircuit/gates`,
-`@shortcircuit/selection`, `@shortcircuit/arithmetic`, and
-`@shortcircuit/comparison` are auto-imported, and
-custom packages are too unless they opt out.
+Packages are available only when the source imports them. The bundled
+`@shortcircuit/gates`, `@shortcircuit/selection`, `@shortcircuit/arithmetic`,
+and `@shortcircuit/comparison` packages still need an explicit `IMPORT` in
+every file that uses their exports. `recommendedAutoImport` is legacy manifest
+metadata and does not activate a package.
 
-- An explicit import with an alias adds qualified access through that alias.
-- An explicit import without an alias adds unqualified access.
-- The import list is resolved before analysis. A missing, disabled, or
-  not-enabled package is `E602`.
+- An import with an alias adds qualified access through that alias.
+- An import without an alias adds unqualified access.
+- The import list is resolved before analysis. Importing a package that is not
+  installed is `E602`.
 - Reusing one alias for two packages is `E603`.
-- The studio's **Packages** button opens the package manager, where installed
-  packages can be toggled off and on. Hosts can pass the same choices through
-  the `disabledPackages` or `enabledPackages` compile options.
+- Only imported packages expose exports to user circuits. Declared dependencies
+  of an imported package load internally so package implementations can resolve
+  their own calls, but those dependencies do not appear in user completions or
+  become callable from user code.
+- The studio's **Packages** button edits the source `IMPORT` lines directly.
+  Checking a package adds its import and unchecking removes it. There is no
+  separate enabled-package state.
+- Hosts can compile against custom bundles with `packages` and omit the bundled
+  snapshot with `disableDefaultPackages`, but neither option bypasses the
+  source import requirement.
 - Package implementation files are real `.lf` sources. Manifests contain
   catalog metadata and source pointers, not embedded circuit logic.
 
@@ -363,6 +372,9 @@ Bundled packages provide:
   Comparators expose `eq`, `lt`, and `gt`, and exactly one of them is high.
 
 ```logicflow
+IMPORT "@shortcircuit/arithmetic"
+IMPORT "@shortcircuit/selection"
+
 CIRCUIT AddAndSelect
   INPUT a : BUS(8)
   INPUT b : BUS(8)
@@ -615,6 +627,8 @@ Eight-bit comparator. Sets exactly one of eq, lt or gt.
 ### 8.1 Defining and instantiating
 
 ```logicflow
+IMPORT "@shortcircuit/gates"
+
 CIRCUIT HalfAdder
   INPUT a
   INPUT b
@@ -681,6 +695,8 @@ END
 State updates happen only in an `ON` block.
 
 ```logicflow
+IMPORT "@shortcircuit/selection"
+
 CIRCUIT Register8
   INPUT data : BUS(8)
   INPUT clock
@@ -875,6 +891,7 @@ in §7.3 is rewritten in place between the generated markers.
 | Maximum instances per circuit | 500 |
 | Maximum diagnostics collected | 100 |
 
-`compile(source, options)` can tighten or adjust these for a host. Package
-toggles are also supplied through compile options: `enabledPackages`,
-`disabledPackages`, and `disableDefaultPackages`.
+`compile(source, options)` can tighten or adjust these for a host. Hosts can
+supply custom package bundles with `packages` and omit the bundled snapshot
+with `disableDefaultPackages`. Package activation still comes from the source
+`IMPORT` lines.

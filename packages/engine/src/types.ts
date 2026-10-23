@@ -54,18 +54,15 @@ export interface CompileOptions {
   maxDiagnostics?: number;
   /**
    * Additional package manifests to make available to the compiler. The
-   * default package snapshot is included unless disabled below.
+   * default package snapshot is included unless disabled below. Availability
+   * does not activate a package; source code still needs an IMPORT for it.
    */
   packages?: import("./packages").PackageBundle | import("./packages").PackageManifest[];
-  /** Set to true for a NAND-only compile with no bundled packages. */
-  disableDefaultPackages?: boolean;
   /**
-   * If provided, only these packages are loaded. Package names are matched
-   * exactly, for example "@shortcircuit/gates".
+   * Omit the bundled package snapshot. This is a host option for compiling
+   * against an explicit package bundle; it does not disable imports in source.
    */
-  enabledPackages?: string[];
-  /** Packages to hide even when they are bundled or auto-imported. */
-  disabledPackages?: string[];
+  disableDefaultPackages?: boolean;
 }
 
 export interface CircuitInput {

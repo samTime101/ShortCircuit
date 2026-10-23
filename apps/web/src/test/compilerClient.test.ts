@@ -22,7 +22,9 @@ describe("compiler client", () => {
   it("reports diagnostics from a broken source", async () => {
     const client = createCompilerClient();
     try {
-      const result = await client.compile("CIRCUIT Broken\nINPUT a\nx = AND(a, missing)\nEND");
+      const result = await client.compile(
+        'IMPORT "@shortcircuit/gates"\nCIRCUIT Broken\nINPUT a\nx = AND(a, missing)\nEND',
+      );
       expect(result.ok).toBe(false);
       expect(result.diagnostics.some((item) => item.code === "E201")).toBe(true);
     } finally {

@@ -4,7 +4,9 @@ import { compile, Simulator } from "@shortcircuit/engine";
 import { WaveformPanel } from "../components/WaveformPanel";
 import { sampleFromSnapshot, type TraceSample } from "../lib/trace";
 
-const SOURCE = `CIRCUIT Counter4
+const SOURCE = `IMPORT "@shortcircuit/arithmetic"
+
+CIRCUIT Counter4
 INPUT clock
 STATE count : BUS(4) = 0000
 incremented = ADD4(count, 0, 1)

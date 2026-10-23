@@ -45,14 +45,8 @@ export function run(
   }
 
   let packagePaths: string[] | undefined;
-  let enabledPackages: string[] | undefined;
-  let disabledPackages: string[] | undefined;
-  let disableDefaultPackages: boolean;
   try {
     packagePaths = listFlag(parsed.flags, "package");
-    enabledPackages = listFlag(parsed.flags, "only-packages", true);
-    disabledPackages = listFlag(parsed.flags, "disable-package", true);
-    disableDefaultPackages = parsed.flags["no-default-packages"] === true;
   } catch (error) {
     return failure(error instanceof Error ? error.message : String(error));
   }
@@ -62,9 +56,6 @@ export function run(
     circuit: typeof parsed.flags.circuit === "string" ? parsed.flags.circuit : undefined,
     out: typeof parsed.flags.out === "string" ? parsed.flags.out : undefined,
     write: parsed.flags.write === true,
-    disableDefaultPackages,
-    enabledPackages,
-    disabledPackages,
   };
 
   if (parsed.command === "package") {

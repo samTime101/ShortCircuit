@@ -75,16 +75,19 @@ import {
   MIN_SIM_DOCK_HEIGHT,
   clampEditorFontSize,
   clampSimDockHeight,
-  readDisabledPackages,
   readEditorFontSize,
   readMode,
   readSimDockHeight,
-  writeDisabledPackages,
   writeEditorFontSize,
   writeMode,
   writeSimDockHeight,
   type StudioMode,
 } from "./lib/settings";
+import {
+  addPackageImport,
+  readPackageImports,
+  removePackageImport,
+} from "./lib/packageImports";
 
 const STORAGE_KEY = "shortcircuit.source.v1";
 const DISPLAY_STORAGE_KEY = "shortcircuit.displays.v1";
@@ -190,7 +193,6 @@ function Studio({
   const [testResult, setTestResult] = useState<TestRunResult | null>(null);
   const [examplesOpen, setExamplesOpen] = useState(false);
   const [packagesOpen, setPackagesOpen] = useState(false);
-  const [disabledPackages, setDisabledPackages] = useState<string[]>(readDisabledPackages);
   const [toast, setToast] = useState<{ id: number; message: string } | null>(null);
   const [editorMaximized, setEditorMaximized] = useState(false);
   const [editorFontSize, setEditorFontSize] = useState(readEditorFontSize);
@@ -279,11 +281,7 @@ function Studio({
   }, []);
 
   const compileNow = useCallback(
-    (
-      nextSource: string,
-      preferredCircuit?: string,
-      disabledPackageOverride?: string[],
-    ) => {
+    (nextSource: string, preferredCircuit?: string) => {
       if (debounceTimer.current !== null) {
         window.clearTimeout(debounceTimer.current);
         debounceTimer.current = null;
@@ -291,13 +289,11 @@ function Studio({
       lastCompiledSource.current = nextSource;
       const sequence = ++compileSeq.current;
       setCompiling(true);
-      const disabled = disabledPackageOverride ?? disabledPackages;
-      const options = disabled.length > 0 ? { disabledPackages: disabled } : undefined;
 
       // The compiler runs in a worker, so a large design never blocks typing.
       // A result that is older than the newest request is dropped.
       void compiler
-        .compile(nextSource, options)
+        .compile(nextSource)
         .then((next) => {
           if (sequence !== compileSeq.current) return;
 
@@ -336,20 +332,20 @@ function Studio({
           setCompiling(false);
         });
     },
-    [activateCircuit, compiler, disabledPackages],
+    [activateCircuit, compiler],
   );
 
   const togglePackage = useCallback(
-    (name: string, enabled: boolean) => {
-      const next = enabled
-        ? disabledPackages.filter((entry) => entry !== name)
-        : [...disabledPackages, name];
-      setDisabledPackages(next);
-      writeDisabledPackages(next);
-      notify(enabled ? `${name} enabled` : `${name} disabled`);
-      compileNow(source, activeCircuitRef.current, next);
+    (name: string, imported: boolean) => {
+      const next = imported
+        ? addPackageImport(source, name)
+        : removePackageImport(source, name);
+      if (next === source) return;
+      setSource(next);
+      notify(imported ? `${name} imported` : `${name} import removed`);
+      compileNow(next, activeCircuitRef.current);
     },
-    [compileNow, disabledPackages, notify, source],
+    [compileNow, notify, source],
   );
 
   // Compile immediately on mount, then debounce edits.
@@ -474,6 +470,11 @@ function Studio({
 
   const matchingExample = useMemo(
     () => EXAMPLES.find((example) => example.source === source),
+    [source],
+  );
+
+  const importedPackages = useMemo(
+    () => new Set(readPackageImports(source).map((entry) => entry.packageName)),
     [source],
   );
 
@@ -746,7 +747,7 @@ function Studio({
           <button
             className="ghost-button"
             onClick={() => setPackagesOpen(true)}
-            title="Enable or disable installed packages"
+            title="Manage package imports"
           >
             <Cpu size={14} />
             <span className="button-label">Packages</span>
@@ -1109,18 +1110,18 @@ function Studio({
         <Modal
           eyebrow="Package manager"
           title="Installed packages"
-          subtitle="Recommended packages load automatically. Switch one off to remove its exports from compilation; existing imports will report a package diagnostic."
+          subtitle="Packages are available only when the source imports them. Check a package to add its IMPORT line at the top, or clear it to remove the line."
           onClose={() => setPackagesOpen(false)}
         >
           <div className="package-list">
             {DEFAULT_PACKAGE_BUNDLE.packages.map((entry) => {
-              const enabled = !disabledPackages.includes(entry.name);
+              const imported = importedPackages.has(entry.name);
               return (
                 <label className="package-row" key={entry.name}>
                   <input
                     type="checkbox"
                     aria-label={entry.name}
-                    checked={enabled}
+                    checked={imported}
                     onChange={(event) => togglePackage(entry.name, event.target.checked)}
                   />
                   <span className="package-row-text">
@@ -1143,8 +1144,8 @@ function Studio({
             })}
           </div>
           <p className="package-note">
-            Disabling a package can make the current source fail with a package or unknown-name
-            diagnostic. Re-enable it here, or import a different package explicitly.
+            Unimported packages do not affect compilation. Removing an IMPORT line makes that
+            package's exports unavailable until it is imported again.
           </p>
         </Modal>
       ) : null}

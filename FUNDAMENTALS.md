@@ -189,10 +189,10 @@ No `AND`, `OR`, `NOT`, `XOR`, `ADD`, `MUX`, `HALF_ADDER`, or similar builtins.
 - graph and simulator;
 - docs shell;
 - circuit picker;
-- package manager and toggles;
+- package manager that edits source imports;
 - project settings and cache.
 
-The frontend must not contain a hardcoded gate list. It renders whatever the core catalog and enabled packages provide.
+The frontend must not contain a hardcoded gate list. It renders whatever the core catalog and imported packages provide.
 
 ### 4.4 Core documentation
 
@@ -386,7 +386,6 @@ The manifest is the app’s source of truth for docs, autocomplete, hover, group
   "name": "@shortcircuit/gates",
   "version": "1.0.0",
   "engine": "^0.3.0",
-  "recommendedAutoImport": true,
   "exports": [
     {
       "kind": "macro",
@@ -419,9 +418,9 @@ The manifest is the app’s source of truth for docs, autocomplete, hover, group
 }
 ```
 
-The app can build the completions and docs index from manifests plus parsed macro declarations without fetching every circuit source. Source is fetched only when a package is enabled or compiled.
+The app can build the completions and docs index from manifests plus parsed macro declarations without fetching every circuit source. Source is fetched only when a package is imported or compiled.
 
-`recommendedAutoImport` is only a package hint. The app’s default package profile decides what is auto-imported; a package cannot silently add names to every project.
+`recommendedAutoImport` is legacy manifest metadata. It does not activate a package; every source needs an explicit `IMPORT` before a package export is available.
 
 ### 7.4 Macro source format
 
@@ -554,7 +553,7 @@ The package owns its documentation and editor metadata.
 - The app sanitizes Markdown before rendering.
 - The docs page merges:
   - core docs for `NAND`, wiring, buses, state, and imports;
-  - enabled package docs for gates, arithmetic, and other components.
+  - imported package docs for gates, arithmetic, and other components.
 
 No gate-specific docs or completion entries are hardcoded in the web app.
 
@@ -574,16 +573,18 @@ No gate-specific docs or completion entries are hardcoded in the web app.
 
 ## 8. Importing and using packages
 
-### 8.1 Default packages
+### 8.1 Bundled packages
 
-The app bundles two packages for first-run usability:
+The app bundles packages for first-run usability:
 
 - `@shortcircuit/gates`
 - `@shortcircuit/arithmetic` (initially half adder and full adder)
 
-The app's default profile auto-imports them, so the common names are available without an import line:
+Bundled packages are installed, but they are not active until the source imports them:
 
 ```logicflow
+IMPORT "@shortcircuit/arithmetic"
+
 CIRCUIT Main
   INPUT a
   INPUT b
@@ -601,7 +602,7 @@ This is still package-provided. It is not hardcoded.
 
 ### 8.2 Explicit import
 
-Explicit imports are used when a package is not in the default profile, or when you want qualified names even for a default package:
+Every package needs an explicit import. An alias gives qualified names:
 
 ```logicflow
 IMPORT "@shortcircuit/gates" AS Gates
@@ -643,7 +644,8 @@ Import rules:
 - Unqualified exports collide with local circuits or other imports are a compile error.
 - Relative file imports are not part of v1.
 - Circular package dependencies are errors.
-- A missing, disabled, or incompatible package is a compile error with an actionable message.
+- A missing or incompatible package is a compile error with an actionable message.
+- Imported packages plus their declared dependencies load internally, but dependencies do not expose exports to user code.
 
 Version pinning can be added to the import later:
 
@@ -658,6 +660,8 @@ For v1, the project lockfile is the authoritative version record.
 Because gates are macros, they behave like expressions:
 
 ```logicflow
+IMPORT "@shortcircuit/gates"
+
 CIRCUIT Blink
   INPUT a
   INPUT b
@@ -674,6 +678,8 @@ After expansion, this is only NAND nodes.
 A register package can use `STATE` and `MUX` without `IF`:
 
 ```logicflow
+IMPORT "@shortcircuit/selection"
+
 CIRCUIT Register8
   INPUT d : BUS(8)
   INPUT clock
@@ -693,18 +699,20 @@ END
 
 `MUX` is package-provided. The `ON` block is an unconditional next-state assignment.
 
-### 8.5 Toggles
+### 8.5 Imports in the editor
 
-The package manager can enable or disable a package.
+The package manager edits the source `IMPORT` lines. Checking a package adds an
+import; unchecking removes it. The source remains the single source of truth,
+so the same source behaves the same in the studio, CLI, and engine API.
 
-When a package is disabled:
+When a package is not imported:
 
-- its exports disappear from docs and autocomplete;
-- its circuits cannot be imported;
-- auto-imported names produce a clear diagnostic;
+- its exports are absent from completions and hover cards;
+- its circuits cannot be instantiated;
+- using one of its names produces a clear diagnostic;
 - core `NAND` and structural operations remain available.
 
-Toggles are package-level in v1. Per-export toggles can be added later.
+Imports are file-level in v1. Per-export opt-in can be added later.
 
 ---
 
@@ -752,7 +760,7 @@ The IR remains the contract. Every view consumes the lowered IR, not package sou
 | `packages/engine/src/types.ts` | Bump the language/IR schema and remove obsolete node kinds. |
 | `packages/engine/src/snippets.ts` | Keep language-level snippets, remove removed features, move gate/circuit snippets to packages. |
 | `packages/engine/src/index.ts` | Stop exporting intrinsic circuits; export package/catalog types instead. |
-| `apps/web/src/editor/completions.ts` | Build completions from core metadata plus the enabled package catalog. |
+| `apps/web/src/editor/completions.ts` | Build completions from core metadata plus the imported package catalog. |
 | `apps/web/src/editor/hover.ts` | Resolve hover cards through the catalog, not hardcoded gate arrays. |
 | `apps/web/src/editor/logicFlowLanguage.ts` | Remove hardcoded `HALF_ADDER`/`FULL_ADDER` and other package names. |
 | `apps/web/src/editor/logicFlowHighlight.ts` | Highlight core syntax; package names can be added from loaded manifests later. |
@@ -799,7 +807,7 @@ The IR remains the contract. Every view consumes the lowered IR, not package sou
 
 - Move arithmetic, comparisons, muxes, decoders, encoders, and sequential packages.
 - Move the example catalog.
-- Add package toggles.
+- Add source imports for package activation.
 - Keep a small offline starter example in the app.
 
 ### Stage 6: Clean up
@@ -864,7 +872,7 @@ The package format and macro expander leave room for these later without changin
 - **Packages:** every derived gate, every composite circuit, and all of their docs, examples, tests, and autocomplete metadata.
 - **Language cut:** no `FOR`, `CONST`, user generics, or `IF`; add them back only if users need them.
 - **Package contract:** static registry, versioned manifests, declarative macros, `.lf` circuit sources, docs, and tests.
-- **Default experience:** bundle `gates` and `arithmetic` as auto-imported packages; disable them in the package manager if desired.
+- **Default experience:** bundle `gates` and `arithmetic`, and require an explicit `IMPORT` before their exports are available. The package manager edits those imports.
 
 The one-sentence version:
 
