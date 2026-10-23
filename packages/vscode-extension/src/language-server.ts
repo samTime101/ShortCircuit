@@ -13,10 +13,13 @@ import {
   MarkupContent,
   Range,
   DidChangeConfigurationNotification,
-  HoverParams
+  HoverParams,
+  CompletionParams
 } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
+import { fileURLToPath } from "url";
 import { compile, type Diagnostic as EngineDiagnostic } from "@shortcircuit/engine";
+import { resolveWorkspaceContext, invalidatePackageCache } from "./packageResolver";
 
 const connection = createConnection(ProposedFeatures.all);
 const documents = new TextDocuments(TextDocument);
@@ -71,6 +74,12 @@ connection.onDidChangeConfiguration(() => {
   if (hasConfigurationCapability) {
     documentSettings.clear();
   }
+  invalidatePackageCache();
+  documents.all().forEach(validateTextDocument);
+});
+
+connection.onDidChangeWatchedFiles(() => {
+  invalidatePackageCache();
   documents.all().forEach(validateTextDocument);
 });
 
@@ -78,11 +87,23 @@ documents.onDidChangeContent(change => {
   validateTextDocument(change.document);
 });
 
+function uriToPath(uri: string): string {
+  try {
+    return fileURLToPath(uri);
+  } catch {
+    return uri.replace(/^file:\/\//, "");
+  }
+}
+
 async function validateTextDocument(textDocument: TextDocument): Promise<void> {
   const source = textDocument.getText();
+  const filePath = uriToPath(textDocument.uri);
 
   try {
+    const wsContext = resolveWorkspaceContext(filePath, source);
     const result = compile(source, {
+      packages: wsContext.bundle,
+      implicitImports: wsContext.implicitImports,
       maxDiagnostics: 100
     });
 
@@ -120,9 +141,12 @@ function convertDiagnostic(d: EngineDiagnostic): Diagnostic {
   };
 }
 
-connection.onCompletion(async (): Promise<CompletionItem[]> => {
+connection.onCompletion(async (params: CompletionParams): Promise<CompletionItem[]> => {
   try {
     const items: CompletionItem[] = [];
+    const document = documents.get(params.textDocument.uri);
+    const filePath = document ? uriToPath(document.uri) : "";
+    const wsContext = filePath ? resolveWorkspaceContext(filePath) : null;
 
     const builtins = [
       "NAND", "NOR", "AND", "OR", "XOR", "XNOR", "NOT", "BUF", "BUFFER",
@@ -149,6 +173,28 @@ connection.onCompletion(async (): Promise<CompletionItem[]> => {
       });
     }
 
+    // Add components from workspace packages
+    if (wsContext) {
+      for (const pkg of wsContext.bundle.packages) {
+        // Suggest package imports: import "@package/name"
+        items.push({
+          label: `"${pkg.name}"`,
+          kind: CompletionItemKind.Module,
+          detail: `Short Circuit Package (${pkg.version})`
+        });
+
+        // Suggest exports
+        for (const exp of pkg.exports) {
+          items.push({
+            label: exp.name,
+            kind: exp.kind === "macro" ? CompletionItemKind.Snippet : CompletionItemKind.Class,
+            detail: `${exp.name} (${pkg.name})`,
+            documentation: exp.summary
+          });
+        }
+      }
+    }
+
     return items;
   } catch {
     return [];
@@ -160,11 +206,16 @@ connection.onHover(async (params: HoverParams): Promise<Hover | null> => {
   if (!document) return null;
 
   const source = document.getText();
+  const filePath = uriToPath(document.uri);
   const position = params.position;
   const line = source.split("\n")[position.line] || "";
 
   try {
-    const result = compile(source);
+    const wsContext = resolveWorkspaceContext(filePath, source);
+    const result = compile(source, {
+      packages: wsContext.bundle,
+      implicitImports: wsContext.implicitImports
+    });
 
     // Check circuit declaration or reference
     for (const circuit of result.circuits) {
@@ -181,6 +232,31 @@ connection.onHover(async (params: HoverParams): Promise<Hover | null> => {
             value: `**${circuit.name}** — Digital Circuit\n\n- **Inputs:** \`${inps || "none"}\`\n- **Outputs:** \`${outs || "none"}\`\n- **Stats:** ${circuit.stats.nodes} nodes, ${circuit.stats.maxDepth} depth`
           };
           return { contents };
+        }
+      }
+    }
+
+    // Check package exports
+    for (const pkg of wsContext.bundle.packages) {
+      for (const exp of pkg.exports) {
+        const regex = new RegExp(`\\b${exp.name}\\b`, "i");
+        const match = regex.exec(line);
+        if (match) {
+          const start = match.index;
+          const end = start + match[0].length;
+          if (position.character >= start && position.character <= end) {
+            let portInfo = "";
+            if (exp.kind === "circuit" && exp.ports) {
+              const inps = exp.ports.inputs?.map(i => `${i.name}: ${i.width}b`).join(", ") ?? "";
+              const outs = exp.ports.outputs?.map(o => `${o.name}: ${o.width}b`).join(", ") ?? "";
+              portInfo = `\n\n- **Inputs:** \`${inps || "none"}\`\n- **Outputs:** \`${outs || "none"}\``;
+            }
+            const contents: MarkupContent = {
+              kind: "markdown",
+              value: `**${exp.name}** (${pkg.name})\n\n${exp.summary ?? ""}${portInfo}`
+            };
+            return { contents };
+          }
         }
       }
     }

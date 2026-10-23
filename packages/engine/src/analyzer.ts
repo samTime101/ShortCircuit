@@ -158,6 +158,7 @@ const DEFAULT_OPTIONS: Required<CompileOptions> = {
   packages: [],
   defaultPackages: { schema: "shortcircuit.packages/v1", packages: [] },
   disableDefaultPackages: false,
+  implicitImports: [],
 };
 
 const EMPTY_IMPORT_RESOLUTION: ImportResolution = {

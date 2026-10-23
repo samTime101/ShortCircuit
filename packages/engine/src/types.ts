@@ -68,6 +68,12 @@ export interface CompileOptions {
    * against an explicit package bundle; it does not disable imports in source.
    */
   disableDefaultPackages?: boolean;
+  /**
+   * Packages to treat as implicitly imported without requiring an explicit
+   * IMPORT in the source text. Used when compiling files inside a package so
+   * that sibling package exports resolve automatically.
+   */
+  implicitImports?: string[];
 }
 
 export interface CircuitInput {

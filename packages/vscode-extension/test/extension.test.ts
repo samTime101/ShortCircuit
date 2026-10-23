@@ -5,6 +5,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { buildLayout } from "../src/graphLayout";
 import { getStudioHtml, type StudioModel } from "../src/studioHtml";
+import { resolveWorkspaceContext } from "../src/packageResolver";
 
 /** Converts Oniguruma regex pattern with (?i) to JS RegExp with 'i' flag for testing */
 function toJsRegex(pattern: string): RegExp {
@@ -296,5 +297,113 @@ describe("Bundle Integrity", () => {
     // Should be CommonJS (not raw ESM import * as vscode)
     expect(extContent).toContain("module.exports");
     expect(extContent).not.toMatch(/^import\s+\*\s+as\s+vscode/m);
+  });
+});
+
+describe("Package Resolution (Intra-Package & Local Packages)", () => {
+  it("resolves intra-package sibling exports without self-imports (add4 in arithmetic)", () => {
+    const add4Path = path.resolve(
+      __dirname,
+      "../../../vendor/ShortCircuit-Packages/packages/arithmetic/circuits/add4/circuit.lf"
+    );
+    expect(fs.existsSync(add4Path)).toBe(true);
+
+    const source = fs.readFileSync(add4Path, "utf-8");
+    const context = resolveWorkspaceContext(add4Path, source);
+
+    expect(context.packageRoot).toBeDefined();
+    expect(context.enclosingPackageName).toBe("@shortcircuit/arithmetic");
+    expect(context.implicitImports).toContain("@shortcircuit/arithmetic");
+    expect(context.implicitImports).toContain("@shortcircuit/gates");
+
+    // Compiling with resolved context should produce 0 errors
+    const result = compileWithPackages(source, {
+      packages: context.bundle,
+      implicitImports: context.implicitImports,
+    });
+
+    const errors = result.diagnostics.filter((d) => d.severity === "error");
+    expect(errors).toHaveLength(0);
+    expect(result.circuits.some((c) => c.name === "ADD4")).toBe(true);
+  });
+
+  it("resolves local packages in packages/ directory from project root", () => {
+    // Create temporary workspace structure
+    const tempDir = path.join(__dirname, "temp-test-project");
+    const localPkgDir = path.join(tempDir, "packages", "custom-adder");
+    const localCircuitsDir = path.join(localPkgDir, "circuits", "adder");
+    const srcDir = path.join(tempDir, "src");
+
+    try {
+      fs.mkdirSync(localCircuitsDir, { recursive: true });
+      fs.mkdirSync(srcDir, { recursive: true });
+
+      // Package manifest
+      fs.writeFileSync(
+        path.join(localPkgDir, "manifest.json"),
+        JSON.stringify(
+          {
+            schema: "shortcircuit.package/v1",
+            name: "@local/custom-adder",
+            version: "0.1.0",
+            exports: [
+              {
+                kind: "circuit",
+                name: "MY_ADDER",
+                source: "circuits/adder/circuit.lf",
+              },
+            ],
+          },
+          null,
+          2
+        )
+      );
+
+      // Package circuit source
+      fs.writeFileSync(
+        path.join(localCircuitsDir, "circuit.lf"),
+        `CIRCUIT MY_ADDER\n  INPUT a\n  INPUT b\n  out = XOR(a, b)\n  OUTPUT out\nEND`
+      );
+
+      // Project manifest
+      fs.writeFileSync(
+        path.join(tempDir, "shortcircuit.json"),
+        JSON.stringify(
+          {
+            schema: "shortcircuit.project/v1",
+            dependencies: {
+              "@local/custom-adder": "path:packages/custom-adder",
+            },
+          },
+          null,
+          2
+        )
+      );
+
+      // Project source file importing the local package
+      const mainPath = path.join(srcDir, "main.lf");
+      const mainSource = `IMPORT "@local/custom-adder"\nCIRCUIT Top\n  INPUT x\n  INPUT y\n  res = MY_ADDER(x, y)\n  OUTPUT res.out\nEND`;
+      fs.writeFileSync(mainPath, mainSource);
+
+      const context = resolveWorkspaceContext(mainPath, mainSource);
+      expect(context.projectRoot).toBe(tempDir);
+      expect(context.bundle.packages.some((p) => p.name === "@local/custom-adder")).toBe(true);
+
+      const result = compileWithPackages(mainSource, {
+        packages: context.bundle,
+        implicitImports: context.implicitImports,
+      });
+
+      const errors = result.diagnostics.filter((d) => d.severity === "error");
+      expect(errors).toHaveLength(0);
+      expect(result.circuits.some((c) => c.name === "Top")).toBe(true);
+    } finally {
+      // Clean up
+      try {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
   });
 });

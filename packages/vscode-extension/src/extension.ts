@@ -16,6 +16,7 @@ import {
 } from "@shortcircuit/engine";
 import { buildLayout, type GraphLayout } from "./graphLayout";
 import { getStudioHtml, type StudioModel, type StudioCircuitData } from "./studioHtml";
+import { resolveWorkspaceContext, invalidatePackageCache } from "./packageResolver";
 
 let client: LanguageClient | undefined;
 let studioProvider: ShortCircuitStudioProvider | undefined;
@@ -36,7 +37,12 @@ export function activate(context: vscode.ExtensionContext): void {
     const clientOptions: LanguageClientOptions = {
       documentSelector: [{ scheme: "file", language: "logicflow" }],
       synchronize: {
-        fileEvents: vscode.workspace.createFileSystemWatcher("**/*.lf"),
+        fileEvents: [
+          vscode.workspace.createFileSystemWatcher("**/*.lf"),
+          vscode.workspace.createFileSystemWatcher("**/manifest.json"),
+          vscode.workspace.createFileSystemWatcher("**/shortcircuit.json"),
+          vscode.workspace.createFileSystemWatcher("**/shortcircuit.lock.json"),
+        ],
         configurationSection: "shortcircuit"
       },
       outputChannelName: "Short Circuit",
@@ -134,7 +140,14 @@ export function activate(context: vscode.ExtensionContext): void {
   let debounceTimer: NodeJS.Timeout | undefined;
   context.subscriptions.push(
     vscode.workspace.onDidChangeTextDocument((event) => {
-      if (event.document.languageId === "logicflow") {
+      const fileName = event.document.fileName;
+      if (fileName.endsWith("manifest.json") || fileName.endsWith("shortcircuit.json")) {
+        invalidatePackageCache();
+        const editor = vscode.window.activeTextEditor;
+        if (editor && editor.document.languageId === "logicflow") {
+          studioProvider?.updateForDocument(editor.document);
+        }
+      } else if (event.document.languageId === "logicflow") {
         if (debounceTimer) clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => {
           studioProvider?.updateForDocument(event.document);
@@ -237,7 +250,12 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
 
   private recompileAndBroadcast(source: string): void {
     try {
-      const result = compile(source);
+      const filePath = this.currentDocument?.fileName || "";
+      const wsContext = filePath ? resolveWorkspaceContext(filePath, source) : null;
+      const result = compile(source, {
+        packages: wsContext?.bundle,
+        implicitImports: wsContext?.implicitImports,
+      });
 
       if (result.circuits.length === 0) {
         this.lastModel = {

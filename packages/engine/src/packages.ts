@@ -559,16 +559,20 @@ function normalizeBundle(input?: PackageBundle | PackageManifest[]): PackageBund
 
 /** Merge the host-provided default package snapshot with any explicit packages. */
 export function resolvePackageBundle(options: CompileOptions): PackageBundle {
-  const bundles: PackageBundle[] = [];
+  const map = new Map<string, PackageManifest>();
   if (!options.disableDefaultPackages && options.defaultPackages) {
-    bundles.push(options.defaultPackages);
+    for (const pkg of options.defaultPackages.packages) {
+      map.set(pkg.name, pkg);
+    }
   }
   const custom = normalizeBundle(options.packages);
-  if (custom.packages.length > 0) bundles.push(custom);
+  for (const pkg of custom.packages) {
+    map.set(pkg.name, pkg);
+  }
 
   return {
     schema: "shortcircuit.packages/v1",
-    packages: bundles.flatMap((bundle) => bundle.packages),
+    packages: Array.from(map.values()),
   };
 }
 

@@ -19,7 +19,7 @@ export {
 } from "./defaultPackages";
 
 function withDefaultPackages(options: CompileOptions): CompileOptions {
-  if (options.disableDefaultPackages || options.defaultPackages) return options;
+  if (options.disableDefaultPackages || options.defaultPackages || options.packages) return options;
   return { ...options, defaultPackages: DEFAULT_PACKAGE_BUNDLE };
 }
 

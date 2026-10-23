@@ -25,6 +25,12 @@ export function compile(source: string, options: CompileOptions = {}): CompileRe
     const bundle = resolvePackageBundle(options);
     const packageCatalog = createPackageCatalog([bundle]);
     const importResolution = resolvePackageImports(packageCatalog, program.imports);
+    if (options.implicitImports) {
+      for (const name of options.implicitImports) {
+        importResolution.importedPackages.add(name);
+        importResolution.unqualifiedPackages.add(name);
+      }
+    }
     // Package circuits are appended after the user's circuits so the first
     // circuit in the result is still the one the user wrote. Only imported
     // packages and their declared dependencies take part in the compilation.
