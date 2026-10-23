@@ -11,21 +11,18 @@ import {
   CompletionItemKind,
   Hover,
   MarkupContent,
-  Position,
   Range,
   DidChangeConfigurationNotification,
-  CompletionParams,
   HoverParams
 } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
-import { compileCore, type CompileResult, type Diagnostic as EngineDiagnostic } from "@shortcircuit/engine/core";
+import { compile, type Diagnostic as EngineDiagnostic } from "@shortcircuit/engine";
 
 const connection = createConnection(ProposedFeatures.all);
 const documents = new TextDocuments(TextDocument);
 
 let hasConfigurationCapability = false;
 let hasWorkspaceFolderCapability = false;
-let hasDiagnosticRelatedInformationCapability = false;
 
 connection.onInitialize((params: InitializeParams) => {
   const capabilities = params.capabilities;
@@ -35,24 +32,15 @@ connection.onInitialize((params: InitializeParams) => {
   hasWorkspaceFolderCapability = !!(
     capabilities.workspace && !!capabilities.workspace.workspaceFolders
   );
-  hasDiagnosticRelatedInformationCapability = !!(
-    capabilities.textDocument &&
-    capabilities.textDocument.publishDiagnostics &&
-    capabilities.textDocument.publishDiagnostics.relatedInformation
-  );
 
   const result: InitializeResult = {
     capabilities: {
       textDocumentSync: TextDocumentSyncKind.Incremental,
       completionProvider: {
         resolveProvider: true,
-        triggerCharacters: [".", "(", "@"]
+        triggerCharacters: [".", "(", "@", "\""]
       },
       hoverProvider: true,
-      diagnosticProvider: {
-        interFileDependencies: true,
-        workspaceDiagnostics: false
-      }
     }
   };
   if (hasWorkspaceFolderCapability) {
@@ -77,45 +65,24 @@ interface ShortCircuitSettings {
 }
 
 let globalSettings: ShortCircuitSettings = { enablePreview: true };
-let documentSettings: Map<string, Thenable<ShortCircuitSettings>> = new Map();
+const documentSettings: Map<string, Thenable<ShortCircuitSettings>> = new Map();
 
-connection.onDidChangeConfiguration(change => {
+connection.onDidChangeConfiguration(() => {
   if (hasConfigurationCapability) {
     documentSettings.clear();
-  } else {
-    globalSettings = <ShortCircuitSettings>(
-      (change.settings.shortcircuit || {})
-    );
   }
   documents.all().forEach(validateTextDocument);
 });
-
-function getDocumentSettings(resource: string): Thenable<ShortCircuitSettings> {
-  if (!hasConfigurationCapability) {
-    return Promise.resolve(globalSettings);
-  }
-  let result = documentSettings.get(resource);
-  if (!result) {
-    result = connection.workspace.getConfiguration({
-      scopeUri: resource,
-      section: "shortcircuit"
-    });
-    documentSettings.set(resource, result);
-  }
-  return result;
-}
 
 documents.onDidChangeContent(change => {
   validateTextDocument(change.document);
 });
 
 async function validateTextDocument(textDocument: TextDocument): Promise<void> {
-  const settings = await getDocumentSettings(textDocument.uri);
   const source = textDocument.getText();
 
   try {
-    const result = compileCore(source, {
-      disableDefaultPackages: true,
+    const result = compile(source, {
       maxDiagnostics: 100
     });
 
@@ -133,11 +100,14 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 }
 
 function convertDiagnostic(d: EngineDiagnostic): Diagnostic {
+  const startCol = Math.max(0, (d.column ?? 1) - 1);
+  const startLine = Math.max(0, (d.line ?? 1) - 1);
+  const length = Math.max(1, d.length ?? 1);
   const range = Range.create(
-    d.line - 1,
-    d.column - 1,
-    d.line - 1,
-    (d.column - 1) + (d.length ?? 1)
+    startLine,
+    startCol,
+    startLine,
+    startCol + length
   );
   return {
     severity: d.severity === "error" ? DiagnosticSeverity.Error :
@@ -154,16 +124,24 @@ connection.onCompletion(async (): Promise<CompletionItem[]> => {
   try {
     const items: CompletionItem[] = [];
 
-    const builtins = ["NAND", "NOR", "AND", "OR", "XOR", "XNOR", "NOT", "BUF"];
+    const builtins = [
+      "NAND", "NOR", "AND", "OR", "XOR", "XNOR", "NOT", "BUF", "BUFFER",
+      "MUX", "CONCAT", "BROADCAST", "SLICE", "ZEXT", "SEXT", "REPEAT", "REVERSE",
+      "HALF_ADDER", "FULL_ADDER", "ADD4", "ADD8"
+    ];
     for (const b of builtins) {
       items.push({
         label: b,
         kind: CompletionItemKind.Function,
-        detail: "Built-in gate"
+        detail: "Built-in component"
       });
     }
 
-    const keywords = ["CIRCUIT", "MACRO", "INPUT", "OUTPUT", "BODY", "END", "TEST", "CASE", "EXPECT", "IMPORT", "AS", "WIDTH"];
+    const keywords = [
+      "circuit", "macro", "input", "output", "end", "body", "state", "const",
+      "import", "as", "test", "case", "expect", "load", "step", "cycle",
+      "on", "rising_edge", "falling_edge", "bus"
+    ];
     for (const k of keywords) {
       items.push({
         label: k,
@@ -183,36 +161,44 @@ connection.onHover(async (params: HoverParams): Promise<Hover | null> => {
 
   const source = document.getText();
   const position = params.position;
-  const offset = document.offsetAt(position);
+  const line = source.split("\n")[position.line] || "";
 
   try {
-    const result = compileCore(source, { disableDefaultPackages: true });
+    const result = compile(source);
 
-    // Check built-in gates
-    const builtins = ["NAND", "NOR", "AND", "OR", "XOR", "XNOR", "NOT", "BUF"];
-    for (const b of builtins) {
-      const index = source.indexOf(b);
-      if (index !== -1 && offset >= index && offset <= index + b.length) {
-        const contents: MarkupContent = {
-          kind: "markdown",
-          value: `**${b}** — Built-in gate`
-        };
-        return { contents, range: Range.create(document.positionAt(index), document.positionAt(index + b.length)) };
+    // Check circuit declaration or reference
+    for (const circuit of result.circuits) {
+      const regex = new RegExp(`\\b${circuit.name}\\b`, "i");
+      const match = regex.exec(line);
+      if (match) {
+        const start = match.index;
+        const end = start + match[0].length;
+        if (position.character >= start && position.character <= end) {
+          const inps = circuit.inputs.map(i => `${i.name}: ${i.width}b`).join(", ");
+          const outs = circuit.outputs.map(o => `${o.name}: ${o.width}b`).join(", ");
+          const contents: MarkupContent = {
+            kind: "markdown",
+            value: `**${circuit.name}** — Digital Circuit\n\n- **Inputs:** \`${inps || "none"}\`\n- **Outputs:** \`${outs || "none"}\`\n- **Stats:** ${circuit.stats.nodes} nodes, ${circuit.stats.maxDepth} depth`
+          };
+          return { contents };
+        }
       }
     }
 
-    // Check user-defined circuits/macros from the compiled result
-    for (const circuit of result.circuits) {
-      const index = source.indexOf(circuit.name);
-      if (index !== -1) {
-        const start = index;
-        const end = index + circuit.name.length;
-        if (offset >= start && offset <= end) {
+    // Check built-in functions
+    const builtins = ["NAND", "NOR", "AND", "OR", "XOR", "XNOR", "NOT", "BUF", "BUFFER", "MUX", "CONCAT", "BROADCAST", "SLICE", "ZEXT", "SEXT", "REPEAT", "REVERSE"];
+    for (const b of builtins) {
+      const regex = new RegExp(`\\b${b}\\b`, "i");
+      const match = regex.exec(line);
+      if (match) {
+        const start = match.index;
+        const end = start + match[0].length;
+        if (position.character >= start && position.character <= end) {
           const contents: MarkupContent = {
             kind: "markdown",
-            value: `**${circuit.name}** — Circuit\n\nInputs: ${circuit.inputs.map(i => i.name).join(", ")}\nOutputs: ${circuit.outputs.map(o => o.name).join(", ")}`
+            value: `**${b}** — Short Circuit Built-in Component`
           };
-          return { contents, range: Range.create(document.positionAt(start), document.positionAt(end)) };
+          return { contents };
         }
       }
     }

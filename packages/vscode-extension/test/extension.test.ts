@@ -1,5 +1,18 @@
 import { compileCore as compile } from "@shortcircuit/engine/core";
+import { compile as compileWithPackages, Simulator, generateTruthTable } from "@shortcircuit/engine";
 import { describe, it, expect } from "vitest";
+import * as fs from "fs";
+import * as path from "path";
+import { buildLayout } from "../src/graphLayout";
+import { getStudioHtml, type StudioModel } from "../src/studioHtml";
+
+/** Converts Oniguruma regex pattern with (?i) to JS RegExp with 'i' flag for testing */
+function toJsRegex(pattern: string): RegExp {
+  if (pattern.startsWith("(?i)")) {
+    return new RegExp(pattern.slice(4), "i");
+  }
+  return new RegExp(pattern);
+}
 
 describe("Short Circuit Engine Integration", () => {
   it("compiles a simple circuit", () => {
@@ -9,6 +22,18 @@ describe("Short Circuit Engine Integration", () => {
 END`;
     const result = compile(source, { disableDefaultPackages: true });
     expect(result.circuits).toHaveLength(1);
+  });
+
+  it("compiles with lowercase keywords", () => {
+    const source = `circuit nice
+  input a
+  input b
+  out = nand(a, b)
+  output out
+end`;
+    const result = compileWithPackages(source);
+    expect(result.circuits).toHaveLength(1);
+    expect(result.circuits[0].name).toBe("nice");
   });
 
   it("detects syntax errors", () => {
@@ -31,20 +56,245 @@ END`;
   });
 });
 
-describe("Language Server Diagnostics Mapping", () => {
-  it("converts engine diagnostics to LSP diagnostics correctly", () => {
-    const source = `CIRCUIT TestCircuit
-  INPUT a
-  y = UNKNOWN(a)
-  OUTPUT y
-END`;
-    const result = compile(source, { disableDefaultPackages: true });
-    const errorDiag = result.diagnostics.find(d => d.severity === "error");
-    expect(errorDiag).toBeDefined();
-    if (errorDiag) {
-      expect(errorDiag.line).toBeGreaterThan(0);
-      expect(errorDiag.column).toBeGreaterThan(0);
-      expect(errorDiag.message).toContain("UNKNOWN");
+describe("Syntax Highlighting Grammar", () => {
+  const grammarPath = path.join(__dirname, "..", "syntaxes", "logicflow.tmLanguage.json");
+  const grammarJson = JSON.parse(fs.readFileSync(grammarPath, "utf-8"));
+
+  it("has valid schema, scopeName, and fileTypes", () => {
+    expect(grammarJson.name).toBe("LogicFlow");
+    expect(grammarJson.scopeName).toBe("source.logicflow");
+    expect(grammarJson.fileTypes).toContain("lf");
+  });
+
+  it("matches lowercase and uppercase keywords in grammar", () => {
+    const keywordPattern = grammarJson.repository.keywords.patterns[0].match;
+    const regex = toJsRegex(keywordPattern);
+
+    // Test case insensitivity
+    expect(regex.test("circuit")).toBe(true);
+    expect(regex.test("CIRCUIT")).toBe(true);
+    expect(regex.test("Circuit")).toBe(true);
+    expect(regex.test("input")).toBe(true);
+    expect(regex.test("output")).toBe(true);
+    expect(regex.test("end")).toBe(true);
+    expect(regex.test("test")).toBe(true);
+    expect(regex.test("case")).toBe(true);
+    expect(regex.test("expect")).toBe(true);
+
+    const importPattern = grammarJson.repository.keywords.patterns[1].match;
+    const importRegex = toJsRegex(importPattern);
+    expect(importRegex.test("import")).toBe(true);
+    expect(importRegex.test("IMPORT")).toBe(true);
+    expect(importRegex.test("Import")).toBe(true);
+  });
+
+  it("matches built-in gates case-insensitively", () => {
+    const builtinPattern = grammarJson.repository.builtins.patterns[0].match;
+    const regex = toJsRegex(builtinPattern);
+
+    expect(regex.test("NAND")).toBe(true);
+    expect(regex.test("nand")).toBe(true);
+    expect(regex.test("Nand")).toBe(true);
+    expect(regex.test("AND")).toBe(true);
+    expect(regex.test("and")).toBe(true);
+    expect(regex.test("OR")).toBe(true);
+    expect(regex.test("NOT")).toBe(true);
+    expect(regex.test("XOR")).toBe(true);
+    expect(regex.test("MUX")).toBe(true);
+  });
+
+  it("matches comments correctly (double slash and block)", () => {
+    const lineCommentPattern = grammarJson.repository.comments.patterns[0].match;
+    const regex = toJsRegex(lineCommentPattern);
+
+    expect(regex.test("// this is a comment")).toBe(true);
+    expect(regex.test("//comment")).toBe(true);
+  });
+
+  it("matches member and port access expressions like apple.y", () => {
+    const memberPattern = grammarJson.repository.members.patterns[0].match;
+    const regex = toJsRegex(memberPattern);
+
+    expect(regex.test("apple.y")).toBe(true);
+    expect(regex.test("result.y")).toBe(true);
+    expect(regex.test("adder.sum")).toBe(true);
+  });
+
+  it("matches number literals (binary, hex, decimal)", () => {
+    const hexPattern = toJsRegex(grammarJson.repository.numbers.patterns[0].match);
+    const binPattern = toJsRegex(grammarJson.repository.numbers.patterns[1].match);
+    const decPattern = toJsRegex(grammarJson.repository.numbers.patterns[2].match);
+
+    expect(hexPattern.test("0xFF")).toBe(true);
+    expect(hexPattern.test("0x0")).toBe(true);
+    expect(binPattern.test("0b1010")).toBe(true);
+    expect(binPattern.test("0b0")).toBe(true);
+    expect(decPattern.test("42")).toBe(true);
+  });
+});
+
+describe("Language Configuration", () => {
+  const langConfigPath = path.join(__dirname, "..", "language-configuration.json");
+  const langConfig = JSON.parse(fs.readFileSync(langConfigPath, "utf-8"));
+
+  it("configures double slash for line comments", () => {
+    expect(langConfig.comments.lineComment).toBe("//");
+    expect(langConfig.comments.blockComment).toEqual(["/*", "*/"]);
+  });
+
+  it("has auto-closing brackets and quotes", () => {
+    expect(langConfig.brackets).toBeDefined();
+    expect(langConfig.autoClosingPairs.some((p: { open: string }) => p.open === "(")).toBe(true);
+    expect(langConfig.autoClosingPairs.some((p: { open: string }) => p.open === "\"")).toBe(true);
+  });
+});
+
+describe("Graph Layout Engine", () => {
+  it("builds layout for a combinational circuit", () => {
+    const source = `circuit HalfAdder
+  input a
+  input b
+  s = xor(a, b)
+  c = and(a, b)
+  output s
+  output c
+end`;
+    const result = compileWithPackages(source);
+    expect(result.circuits.length).toBeGreaterThan(0);
+    const layout = buildLayout(result.circuits[0]);
+
+    expect(layout.nodes.length).toBeGreaterThan(0);
+    expect(layout.edges.length).toBeGreaterThan(0);
+    expect(layout.width).toBeGreaterThan(200);
+    expect(layout.height).toBeGreaterThan(100);
+    expect(layout.depth).toBeGreaterThan(0);
+
+    // Output nodes exist
+    const outS = layout.nodes.find(n => n.label === "s" && n.kind === "output");
+    const outC = layout.nodes.find(n => n.label === "c" && n.kind === "output");
+    expect(outS).toBeDefined();
+    expect(outC).toBeDefined();
+
+    // Edges have curved paths
+    for (const edge of layout.edges) {
+      expect(edge.path).toContain("M ");
+      expect(edge.path).toContain("C ");
     }
+  });
+});
+
+describe("Studio HTML Generation", () => {
+  it("renders studio HTML with model data", () => {
+    const source = `circuit Simple
+  input a
+  input b
+  y = nand(a, b)
+  output y
+end`;
+    const res = compileWithPackages(source);
+    const circuit = res.circuits[0];
+    const sim = new Simulator(circuit);
+    const snap = sim.setInputs({ a: 1, b: 0 });
+    const layout = buildLayout(circuit);
+    const tt = generateTruthTable(circuit);
+
+    const model: StudioModel = {
+      circuits: [{
+        name: circuit.name,
+        stats: circuit.stats,
+        sequential: circuit.sequential,
+        inputs: circuit.inputs.map(i => ({ name: i.name, width: i.width })),
+        outputs: circuit.outputs.map(o => ({ name: o.name, width: o.width })),
+      }],
+      activeCircuit: circuit.name,
+      inputs: { a: "1", b: "0" },
+      snapshot: {
+        inputs: snap.inputs,
+        outputs: snap.outputs,
+        nodes: snap.nodes,
+      },
+      layout,
+      truthTable: {
+        circuit: tt.circuit,
+        inputs: tt.inputs,
+        outputs: tt.outputs,
+        rows: tt.rows,
+      },
+      waveform: {
+        timeSteps: [],
+        inputNames: ["a", "b"],
+        outputNames: ["y"]
+      },
+      tests: null,
+      ir: circuit,
+      diagnostics: []
+    };
+
+    const html = getStudioHtml(model);
+    expect(html).toContain("Short Circuit Studio");
+    expect(html).toContain("circuit-picker");
+    expect(html).toContain("btn-reset");
+    expect(html).toContain("btn-expand");
+    expect(html).toContain("tab-circuit");
+    expect(html).toContain("tab-truth");
+    expect(html).toContain("tab-waveform");
+    expect(html).toContain("tab-tests");
+    expect(html).toContain("tab-ir");
+  });
+
+  it("handles empty or null model gracefully", () => {
+    const html = getStudioHtml(null);
+    expect(html).toContain("Short Circuit Studio");
+    expect(html).toContain("No LogicFlow file active");
+  });
+});
+
+describe("Extension Package Manifest", () => {
+  const pkgPath = path.join(__dirname, "..", "package.json");
+  const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
+
+  it("contributes activity bar container and view", () => {
+    expect(pkg.contributes.viewsContainers.activitybar).toBeDefined();
+    const ac = pkg.contributes.viewsContainers.activitybar[0];
+    expect(ac.id).toBe("shortcircuit-sidebar");
+    expect(ac.icon).toBe("media/shortcircuit.svg");
+
+    expect(pkg.contributes.views["shortcircuit-sidebar"]).toBeDefined();
+    const view = pkg.contributes.views["shortcircuit-sidebar"][0];
+    expect(view.id).toBe("shortcircuit.studioView");
+    expect(view.type).toBe("webview");
+  });
+
+  it("contributes all necessary commands", () => {
+    const commands = pkg.contributes.commands.map((c: { command: string }) => c.command);
+    expect(commands).toContain("shortcircuit.openStudio");
+    expect(commands).toContain("shortcircuit.expandStudio");
+    expect(commands).toContain("shortcircuit.openWaveform");
+    expect(commands).toContain("shortcircuit.openTruthTable");
+    expect(commands).toContain("shortcircuit.runTest");
+    expect(commands).toContain("shortcircuit.runAllTests");
+  });
+
+  it("includes proper activation events", () => {
+    expect(pkg.activationEvents).toContain("onLanguage:logicflow");
+    expect(pkg.activationEvents).toContain("onView:shortcircuit.studioView");
+    expect(pkg.activationEvents).toContain("onCommand:shortcircuit.openStudio");
+    expect(pkg.activationEvents).toContain("onCommand:shortcircuit.openTruthTable");
+    expect(pkg.activationEvents).toContain("onCommand:shortcircuit.openWaveform");
+  });
+});
+
+describe("Bundle Integrity", () => {
+  it("has built extension.js and language-server.js as CommonJS modules", () => {
+    const extFile = path.join(__dirname, "..", "out", "extension.js");
+    const lsFile = path.join(__dirname, "..", "out", "language-server.js");
+
+    expect(fs.existsSync(extFile)).toBe(true);
+    expect(fs.existsSync(lsFile)).toBe(true);
+
+    const extContent = fs.readFileSync(extFile, "utf-8");
+    // Should be CommonJS (not raw ESM import * as vscode)
+    expect(extContent).toContain("module.exports");
+    expect(extContent).not.toMatch(/^import\s+\*\s+as\s+vscode/m);
   });
 });

@@ -3,9 +3,8 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "lib": ["ES2022"],
+    "lib": ["ES2022", "DOM"],
     "outDir": "out",
-    "rootDir": "src",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -16,7 +15,8 @@
     "sourceMap": true,
     "baseUrl": ".",
     "paths": {
-      "@shortcircuit/engine/*": ["../../engine/src/*"]
+      "@shortcircuit/engine": ["../engine/src/index.ts"],
+      "@shortcircuit/engine/*": ["../engine/src/*"]
     }
   },
   "include": ["src/**/*"],

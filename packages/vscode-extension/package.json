@@ -1,7 +1,7 @@
 {
   "name": "shortcircuit",
   "displayName": "Short Circuit",
-  "description": "LogicFlow language support for Short Circuit: syntax highlighting, diagnostics, completions, hovers, waveform/truth-table previews, and test runner.",
+  "description": "LogicFlow language support for Short Circuit: interactive simulator studio, syntax highlighting, diagnostics, completions, hovers, waveform/truth-table previews, and test runner.",
   "version": "0.1.0",
   "publisher": "samTime101",
   "engines": {
@@ -10,13 +10,15 @@
   "categories": [
     "Programming Languages",
     "Snippets",
-    "Testing"
+    "Testing",
+    "Other"
   ],
   "keywords": [
     "logicflow",
     "shortcircuit",
     "digital-logic",
-    "hardware-description"
+    "hardware-description",
+    "simulator"
   ],
   "icon": "icon.png",
   "license": "MIT",
@@ -29,7 +31,14 @@
   },
   "main": "out/extension.js",
   "activationEvents": [
-    "onLanguage:logicflow"
+    "onLanguage:logicflow",
+    "onView:shortcircuit.studioView",
+    "onCommand:shortcircuit.openStudio",
+    "onCommand:shortcircuit.expandStudio",
+    "onCommand:shortcircuit.openWaveform",
+    "onCommand:shortcircuit.openTruthTable",
+    "onCommand:shortcircuit.runTest",
+    "onCommand:shortcircuit.runAllTests"
   ],
   "contributes": {
     "languages": [
@@ -37,7 +46,8 @@
         "id": "logicflow",
         "aliases": [
           "LogicFlow",
-          "Short Circuit"
+          "Short Circuit",
+          "logicflow"
         ],
         "extensions": [
           ".lf"
@@ -52,6 +62,24 @@
         "path": "./syntaxes/logicflow.tmLanguage.json"
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "shortcircuit-sidebar",
+          "title": "Short Circuit",
+          "icon": "media/shortcircuit.svg"
+        }
+      ]
+    },
+    "views": {
+      "shortcircuit-sidebar": [
+        {
+          "type": "webview",
+          "id": "shortcircuit.studioView",
+          "name": "Short Circuit Studio"
+        }
+      ]
+    },
     "configuration": {
       "type": "object",
       "title": "Short Circuit",
@@ -75,14 +103,28 @@
     },
     "commands": [
       {
+        "command": "shortcircuit.openStudio",
+        "title": "Open Interactive Studio",
+        "category": "Short Circuit",
+        "icon": "$(circuit-board)"
+      },
+      {
+        "command": "shortcircuit.expandStudio",
+        "title": "Expand Studio to Editor",
+        "category": "Short Circuit",
+        "icon": "$(screen-full)"
+      },
+      {
         "command": "shortcircuit.openWaveform",
         "title": "Open Waveform Preview",
-        "category": "Short Circuit"
+        "category": "Short Circuit",
+        "icon": "$(pulse)"
       },
       {
         "command": "shortcircuit.openTruthTable",
         "title": "Open Truth Table Preview",
-        "category": "Short Circuit"
+        "category": "Short Circuit",
+        "icon": "$(table)"
       },
       {
         "command": "shortcircuit.runTest",
@@ -96,15 +138,27 @@
       }
     ],
     "menus": {
+      "view/title": [
+        {
+          "when": "view == shortcircuit.studioView",
+          "command": "shortcircuit.expandStudio",
+          "group": "navigation"
+        }
+      ],
       "editor/title": [
         {
           "when": "editorLangId == logicflow",
-          "command": "shortcircuit.openWaveform",
+          "command": "shortcircuit.openStudio",
           "group": "navigation"
         },
         {
           "when": "editorLangId == logicflow",
           "command": "shortcircuit.openTruthTable",
+          "group": "navigation"
+        },
+        {
+          "when": "editorLangId == logicflow",
+          "command": "shortcircuit.openWaveform",
           "group": "navigation"
         }
       ],
@@ -117,6 +171,12 @@
       ]
     },
     "keybindings": [
+      {
+        "command": "shortcircuit.openStudio",
+        "key": "ctrl+shift+s",
+        "mac": "cmd+shift+s",
+        "when": "editorLangId == logicflow"
+      },
       {
         "command": "shortcircuit.openWaveform",
         "key": "ctrl+shift+w",
@@ -132,11 +192,12 @@
     ]
   },
   "scripts": {
-    "compile": "tsc -p .",
-    "watch": "tsc -p . -w",
-    "lint": "eslint src --ext ts",
+    "build": "node build.js",
+    "compile": "node build.js",
+    "watch": "node build.js --watch",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "package": "vsce package",
+    "package": "node build.js && vsce package --no-git-tag-version",
     "prepublishOnly": "npm run compile"
   },
   "devDependencies": {
@@ -144,13 +205,11 @@
     "@types/vscode": "^1.85.0",
     "esbuild": "^0.20.0",
     "typescript": "^5.3.0",
-    "vitest": "^1.0.0",
-    "vscode-languageclient": "^9.0.0",
-    "vscode-languageserver": "^9.0.0",
-    "vscode-languageserver-protocol": "^3.17.0"
+    "vitest": "^1.0.0"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.0",
+    "vscode-languageserver": "^9.0.0",
     "vscode-languageserver-textdocument": "^1.0.16"
   }
 }

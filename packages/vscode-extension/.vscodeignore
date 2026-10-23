@@ -1,26 +1,26 @@
 # VS Code extension packaging ignore file
-# This file controls what files are included in the .vsix package
-
-# Ignore everything outside the extension directory first
+# Ignore everything outside the extension directory
 **/../**
 **/../../**
 
-# Ignore node_modules - we don't bundle dependencies
+# Ignore node_modules - extension is bundled by esbuild
 node_modules/
 
-# Ignore source files - we only need the compiled output
+# Ignore source files and tests
 src/
 test/
 *.test.ts
 vitest.config.ts
 tsconfig.json
+build.js
 .vscode/
 
-# Ignore build artifacts that shouldn't be in the package
+# Ignore build artifacts
 *.map
 *.tsbuildinfo
+*.vsix
 
-# Ignore git - both local and parent
+# Ignore git
 .git/
 ../.git/
 ../../.git/

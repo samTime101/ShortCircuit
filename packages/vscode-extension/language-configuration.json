@@ -1,6 +1,6 @@
 {
   "comments": {
-    "lineComment": "#",
+    "lineComment": "//",
     "blockComment": ["/*", "*/"]
   },
   "brackets": [
@@ -22,10 +22,14 @@
     { "open": "\"", "close": "\"" },
     { "open": "'", "close": "'" }
   ],
+  "indentationRules": {
+    "increaseIndentPattern": "(?i)^\\s*(circuit|macro|test|case|if|for|on)\\b.*$",
+    "decreaseIndentPattern": "(?i)^\\s*(end|else)\\b.*$"
+  },
   "folding": {
     "markers": {
-      "start": "^\\s*#region\\b",
-      "end": "^\\s*#endregion\\b"
+      "start": "(?i)^\\s*(circuit|macro|test)\\b",
+      "end": "(?i)^\\s*end\\b"
     }
   }
 }

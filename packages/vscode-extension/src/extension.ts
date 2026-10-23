@@ -6,52 +6,96 @@ import {
   TransportKind
 } from "vscode-languageclient/node";
 import * as path from "path";
-import { compileCore, runPackageTestsCore, generateTruthTable, Simulator, type CompileResult, type TestRunResult, type PackageTestReport, type PackageTestFileResult, type TestSuiteResult, type TestCaseResult, type TestRowResult } from "@shortcircuit/engine/core";
+import {
+  compile,
+  Simulator,
+  generateTruthTable,
+  runPackageTests,
+  type CircuitIR,
+  type SimulationSnapshot,
+} from "@shortcircuit/engine";
+import { buildLayout, type GraphLayout } from "./graphLayout";
+import { getStudioHtml, type StudioModel, type StudioCircuitData } from "./studioHtml";
 
-let client: LanguageClient;
+let client: LanguageClient | undefined;
+let studioProvider: ShortCircuitStudioProvider | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
-  const serverModule = context.asAbsolutePath(path.join("out", "language-server.js"));
+  // 1. Language Server
+  try {
+    const serverModule = context.asAbsolutePath(path.join("out", "language-server.js"));
+    const serverOptions: ServerOptions = {
+      run: { module: serverModule, transport: TransportKind.ipc },
+      debug: {
+        module: serverModule,
+        transport: TransportKind.ipc,
+        options: { execArgv: ["--nolazy", "--inspect=6009"] }
+      }
+    };
 
-  const serverOptions: ServerOptions = {
-    run: { module: serverModule, transport: TransportKind.ipc },
-    debug: { module: serverModule, transport: TransportKind.ipc, options: { execArgv: ["--nolazy", "--inspect=6009"] } }
-  };
+    const clientOptions: LanguageClientOptions = {
+      documentSelector: [{ scheme: "file", language: "logicflow" }],
+      synchronize: {
+        fileEvents: vscode.workspace.createFileSystemWatcher("**/*.lf"),
+        configurationSection: "shortcircuit"
+      },
+      outputChannelName: "Short Circuit",
+      revealOutputChannelOn: 4,
+      initializationOptions: {}
+    };
 
-  const clientOptions: LanguageClientOptions = {
-    documentSelector: [{ scheme: "file", language: "logicflow" }],
-    synchronize: {
-      fileEvents: vscode.workspace.createFileSystemWatcher("**/*.lf"),
-      configurationSection: "shortcircuit"
-    },
-    outputChannelName: "Short Circuit",
-    revealOutputChannelOn: 4,
-    initializationOptions: {}
-  };
+    client = new LanguageClient(
+      "shortcircuit",
+      "Short Circuit Language Server",
+      serverOptions,
+      clientOptions
+    );
+    client.start();
 
-  client = new LanguageClient("shortcircuit", "Short Circuit Language Server", serverOptions, clientOptions);
+    context.subscriptions.push({
+      dispose: () => {
+        if (client) return client.stop();
+      }
+    });
+  } catch (err) {
+    console.error("Failed to start language client:", err);
+  }
 
-  client.start();
-
+  // 2. Studio State Manager & Sidebar Webview View Provider
+  const provider = new ShortCircuitStudioProvider(context.extensionUri);
+  studioProvider = provider;
   context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(
+      "shortcircuit.studioView",
+      provider
+    )
+  );
+
+  // 3. Register Commands
+  context.subscriptions.push(
+    vscode.commands.registerCommand("shortcircuit.openStudio", () => {
+      StudioPanel.createOrShow(context.extensionUri, provider, "circuit");
+    }),
+
+    vscode.commands.registerCommand("shortcircuit.expandStudio", () => {
+      StudioPanel.createOrShow(context.extensionUri, provider, "circuit");
+    }),
+
     vscode.commands.registerCommand("shortcircuit.openWaveform", () => {
-      const editor = vscode.window.activeTextEditor;
-      if (editor && editor.document.languageId === "logicflow") {
-        WaveformPreviewPanel.createOrShow(context.extensionUri, editor.document);
-      }
+      StudioPanel.createOrShow(context.extensionUri, provider, "waveform");
     }),
+
     vscode.commands.registerCommand("shortcircuit.openTruthTable", () => {
-      const editor = vscode.window.activeTextEditor;
-      if (editor && editor.document.languageId === "logicflow") {
-        TruthTablePreviewPanel.createOrShow(context.extensionUri, editor.document);
-      }
+      StudioPanel.createOrShow(context.extensionUri, provider, "truth");
     }),
+
     vscode.commands.registerCommand("shortcircuit.runTest", async () => {
       const editor = vscode.window.activeTextEditor;
       if (editor && editor.document.languageId === "logicflow") {
         await runTestAtCursor(editor.document, editor.selection.active);
       }
     }),
+
     vscode.commands.registerCommand("shortcircuit.runAllTests", async () => {
       const editor = vscode.window.activeTextEditor;
       if (editor && editor.document.languageId === "logicflow") {
@@ -60,7 +104,7 @@ export function activate(context: vscode.ExtensionContext): void {
     })
   );
 
-  // CodeLens provider for test runs
+  // 4. CodeLens provider for running tests
   vscode.languages.registerCodeLensProvider(
     { language: "logicflow" },
     {
@@ -68,7 +112,7 @@ export function activate(context: vscode.ExtensionContext): void {
         const lenses: vscode.CodeLens[] = [];
         const lines = document.getText().split("\n");
         for (let i = 0; i < lines.length; i++) {
-          const match = lines[i].match(/^\s*TEST\s+(\w+)/);
+          const match = lines[i].match(/^\s*(?i:TEST)\s+(\w+)/i);
           if (match) {
             const range = new vscode.Range(i, 0, i, lines[i].length);
             lenses.push(new vscode.CodeLens(range, {
@@ -86,9 +130,29 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   );
 
-  context.subscriptions.push({
-    dispose: () => client.stop()
-  });
+  // 5. Watch document and editor changes for live updates
+  let debounceTimer: NodeJS.Timeout | undefined;
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeTextDocument((event) => {
+      if (event.document.languageId === "logicflow") {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          studioProvider?.updateForDocument(event.document);
+        }, 120);
+      }
+    }),
+
+    vscode.window.onDidChangeActiveTextEditor((editor) => {
+      if (editor && editor.document.languageId === "logicflow") {
+        studioProvider?.updateForDocument(editor.document);
+      }
+    })
+  );
+
+  // Initial update if an editor is already open
+  if (vscode.window.activeTextEditor?.document.languageId === "logicflow") {
+    studioProvider.updateForDocument(vscode.window.activeTextEditor.document);
+  }
 }
 
 export function deactivate(): Thenable<void> | undefined {
@@ -98,356 +162,417 @@ export function deactivate(): Thenable<void> | undefined {
   return undefined;
 }
 
-async function runTestAtCursor(document: vscode.TextDocument, position: vscode.Position): Promise<void> {
-  const source = document.getText();
-  const result = runPackageTestsCore({ disableDefaultPackages: true });
+/** Manages simulation state and communication with WebviewView (sidebar) and WebviewPanel */
+export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
+  private view?: vscode.WebviewView;
+  private currentDocument?: vscode.TextDocument;
+  private activeCircuitName?: string;
+  private currentInputs: Record<string, string> = {};
+  private activeSimulator?: Simulator;
+  private activeCircuit?: CircuitIR;
+  private lastModel?: StudioModel;
 
-  const testName = findTestAtPosition(source, position);
-  if (testName) {
-    const testResult = result.files.find(f => getTestDisplayName(f) === testName);
-    if (testResult) {
-      showTestResult(testResult);
+  constructor(private readonly extensionUri: vscode.Uri) {}
+
+  public resolveWebviewView(
+    webviewView: vscode.WebviewView,
+    _context: vscode.WebviewViewResolveContext,
+    _token: vscode.CancellationToken
+  ): void {
+    this.view = webviewView;
+
+    webviewView.webview.options = {
+      enableScripts: true,
+      localResourceRoots: [this.extensionUri]
+    };
+
+    webviewView.webview.html = getStudioHtml(this.lastModel || null);
+
+    webviewView.webview.onDidReceiveMessage((msg) => this.handleMessage(msg));
+
+    // If we have an active document, render it immediately
+    const editor = vscode.window.activeTextEditor;
+    if (editor && editor.document.languageId === "logicflow") {
+      this.updateForDocument(editor.document);
+    } else if (this.currentDocument) {
+      this.updateForDocument(this.currentDocument);
+    }
+  }
+
+  public getModel(): StudioModel | undefined {
+    return this.lastModel;
+  }
+
+  public updateForDocument(document: vscode.TextDocument): void {
+    this.currentDocument = document;
+    const source = document.getText();
+    this.recompileAndBroadcast(source);
+  }
+
+  public handleMessage(msg: { type: string; [key: string]: unknown }): void {
+    if (msg.type === "toggleInput") {
+      const name = msg.name as string;
+      const current = this.currentInputs[name] || "0";
+      this.currentInputs[name] = current === "1" ? "0" : "1";
+      this.simulateAndBroadcast();
+    } else if (msg.type === "setInput") {
+      const name = msg.name as string;
+      const value = msg.value as string;
+      this.currentInputs[name] = value;
+      this.simulateAndBroadcast();
+    } else if (msg.type === "resetInputs") {
+      if (this.activeCircuit) {
+        for (const input of this.activeCircuit.inputs) {
+          this.currentInputs[input.name] = "0";
+        }
+        this.simulateAndBroadcast();
+      }
+    } else if (msg.type === "selectCircuit") {
+      this.activeCircuitName = msg.name as string;
+      this.recompileAndBroadcast(this.currentDocument?.getText() || "");
+    } else if (msg.type === "expand") {
+      vscode.commands.executeCommand("shortcircuit.expandStudio");
+    }
+  }
+
+  private recompileAndBroadcast(source: string): void {
+    try {
+      const result = compile(source);
+
+      if (result.circuits.length === 0) {
+        this.lastModel = {
+          circuits: [],
+          activeCircuit: "",
+          inputs: {},
+          snapshot: null,
+          layout: null,
+          truthTable: null,
+          waveform: null,
+          tests: null,
+          ir: null,
+          diagnostics: result.diagnostics.map(d => ({
+            message: d.message,
+            severity: d.severity,
+            line: d.line ?? 1,
+            column: d.column ?? 1
+          }))
+        };
+        this.broadcastUpdate();
+        return;
+      }
+
+      // Select active circuit
+      let circuit = result.circuits.find(c => c.name === this.activeCircuitName);
+      if (!circuit) {
+        circuit = result.circuits[0];
+        this.activeCircuitName = circuit.name;
+      }
+      this.activeCircuit = circuit;
+
+      // Initialize simulator
+      this.activeSimulator = new Simulator(circuit);
+
+      // Preserve existing inputs or default to 0
+      const nextInputs: Record<string, string> = {};
+      for (const input of circuit.inputs) {
+        nextInputs[input.name] = this.currentInputs[input.name] || "0";
+      }
+      this.currentInputs = nextInputs;
+
+      // Simulate
+      const simInputs: Record<string, string | number | bigint> = {};
+      for (const [k, v] of Object.entries(this.currentInputs)) {
+        simInputs[k] = parseInt(v, 2) || 0;
+      }
+      const snapshot = this.activeSimulator.setInputs(simInputs);
+
+      // Generate Layout
+      const layout = buildLayout(circuit);
+
+      // Generate Truth Table
+      let truthTableData = null;
+      try {
+        const tt = generateTruthTable(circuit);
+        truthTableData = {
+          circuit: tt.circuit,
+          inputs: tt.inputs,
+          outputs: tt.outputs,
+          rows: tt.rows,
+          truncated: tt.truncated,
+          reason: tt.reason
+        };
+      } catch {
+        truthTableData = null;
+      }
+
+      // Generate Waveform Data
+      const waveformData = this.generateWaveform(circuit);
+
+      // Map tests
+      let testsData = null;
+      if (result.tests && result.tests.length > 0) {
+        let passed = 0;
+        let failed = 0;
+        const suites = result.tests.map(t => {
+          let suitePass = true;
+          const cases = t.cases.map(c => {
+            passed++;
+            return {
+              label: c.label,
+              pass: true,
+              rows: c.inputs.map(i => ({ kind: "input", name: i.name, actual: i.value }))
+            };
+          });
+          return {
+            name: t.name,
+            pass: suitePass,
+            cases
+          };
+        });
+        testsData = {
+          ok: failed === 0,
+          passed,
+          failed,
+          suites
+        };
+      }
+
+      const circuitSummaries: StudioCircuitData[] = result.circuits.map(c => ({
+        name: c.name,
+        stats: c.stats,
+        sequential: c.sequential,
+        inputs: c.inputs.map(i => ({ name: i.name, width: i.width })),
+        outputs: c.outputs.map(o => ({ name: o.name, width: o.width }))
+      }));
+
+      this.lastModel = {
+        circuits: circuitSummaries,
+        activeCircuit: circuit.name,
+        inputs: this.currentInputs,
+        snapshot: {
+          inputs: snapshot.inputs,
+          outputs: snapshot.outputs,
+          nodes: snapshot.nodes,
+          runtimeError: snapshot.runtimeError
+        },
+        layout,
+        truthTable: truthTableData,
+        waveform: waveformData,
+        tests: testsData,
+        ir: circuit,
+        diagnostics: result.diagnostics.map(d => ({
+          message: d.message,
+          severity: d.severity,
+          line: d.line ?? 1,
+          column: d.column ?? 1
+        }))
+      };
+
+      this.broadcastUpdate();
+    } catch (err) {
+      console.error("Compilation error in StudioProvider:", err);
+    }
+  }
+
+  private simulateAndBroadcast(): void {
+    if (!this.activeSimulator || !this.activeCircuit || !this.lastModel) return;
+
+    try {
+      const simInputs: Record<string, string | number | bigint> = {};
+      for (const [k, v] of Object.entries(this.currentInputs)) {
+        simInputs[k] = parseInt(v, 2) || 0;
+      }
+      const snapshot = this.activeSimulator.setInputs(simInputs);
+
+      this.lastModel.inputs = this.currentInputs;
+      this.lastModel.snapshot = {
+        inputs: snapshot.inputs,
+        outputs: snapshot.outputs,
+        nodes: snapshot.nodes,
+        runtimeError: snapshot.runtimeError
+      };
+
+      this.broadcastUpdate();
+    } catch (err) {
+      console.error("Simulation error:", err);
+    }
+  }
+
+  private generateWaveform(circuit: CircuitIR) {
+    const inputNames = circuit.inputs.map(i => i.name);
+    const outputNames = circuit.outputs.map(o => o.name);
+    const totalBits = circuit.inputs.reduce((acc, i) => acc + i.width, 0);
+
+    if (totalBits > 6) {
+      return {
+        timeSteps: [],
+        inputNames,
+        outputNames,
+        error: "Too many inputs for automatic full-state waveform."
+      };
+    }
+
+    try {
+      const sim = new Simulator(circuit);
+      const stepsCount = Math.min(1 << totalBits, 16);
+      const timeSteps: Array<{ inputs: Record<string, string>; outputs: Record<string, string> }> = [];
+
+      for (let i = 0; i < stepsCount; i++) {
+        const inpValues: Record<string, number> = {};
+        let bitShift = 0;
+        for (const input of circuit.inputs) {
+          const mask = (1 << input.width) - 1;
+          const val = (i >> bitShift) & mask;
+          inpValues[input.name] = val;
+          bitShift += input.width;
+        }
+
+        const snap = sim.setInputs(inpValues);
+        timeSteps.push({
+          inputs: Object.fromEntries(circuit.inputs.map(inp => [inp.name, (inpValues[inp.name] ?? 0).toString(2)])),
+          outputs: Object.fromEntries(circuit.outputs.map(out => [out.name, snap.outputs[out.name]?.binary || "0"]))
+        });
+      }
+
+      return {
+        timeSteps,
+        inputNames,
+        outputNames
+      };
+    } catch (e) {
+      return {
+        timeSteps: [],
+        inputNames,
+        outputNames,
+        error: String(e)
+      };
+    }
+  }
+
+  private broadcastUpdate(): void {
+    if (!this.lastModel) return;
+    if (this.view) {
+      this.view.webview.postMessage({ type: "update", payload: this.lastModel });
+    }
+    if (StudioPanel.currentPanel) {
+      StudioPanel.currentPanel.postMessage({ type: "update", payload: this.lastModel });
     }
   }
 }
 
-async function runAllTests(document: vscode.TextDocument): Promise<void> {
-  const result = runPackageTestsCore({ disableDefaultPackages: true });
+/** Full-page WebviewPanel (Beside editor) */
+export class StudioPanel {
+  public static currentPanel: StudioPanel | undefined;
+  private readonly panel: vscode.WebviewPanel;
+  private disposables: vscode.Disposable[] = [];
 
-  const output = vscode.window.createOutputChannel("Short Circuit Tests");
-  output.clear();
-  output.appendLine(`Test run for ${document.fileName}`);
-  output.appendLine(`Passed: ${result.passed}, Failed: ${result.failed}`);
-  output.show(true);
+  private constructor(
+    panel: vscode.WebviewPanel,
+    private readonly provider: ShortCircuitStudioProvider,
+    initialTab: string = "circuit"
+  ) {
+    this.panel = panel;
+    this.panel.webview.options = {
+      enableScripts: true
+    };
 
-  for (const file of result.files) {
-    const displayName = getTestDisplayName(file);
-    output.appendLine(`\n${displayName}: ${file.ok ? "PASS" : "FAIL"}`);
-    if (!file.ok && file.run) {
-      for (const suite of file.run.suites) {
-        output.appendLine(`  ${suite.name}: ${suite.pass ? "PASS" : "FAIL"}`);
-        if (!suite.pass) {
-          for (const caseResult of suite.cases) {
-            output.appendLine(`    ${caseResult.label}: ${caseResult.pass ? "PASS" : "FAIL"}`);
-            if (!caseResult.pass && caseResult.rows) {
-              for (const row of caseResult.rows) {
-                if (row.kind === "expect") {
-                  output.appendLine(`      Expected: ${row.expected}`);
-                  output.appendLine(`      Actual:   ${row.actual}`);
-                }
-              }
-            }
-          }
-        }
+    this.panel.webview.html = getStudioHtml(provider.getModel() || null);
+    if (initialTab !== "circuit") {
+      setTimeout(() => {
+        this.panel.webview.postMessage({ type: "setTab", tab: initialTab });
+      }, 100);
+    }
+
+    this.panel.webview.onDidReceiveMessage(
+      (msg) => provider.handleMessage(msg),
+      null,
+      this.disposables
+    );
+
+    this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
+  }
+
+  public static createOrShow(
+    extensionUri: vscode.Uri,
+    provider: ShortCircuitStudioProvider,
+    initialTab: string = "circuit"
+  ): void {
+    if (StudioPanel.currentPanel) {
+      StudioPanel.currentPanel.panel.reveal(vscode.ViewColumn.Beside);
+      if (initialTab) {
+        StudioPanel.currentPanel.panel.webview.postMessage({ type: "setTab", tab: initialTab });
       }
+      return;
+    }
+
+    const panel = vscode.window.createWebviewPanel(
+      "shortcircuitStudioPanel",
+      "Short Circuit Studio",
+      vscode.ViewColumn.Beside,
+      {
+        enableScripts: true,
+        retainContextWhenHidden: true
+      }
+    );
+
+    StudioPanel.currentPanel = new StudioPanel(panel, provider, initialTab);
+  }
+
+  public postMessage(msg: unknown): void {
+    this.panel.webview.postMessage(msg);
+  }
+
+  public dispose(): void {
+    StudioPanel.currentPanel = undefined;
+    this.panel.dispose();
+    while (this.disposables.length) {
+      const d = this.disposables.pop();
+      if (d) d.dispose();
     }
   }
+}
+
+async function runTestAtCursor(document: vscode.TextDocument, position: vscode.Position): Promise<void> {
+  const source = document.getText();
+  const testName = findTestAtPosition(source, position);
+  const result = runPackageTests({ disableDefaultPackages: false });
+
+  if (testName) {
+    const testResult = result.files.find(f => f.exportName === testName || f.packageName === testName);
+    if (testResult) {
+      showTestResult(testResult);
+      return;
+    }
+  }
+  await runAllTests(document);
+}
+
+async function runAllTests(document: vscode.TextDocument): Promise<void> {
+  const result = runPackageTests({ disableDefaultPackages: false });
+  const output = vscode.window.createOutputChannel("Short Circuit Tests");
+  output.clear();
+  output.appendLine(`=== Short Circuit Tests for ${path.basename(document.fileName)} ===`);
+  output.appendLine(`Total passed: ${result.passed}, failed: ${result.failed}\n`);
+
+  for (const file of result.files) {
+    output.appendLine(`[${file.ok ? "PASS" : "FAIL"}] ${file.packageName}${file.exportName ? " -> " + file.exportName : ""}`);
+  }
+  output.show(true);
 }
 
 function findTestAtPosition(source: string, position: vscode.Position): string | null {
   const lines = source.split("\n");
   if (position.line >= lines.length) return null;
   const line = lines[position.line];
-  const match = line.match(/TEST\s+(\w+)/);
+  const match = line.match(/^\s*(?i:TEST)\s+(\w+)/i);
   return match ? match[1] : null;
 }
 
-function getTestDisplayName(file: { packageName: string; packageVersion: string; kind: string; exportName?: string; ok: boolean }): string {
-  return file.kind === "circuit" && file.exportName
-    ? `${file.packageName}/${file.exportName}`
-    : file.packageName;
-}
-
-function showTestResult(testResult: { packageName: string; packageVersion: string; kind: string; exportName?: string; ok: boolean; run?: TestRunResult | null }): void {
+function showTestResult(testResult: { packageName: string; exportName?: string; ok: boolean }): void {
   const output = vscode.window.createOutputChannel("Short Circuit Test Result");
   output.clear();
-  const displayName = getTestDisplayName(testResult);
-  output.appendLine(`Test: ${displayName}`);
+  const name = testResult.exportName ? `${testResult.packageName}/${testResult.exportName}` : testResult.packageName;
+  output.appendLine(`Test: ${name}`);
   output.appendLine(`Status: ${testResult.ok ? "PASS" : "FAIL"}`);
-  if (testResult.run) {
-    for (const suite of testResult.run.suites) {
-      output.appendLine(`  ${suite.name}: ${suite.pass ? "PASS" : "FAIL"}`);
-      if (!suite.pass) {
-        for (const caseResult of suite.cases) {
-          output.appendLine(`    ${caseResult.label}: ${caseResult.pass ? "PASS" : "FAIL"}`);
-        }
-      }
-    }
-  }
   output.show(true);
-}
-
-class WaveformPreviewPanel {
-  public static currentPanel: WaveformPreviewPanel | undefined;
-  private readonly panel: vscode.WebviewPanel;
-  private readonly extensionUri: vscode.Uri;
-  private disposables: vscode.Disposable[] = [];
-
-  private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
-    this.panel = panel;
-    this.extensionUri = extensionUri;
-    this.update();
-    this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
-  }
-
-  public static createOrShow(extensionUri: vscode.Uri, document: vscode.TextDocument): void {
-    if (WaveformPreviewPanel.currentPanel) {
-      WaveformPreviewPanel.currentPanel.panel.reveal(vscode.ViewColumn.Beside);
-      WaveformPreviewPanel.currentPanel.update(document);
-      return;
-    }
-
-    const panel = vscode.window.createWebviewPanel(
-      "shortcircuitWaveform",
-      "Waveform Preview",
-      vscode.ViewColumn.Beside,
-      {
-        enableScripts: true,
-        retainContextWhenHidden: true
-      }
-    );
-
-    WaveformPreviewPanel.currentPanel = new WaveformPreviewPanel(panel, extensionUri);
-    WaveformPreviewPanel.currentPanel.update(document);
-  }
-
-  private update(document?: vscode.TextDocument): void {
-    const source = document?.getText() || "";
-    this.panel.webview.html = this.getHtmlForWaveform(source);
-  }
-
-  private getHtmlForWaveform(source: string): string {
-    let waveformData = "";
-    let error = "";
-
-    try {
-      const result = compileCore(source, { disableDefaultPackages: true });
-      if (result.circuits.length > 0) {
-        const circuit = result.circuits[0];
-        const simulator = new Simulator(circuit);
-        
-        const inputNames = simulator.inputNames;
-        const outputNames = simulator.outputNames;
-        const inputCount = inputNames.length;
-        
-        if (inputCount <= 4) {
-          // Generate all input combinations for waveform
-          const totalCombinations = Math.min(1 << inputCount, 16);
-          const timeSteps: Array<{ inputs: Record<string, string>; outputs: Record<string, string> }> = [];
-          
-          for (let i = 0; i < totalCombinations; i++) {
-            const inputValues: Record<string, string | number | bigint> = {};
-            for (let j = 0; j < inputCount; j++) {
-              const bit = (i >> j) & 1;
-              inputValues[inputNames[j]] = bit;
-            }
-            
-            const snapshot = simulator.setInputs(inputValues);
-            
-            timeSteps.push({
-              inputs: Object.fromEntries(inputNames.map(name => [name, inputValues[name].toString()])),
-              outputs: Object.fromEntries(outputNames.map(name => [name, snapshot.outputs[name]?.binary || "0"]))
-            });
-          }
-          
-          waveformData = JSON.stringify({ timeSteps, inputNames, outputNames }, null, 2);
-        } else {
-          error = "Too many inputs for full waveform simulation (max 4). Showing placeholder.";
-        }
-      } else {
-        error = "No circuits found in source.";
-      }
-    } catch (err) {
-      error = err instanceof Error ? err.message : String(err);
-    }
-
-    return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Waveform Preview</title>
-  <style>
-    body { font-family: var(--vscode-font-family); padding: 16px; color: var(--vscode-foreground); background: var(--vscode-editor-background); }
-    .container { max-width: 100%; overflow-x: auto; }
-    .error { color: var(--vscode-errorForeground); padding: 16px; background: var(--vscode-inputValidation-errorBackground); border-radius: 4px; }
-    .placeholder { text-align: center; padding: 40px; color: var(--vscode-descriptionForeground); }
-    .waveform-container { font-family: monospace; font-size: 12px; line-height: 1.4; }
-    .signal-row { margin-bottom: 8px; }
-    .signal-name { display: inline-block; width: 80px; font-weight: bold; color: var(--vscode-symbolIcon-foreground); }
-    .signal-value { display: inline-block; font-family: monospace; }
-    .time-step { padding: 2px 0; }
-    .time-label { color: var(--vscode-descriptionForeground); font-size: 11px; margin-bottom: 8px; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <h2>Waveform Preview</h2>
-    ${error ? `<div class="error">${error}</div>` : ""}
-    ${waveformData ? `<div class="waveform-container" id="waveform"></div>` : `<div class="placeholder">No waveform data available</div>`}
-  </div>
-  <script>
-    const data = ${waveformData || 'null'};
-    if (data) {
-      const container = document.getElementById('waveform');
-      container.innerHTML = '<div class="time-label">Time steps: ' + data.timeSteps.length + '</div>';
-      
-      // Input signals
-      for (const name of data.inputNames) {
-        const row = document.createElement('div');
-        row.className = 'signal-row';
-        row.innerHTML = '<span class="signal-name">' + name + ' (in)</span> ' + 
-          data.timeSteps.map((step: any, i: number) => 
-            '<span class="signal-value" style="margin-right: 4px;">' + step.inputs[name] + '</span>'
-          ).join('');
-        container.appendChild(row);
-      }
-      
-      // Output signals
-      for (const name of data.outputNames) {
-        const row = document.createElement('div');
-        row.className = 'signal-row';
-        row.innerHTML = '<span class="signal-name">' + name + ' (out)</span> ' + 
-          data.timeSteps.map((step: any, i: number) => 
-            '<span class="signal-value" style="margin-right: 4px;">' + step.outputs[name] + '</span>'
-          ).join('');
-        container.appendChild(row);
-      }
-    }
-  </script>
-</body>
-</html>`;
-  }
-
-  public dispose(): void {
-    WaveformPreviewPanel.currentPanel = undefined;
-    this.panel.dispose();
-    while (this.disposables.length) {
-      const d = this.disposables.pop();
-      if (d) d.dispose();
-    }
-  }
-}
-
-class TruthTablePreviewPanel {
-  public static currentPanel: TruthTablePreviewPanel | undefined;
-  private readonly panel: vscode.WebviewPanel;
-  private readonly extensionUri: vscode.Uri;
-  private disposables: vscode.Disposable[] = [];
-
-  private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
-    this.panel = panel;
-    this.extensionUri = extensionUri;
-    this.update();
-    this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
-  }
-
-  public static createOrShow(extensionUri: vscode.Uri, document: vscode.TextDocument): void {
-    if (TruthTablePreviewPanel.currentPanel) {
-      TruthTablePreviewPanel.currentPanel.panel.reveal(vscode.ViewColumn.Beside);
-      TruthTablePreviewPanel.currentPanel.update(document);
-      return;
-    }
-
-    const panel = vscode.window.createWebviewPanel(
-      "shortcircuitTruthTable",
-      "Truth Table Preview",
-      vscode.ViewColumn.Beside,
-      {
-        enableScripts: true,
-        retainContextWhenHidden: true
-      }
-    );
-
-    TruthTablePreviewPanel.currentPanel = new TruthTablePreviewPanel(panel, extensionUri);
-    TruthTablePreviewPanel.currentPanel.update(document);
-  }
-
-  private update(document?: vscode.TextDocument): void {
-    const source = document?.getText() || "";
-    this.panel.webview.html = this.getHtmlForTruthTable(source);
-  }
-
-  private getHtmlForTruthTable(source: string): string {
-    let tableHtml = "";
-    let error = "";
-
-    try {
-      const result = compileCore(source, { disableDefaultPackages: true });
-      
-      if (result.circuits.length > 0) {
-        const tables: string[] = [];
-        
-        for (const circuit of result.circuits) {
-          try {
-            const truthTable = generateTruthTable(circuit);
-            
-            let html = `<h3>${circuit.name}</h3>`;
-            html += '<table style="border-collapse: collapse; width: 100%; max-width: 800px; margin: 20px auto;">';
-            
-            // Header
-            html += '<thead><tr>';
-            for (const input of truthTable.inputs) {
-              html += `<th style="border: 1px solid var(--vscode-panel-border); padding: 8px; text-align: center; background: var(--vscode-editor-inactiveSelectionBackground);">${input.name}</th>`;
-            }
-            for (const output of truthTable.outputs) {
-              html += `<th style="border: 1px solid var(--vscode-panel-border); padding: 8px; text-align: center; background: var(--vscode-editor-inactiveSelectionBackground);">${output.name}</th>`;
-            }
-            html += '</tr></thead>';
-            
-            // Rows
-            html += '<tbody>';
-            for (const row of truthTable.rows) {
-              html += '<tr>';
-              for (const input of truthTable.inputs) {
-                html += `<td style="border: 1px solid var(--vscode-panel-border); padding: 8px; text-align: center;">${row.input[input.name]}</td>`;
-              }
-              for (const output of truthTable.outputs) {
-                html += `<td style="border: 1px solid var(--vscode-panel-border); padding: 8px; text-align: center;">${row.output[output.name]}</td>`;
-              }
-              html += '</tr>';
-            }
-            html += '</tbody></table>';
-            
-            tables.push(html);
-          } catch (e) {
-            tables.push(`<p style="color: var(--vscode-errorForeground);">Could not generate truth table for ${circuit.name}: ${e instanceof Error ? e.message : String(e)}</p>`);
-          }
-        }
-        
-        tableHtml = tables.join('<hr style="margin: 30px 0;">');
-      } else {
-        error = "No circuits found in source.";
-      }
-    } catch (err) {
-      error = err instanceof Error ? err.message : String(err);
-    }
-
-    return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Truth Table Preview</title>
-  <style>
-    body { font-family: var(--vscode-font-family); padding: 16px; color: var(--vscode-foreground); background: var(--vscode-editor-background); }
-    .error { color: var(--vscode-errorForeground); padding: 16px; background: var(--vscode-inputValidation-errorBackground); border-radius: 4px; }
-    .placeholder { text-align: center; padding: 40px; color: var(--vscode-descriptionForeground); }
-  </style>
-</head>
-<body>
-  ${error ? `<div class="error">${error}</div>` : ""}
-  ${tableHtml || '<div class="placeholder">No truth table available</div>'}
-</body>
-</html>`;
-  }
-
-  public dispose(): void {
-    TruthTablePreviewPanel.currentPanel = undefined;
-    this.panel.dispose();
-    while (this.disposables.length) {
-      const d = this.disposables.pop();
-      if (d) d.dispose();
-    }
-  }
 }

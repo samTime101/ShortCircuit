@@ -31,6 +31,14 @@ export default defineConfig({
       },
       {
         test: {
+          name: "vscode",
+          root: "./packages/vscode-extension",
+          environment: "node",
+          include: ["test/**/*.test.ts"],
+        },
+      },
+      {
+        test: {
           name: "cross",
           root: ".",
           environment: "node",

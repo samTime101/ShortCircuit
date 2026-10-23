@@ -3,173 +3,55 @@
   "name": "LogicFlow",
   "scopeName": "source.logicflow",
   "fileTypes": ["lf"],
-  "injectionSelector": "L:source.logicflow - comment - string",
   "patterns": [
     {
       "include": "#comments"
     },
     {
-      "include": "#keywords"
+      "include": "#strings"
     },
     {
-      "include": "#types"
+      "include": "#declarations"
     },
     {
       "include": "#builtins"
     },
     {
-      "include": "#imports"
+      "include": "#types"
     },
     {
-      "include": "#circuits"
+      "include": "#keywords"
     },
     {
-      "include": "#tests"
+      "include": "#calls"
     },
     {
-      "include": "#identifiers"
+      "include": "#members"
+    },
+    {
+      "include": "#assignments"
     },
     {
       "include": "#numbers"
     },
     {
-      "include": "#strings"
+      "include": "#operators"
     },
     {
-      "include": "#operators"
+      "include": "#identifiers"
     }
   ],
   "repository": {
     "comments": {
       "patterns": [
         {
-          "name": "comment.line.number-sign.logicflow",
-          "match": "^\\s*#.*$"
+          "name": "comment.line.double-slash.logicflow",
+          "match": "//.*$"
         },
         {
           "name": "comment.block.logicflow",
           "begin": "/\\*",
           "end": "\\*/"
-        }
-      ]
-    },
-    "keywords": {
-      "patterns": [
-        {
-          "name": "keyword.control.logicflow",
-          "match": "\\b(IMPORT|CIRCUIT|MACRO|INPUT|OUTPUT|BODY|END|TEST|CASE|EXPECT)\\b"
-        },
-        {
-          "name": "keyword.other.logicflow",
-          "match": "\\b(AS|WIDTH)\\b"
-        }
-      ]
-    },
-    "types": {
-      "patterns": [
-        {
-          "name": "storage.type.logicflow",
-          "match": "\\b(BIT|BUS)\\b"
-        }
-      ]
-    },
-    "builtins": {
-      "patterns": [
-        {
-          "name": "support.function.builtin.logicflow",
-          "match": "\\b(NAND|NOR|AND|OR|XOR|XNOR|NOT|BUF)\\b"
-        }
-      ]
-    },
-    "imports": {
-      "patterns": [
-        {
-          "name": "keyword.other.import.logicflow",
-          "match": "\\bIMPORT\\b"
-        },
-        {
-          "name": "string.quoted.double.import.logicflow",
-          "begin": "IMPORT\\s+",
-          "end": "(?=\\s|$)",
-          "patterns": [
-            {
-              "name": "string.quoted.double.import.logicflow",
-              "match": "\"@[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*\""
-            }
-          ]
-        }
-      ]
-    },
-    "circuits": {
-      "patterns": [
-        {
-          "name": "entity.name.type.circuit.logicflow",
-          "match": "\\b(CIRCUIT|MACRO)\\s+([A-Za-z_][A-Za-z0-9_]*)",
-          "captures": {
-            "1": { "name": "keyword.declaration.logicflow" },
-            "2": { "name": "entity.name.function.logicflow" }
-          }
-        }
-      ]
-    },
-    "tests": {
-      "patterns": [
-        {
-          "name": "keyword.control.test.logicflow",
-          "match": "\\b(TEST|CASE|EXPECT)\\b"
-        },
-        {
-          "name": "string.quoted.double.test.logicflow",
-          "begin": "CASE\\s+",
-          "end": "(?=\\s|$)",
-          "patterns": [
-            {
-              "name": "string.quoted.double.logicflow",
-              "match": "\"[^\"]*\""
-            }
-          ]
-        }
-      ]
-    },
-    "identifiers": {
-      "patterns": [
-        {
-          "name": "variable.parameter.input.logicflow",
-          "match": "\\bINPUT\\s+([A-Za-z_][A-Za-z0-9_]*)",
-          "captures": {
-            "1": { "name": "variable.parameter.logicflow" }
-          }
-        },
-        {
-          "name": "variable.parameter.output.logicflow",
-          "match": "\\bOUTPUT\\s+([A-Za-z_][A-Za-z0-9_]*)",
-          "captures": {
-            "1": { "name": "variable.parameter.logicflow" }
-          }
-        },
-        {
-          "name": "variable.other.assign.logicflow",
-          "match": "([A-Za-z_][A-Za-z0-9_]*)\\s*="
-        },
-        {
-          "name": "variable.other.logicflow",
-          "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
-        }
-      ]
-    },
-    "numbers": {
-      "patterns": [
-        {
-          "name": "constant.numeric.binary.logicflow",
-          "match": "\\b[01]+'b\\b"
-        },
-        {
-          "name": "constant.numeric.hex.logicflow",
-          "match": "\\b[0-9A-Fa-f]+'h\\b"
-        },
-        {
-          "name": "constant.numeric.decimal.logicflow",
-          "match": "\\b\\d+\\b"
         }
       ]
     },
@@ -185,22 +67,165 @@
               "match": "\\\\."
             }
           ]
+        },
+        {
+          "name": "string.quoted.single.logicflow",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            {
+              "name": "constant.character.escape.logicflow",
+              "match": "\\\\."
+            }
+          ]
+        }
+      ]
+    },
+    "declarations": {
+      "patterns": [
+        {
+          "match": "(?i)\\b(circuit|macro)\\b\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.declaration.circuit.logicflow" },
+            "2": { "name": "entity.name.type.circuit.logicflow" }
+          }
+        },
+        {
+          "match": "(?i)\\b(test)\\b\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.control.test.logicflow" },
+            "2": { "name": "entity.name.function.test.logicflow" }
+          }
+        },
+        {
+          "match": "(?i)\\b(input)\\b\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.declaration.input.logicflow" },
+            "2": { "name": "variable.parameter.input.logicflow" }
+          }
+        },
+        {
+          "match": "(?i)\\b(output)\\b\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.declaration.output.logicflow" },
+            "2": { "name": "variable.parameter.output.logicflow" }
+          }
+        },
+        {
+          "match": "(?i)\\b(state|const)\\b\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.declaration.state.logicflow" },
+            "2": { "name": "variable.other.declaration.logicflow" }
+          }
+        }
+      ]
+    },
+    "builtins": {
+      "patterns": [
+        {
+          "name": "support.function.builtin.logicflow",
+          "match": "(?i)\\b(NAND|NOR|AND|OR|XOR|XNOR|NOT|BUF|BUFFER|MUX|CONCAT|BROADCAST|SLICE|ZEXT|SEXT|REPEAT|REVERSE|HALF_ADDER|FULL_ADDER|ADD4|ADD8)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "storage.type.logicflow",
+          "match": "(?i)\\b(BUS|BIT)\\b"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.logicflow",
+          "match": "(?i)\\b(CIRCUIT|MACRO|BODY|END|INPUT|OUTPUT|STATE|CONST|TEST|CASE|EXPECT|LOAD|STEP|CYCLE|ON|RISING_EDGE|FALLING_EDGE|IF|ELSE|FOR)\\b"
+        },
+        {
+          "name": "keyword.other.import.logicflow",
+          "match": "(?i)\\b(IMPORT|AS)\\b"
+        }
+      ]
+    },
+    "calls": {
+      "patterns": [
+        {
+          "name": "entity.name.function.call.logicflow",
+          "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\()"
+        }
+      ]
+    },
+    "members": {
+      "patterns": [
+        {
+          "match": "([A-Za-z_][A-Za-z0-9_]*)\\.([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "variable.other.logicflow" },
+            "2": { "name": "variable.other.property.logicflow" }
+          }
+        }
+      ]
+    },
+    "assignments": {
+      "patterns": [
+        {
+          "match": "([A-Za-z_][A-Za-z0-9_]*)\\s*(?==)",
+          "captures": {
+            "1": { "name": "variable.other.assignment.logicflow" }
+          }
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.hex.logicflow",
+          "match": "\\b0[xX][0-9a-fA-F_]+\\b"
+        },
+        {
+          "name": "constant.numeric.binary.logicflow",
+          "match": "\\b0[bB][01_]+\\b"
+        },
+        {
+          "name": "constant.numeric.decimal.logicflow",
+          "match": "\\b[0-9][0-9_]*\\b"
         }
       ]
     },
     "operators": {
       "patterns": [
         {
+          "name": "keyword.operator.comparison.logicflow",
+          "match": "=="
+        },
+        {
           "name": "keyword.operator.assignment.logicflow",
           "match": "="
         },
         {
+          "name": "keyword.operator.arithmetic.logicflow",
+          "match": "[+\\-*/%]"
+        },
+        {
+          "name": "keyword.operator.relational.logicflow",
+          "match": "[<>]"
+        },
+        {
           "name": "punctuation.separator.logicflow",
-          "match": ","
+          "match": "[,:]"
         },
         {
           "name": "punctuation.definition.parameters.logicflow",
-          "match": "[()]"
+          "match": "[()\\[\\]{}]"
+        }
+      ]
+    },
+    "identifiers": {
+      "patterns": [
+        {
+          "name": "variable.other.logicflow",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
         }
       ]
     }
