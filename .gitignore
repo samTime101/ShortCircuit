@@ -4,3 +4,7 @@ dist
 *.local
 .DS_Store
 coverage
+
+# VS Code extension build output
+packages/vscode-extension/out/
+packages/vscode-extension/*.vsix
