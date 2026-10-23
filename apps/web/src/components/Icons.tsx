@@ -93,6 +93,12 @@ export const Check = (p: IconProps) => (
     <path d="m4 12.5 5 5L20 6.5" />
   </Icon>
 );
+export const Search = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="11" cy="11" r="6.5" />
+    <path d="m16 16 4.5 4.5" />
+  </Icon>
+);
 export const X = (p: IconProps) => (
   <Icon {...p}>
     <path d="m6 6 12 12M18 6 6 18" />

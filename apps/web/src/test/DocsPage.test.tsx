@@ -1,11 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import {
   BUILTINS,
+  DEFAULT_PACKAGE_CATALOG,
   DEFAULT_PACKAGE_CIRCUITS,
   DEFAULT_PACKAGE_MACROS,
 } from "@shortcircuit/engine";
 import { DocsPage } from "../pages/DocsPage";
+import { packageAnchor } from "../pages/docsSearch";
 
 describe("documentation page", () => {
   it("documents every built-in with arguments and an example", () => {
@@ -112,5 +115,56 @@ describe("documentation page", () => {
     const section = document.getElementById("snippets");
     const snippets = within(section as HTMLElement).getAllByRole("article");
     expect(snippets.length).toBeGreaterThan(10);
+  });
+
+  it("searches sections and package functions from the top bar", async () => {
+    const user = userEvent.setup();
+    render(<DocsPage onBack={() => {}} />);
+    const search = screen.getByRole("combobox", { name: /search documentation/i });
+
+    await user.type(search, "compare4");
+    const list = await screen.findByRole("listbox", { name: /search results/i });
+    expect(within(list).getByText("COMPARE4")).toBeInTheDocument();
+
+    await user.clear(search);
+    await user.type(search, "syntax");
+    const syntaxList = await screen.findByRole("listbox", { name: /search results/i });
+    expect(within(syntaxList).getByText("Syntax")).toBeInTheDocument();
+  });
+
+  it("jumps to a search result with Enter", async () => {
+    const user = userEvent.setup();
+    render(<DocsPage onBack={() => {}} />);
+    const search = screen.getByRole("combobox", { name: /search documentation/i });
+
+    await user.type(search, "compare4");
+    const list = await screen.findByRole("listbox", { name: /search results/i });
+    expect(within(list).getByText("COMPARE4")).toBeInTheDocument();
+
+    await user.keyboard("{Enter}");
+    expect(screen.queryByRole("listbox", { name: /search results/i })).not.toBeInTheDocument();
+    expect(search).toHaveValue("");
+  });
+
+  it("documents every package with its import and public functions", () => {
+    render(<DocsPage onBack={() => {}} />);
+    for (const manifest of DEFAULT_PACKAGE_CATALOG.packages) {
+      const section = document.getElementById(packageAnchor(manifest.name));
+      expect(section, manifest.name).not.toBeNull();
+      const text = section?.textContent ?? "";
+      expect(text, manifest.name).toContain(manifest.name);
+      expect(text, manifest.name).toContain(`IMPORT "${manifest.name}"`);
+      for (const entry of manifest.exports) {
+        if (entry.kind === "macro" && entry.internal) continue;
+        expect(text, `${manifest.name}.${entry.name}`).toContain(entry.name);
+      }
+    }
+  });
+
+  it("renders the package docs notes for a function", () => {
+    render(<DocsPage onBack={() => {}} />);
+    const halfAdder = document.getElementById("fn-half_adder");
+    expect(halfAdder?.textContent).toContain("Adds two one-bit values.");
+    expect(halfAdder?.querySelector(".docs-notes-table")).not.toBeNull();
   });
 });

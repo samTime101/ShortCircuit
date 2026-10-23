@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   BUILTINS,
+  DEFAULT_PACKAGE_CATALOG,
   DEFAULT_PACKAGE_CIRCUITS,
   DEFAULT_PACKAGE_MACROS,
   GLOSSARY,
@@ -8,10 +9,20 @@ import {
   LANGUAGE_VERSION,
   IR_SCHEMA,
   packageWorkedExamples,
+  type PackageExport,
+  type PackageManifest,
   type WorkedExample,
 } from "@shortcircuit/engine";
 import { ArrowUpRight, Check, Code, Copy, Layers } from "../components/Icons";
 import { highlightLogicFlow } from "../editor/logicFlowHighlight";
+import { DocsSearch } from "./DocsSearch";
+import {
+  buildDocsSearchIndex,
+  functionAnchor,
+  packageAnchor,
+  snippetAnchor,
+  termAnchor,
+} from "./docsSearch";
 import "./docs.css";
 
 interface DocsPageProps {
@@ -24,54 +35,177 @@ interface SectionDef {
   id: string;
   label: string;
   group: string;
+  keywords?: string[];
 }
 
 /** The worked example of every package export, taken from the package tests. */
 const WORKED_EXAMPLES = packageWorkedExamples();
+
+const PACKAGES = DEFAULT_PACKAGE_CATALOG.packages;
+const MACROS_BY_NAME = new Map(
+  DEFAULT_PACKAGE_MACROS.map((macro) => [macro.name.toUpperCase(), macro]),
+);
 
 function workedExampleFor(packageName: string, exportName: string): WorkedExample | undefined {
   return WORKED_EXAMPLES.get(`${packageName}:${exportName}`);
 }
 
 const SECTIONS: SectionDef[] = [
-  { id: "overview", label: "Overview", group: "Getting started" },
-  { id: "quick-start", label: "Quick start", group: "Getting started" },
-  { id: "glossary", label: "Glossary", group: "Getting started" },
-  { id: "syntax", label: "Syntax", group: "Language" },
-  { id: "values", label: "Values and buses", group: "Language" },
-  { id: "signals", label: "Signals and state", group: "Language" },
-  { id: "operations", label: "Built-in operations", group: "Language" },
-  { id: "reference", label: "Function reference", group: "Language" },
-  { id: "widths", label: "Width policy", group: "Language" },
-  { id: "packages", label: "Imports and packages", group: "Language" },
-  { id: "libraries", label: "Fixed-width library", group: "Language" },
-  { id: "composition", label: "Composition", group: "Language" },
-  { id: "clocking", label: "State and clocks", group: "Language" },
-  { id: "testing", label: "Tests and truth tables", group: "Language" },
-  { id: "diagnostics", label: "Diagnostics", group: "Reference" },
-  { id: "limits", label: "Limits", group: "Reference" },
-  { id: "snippets", label: "Snippet library", group: "Reference" },
-  { id: "displays", label: "Output displays", group: "Reference" },
-  { id: "editor", label: "Editor tips", group: "Reference" },
-  { id: "ir", label: "Portable IR", group: "Reference" },
+  {
+    id: "overview",
+    label: "Overview",
+    group: "Getting started",
+    keywords: ["introduction", "start", "what is logicflow"],
+  },
+  {
+    id: "syntax",
+    label: "Syntax",
+    group: "Language",
+    keywords: [
+      "program",
+      "structure",
+      "circuit",
+      "comments",
+      "identifiers",
+      "keywords",
+      "lexical",
+      "quick start",
+      "end",
+    ],
+  },
+  {
+    id: "values",
+    label: "Values and buses",
+    group: "Language",
+    keywords: ["literals", "decimal", "binary", "hex", "bus", "slice", "concat", "width"],
+  },
+  {
+    id: "signals",
+    label: "Signals and state",
+    group: "Language",
+    keywords: ["input", "output", "state", "assignment", "duplicate", "feedback"],
+  },
+  {
+    id: "composition",
+    label: "Composition",
+    group: "Language",
+    keywords: ["instance", "ports", "named arguments", "recursion", "nested"],
+  },
+  {
+    id: "clocking",
+    label: "State and clocks",
+    group: "Language",
+    keywords: ["edge", "rising", "falling", "register", "clock", "state update"],
+  },
+  {
+    id: "testing",
+    label: "Tests and truth tables",
+    group: "Verification",
+    keywords: ["test", "case", "expect", "step", "cycle", "load", "truth table"],
+  },
+  {
+    id: "operations",
+    label: "Built-in operations",
+    group: "Built-in functions",
+    keywords: ["gates", "bus", "kernel", "nand", "catalog"],
+  },
+  {
+    id: "reference",
+    label: "Built-in reference",
+    group: "Built-in functions",
+    keywords: ["signature", "arguments", "width", "function", "built in"],
+  },
+  {
+    id: "widths",
+    label: "Width policy",
+    group: "Built-in functions",
+    keywords: ["truncation", "extension", "mismatch", "zero extend", "sign extend"],
+  },
+  {
+    id: "packages",
+    label: "Imports and packages",
+    group: "Packages",
+    keywords: ["import", "alias", "dependency", "module", "library"],
+  },
+  ...PACKAGES.map((manifest) => ({
+    id: packageAnchor(manifest.name),
+    label: manifest.name,
+    group: "Packages",
+    keywords: [
+      manifest.name.replace("@shortcircuit/", ""),
+      manifest.description ?? "",
+      ...Object.keys(manifest.dependencies ?? {}),
+    ],
+  })),
+  {
+    id: "diagnostics",
+    label: "Diagnostics",
+    group: "Reference",
+    keywords: ["error", "warning", "code", "suggestion", "e301"],
+  },
+  {
+    id: "limits",
+    label: "Limits",
+    group: "Reference",
+    keywords: ["maximum", "nodes", "width", "depth", "instances"],
+  },
+  {
+    id: "glossary",
+    label: "Glossary",
+    group: "Reference",
+    keywords: ["terms", "definitions", "plain language"],
+  },
+  {
+    id: "snippets",
+    label: "Snippet library",
+    group: "Reference",
+    keywords: ["templates", "examples", "editor"],
+  },
+  {
+    id: "displays",
+    label: "Output displays",
+    group: "Reference",
+    keywords: ["leds", "seven segment", "bar", "grid", "number"],
+  },
+  {
+    id: "editor",
+    label: "Editor tips",
+    group: "Reference",
+    keywords: ["completions", "hover", "shortcuts", "keyboard"],
+  },
+  {
+    id: "ir",
+    label: "Portable IR",
+    group: "Reference",
+    keywords: ["json", "schema", "export", "graph"],
+  },
 ];
+
+/** Number the numbered sections in reading order. The hero is not numbered. */
+const SECTION_INDEX = new Map(
+  SECTIONS.filter((section) => section.id !== "overview").map((section, index) => [
+    section.id,
+    String(index + 1).padStart(2, "0"),
+  ]),
+);
 
 const CATEGORY_LABEL: Record<string, string> = {
   gate: "gate",
   bus: "bus",
 };
 
-
-
-function useActiveSection(scroller: React.RefObject<HTMLElement | null>): string {
-  const [active, setActive] = useState(SECTIONS[0]!.id);
+function useActiveSection(
+  scroller: React.RefObject<HTMLElement | null>,
+  sections: readonly SectionDef[],
+): string {
+  const [active, setActive] = useState(sections[0]?.id ?? "");
   useEffect(() => {
     const element = scroller.current;
     if (!element) return;
     const update = () => {
-      const marker = element.scrollTop + 150;
-      let current = SECTIONS[0]!.id;
-      for (const section of SECTIONS) {
+      const marker = 150;
+      let current = sections[0]?.id ?? "";
+      for (const section of sections) {
         const target = element.querySelector(`#${section.id}`);
         if (!target) continue;
         const top = target.getBoundingClientRect().top - element.getBoundingClientRect().top;
@@ -86,7 +220,7 @@ function useActiveSection(scroller: React.RefObject<HTMLElement | null>): string
       element.removeEventListener("scroll", update);
       window.removeEventListener("resize", update);
     };
-  }, [scroller]);
+  }, [scroller, sections]);
   return active;
 }
 
@@ -128,19 +262,18 @@ function CodeBlock({ code, caption }: { code: string; caption?: string }) {
 
 function Section({
   id,
-  index,
   eyebrow,
   title,
   lead,
   children,
 }: {
   id: string;
-  index: string;
   eyebrow: string;
   title: string;
   lead?: string;
   children: ReactNode;
 }) {
+  const index = SECTION_INDEX.get(id) ?? "";
   return (
     <section id={id} className="docs-section">
       <header className="docs-section-head">
@@ -159,9 +292,371 @@ function Note({ kind = "info", children }: { kind?: "info" | "warn"; children: R
   return <div className={`docs-note is-${kind}`}>{children}</div>;
 }
 
+function widthLabel(width: number): string {
+  return width === 1 ? "1 bit" : `BUS(${width})`;
+}
+
+function inlineText(text: string): ReactNode {
+  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
+  return parts.map((part, index) => {
+    if (part.startsWith("`") && part.endsWith("`") && part.length >= 2) {
+      return <code key={index}>{part.slice(1, -1)}</code>;
+    }
+    if (part.startsWith("**") && part.endsWith("**") && part.length >= 4) {
+      return <strong key={index}>{part.slice(2, -2)}</strong>;
+    }
+    return <span key={index}>{part}</span>;
+  });
+}
+
+function isNotesBlockStart(line: string): boolean {
+  const trimmed = line.trimStart();
+  return (
+    trimmed.startsWith("#") ||
+    trimmed.startsWith("|") ||
+    trimmed.startsWith("```") ||
+    /^[-*]\s+/.test(trimmed)
+  );
+}
+
+/** Render the small Markdown subset used by package docs files. */
+function DocsNotes({ markdown }: { markdown: string }) {
+  const lines = markdown.replace(/\r\n/g, "\n").split("\n");
+  const blocks: ReactNode[] = [];
+  let index = 0;
+  let key = 0;
+
+  while (index < lines.length) {
+    const line = lines[index]!;
+    if (!line.trim()) {
+      index += 1;
+      continue;
+    }
+
+    if (line.startsWith("# ")) {
+      // The function card already shows the export name.
+      index += 1;
+      continue;
+    }
+
+    if (line.startsWith("## ") || line.startsWith("### ")) {
+      const level = line.startsWith("### ") ? 6 : 5;
+      const title = line.slice(level === 6 ? 4 : 3).trim();
+      blocks.push(
+        level === 6 ? (
+          <h6 key={key++}>{inlineText(title)}</h6>
+        ) : (
+          <h5 key={key++}>{inlineText(title)}</h5>
+        ),
+      );
+      index += 1;
+      continue;
+    }
+
+    if (line.trimStart().startsWith("```")) {
+      const caption = line.trim().slice(3).trim();
+      const code: string[] = [];
+      index += 1;
+      while (index < lines.length && !lines[index]!.trimStart().startsWith("```")) {
+        code.push(lines[index]!);
+        index += 1;
+      }
+      if (index < lines.length) index += 1;
+      blocks.push(<CodeBlock key={key++} code={code.join("\n")} caption={caption || undefined} />);
+      continue;
+    }
+
+    if (line.trimStart().startsWith("|")) {
+      const rows: string[][] = [];
+      while (index < lines.length && lines[index]!.trimStart().startsWith("|")) {
+        rows.push(
+          lines[index]!
+            .trim()
+            .replace(/^\|/, "")
+            .replace(/\|$/, "")
+            .split("|")
+            .map((cell) => cell.trim()),
+        );
+        index += 1;
+      }
+      const header = rows[0] ?? [];
+      const body = rows.slice(2);
+      blocks.push(
+        <table className="docs-table docs-notes-table" key={key++}>
+          <thead>
+            <tr>
+              {header.map((cell, cellIndex) => (
+                <th key={cellIndex}>{inlineText(cell)}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {body.map((row, rowIndex) => (
+              <tr key={rowIndex}>
+                {row.map((cell, cellIndex) => (
+                  <td key={cellIndex}>{inlineText(cell)}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>,
+      );
+      continue;
+    }
+
+    if (/^\s*[-*]\s+/.test(line)) {
+      const items: string[] = [];
+      while (index < lines.length && /^\s*[-*]\s+/.test(lines[index]!)) {
+        items.push(lines[index]!.replace(/^\s*[-*]\s+/, ""));
+        index += 1;
+      }
+      blocks.push(
+        <ul className="docs-list" key={key++}>
+          {items.map((item, itemIndex) => (
+            <li key={itemIndex}>{inlineText(item)}</li>
+          ))}
+        </ul>,
+      );
+      continue;
+    }
+
+    const paragraph: string[] = [];
+    while (index < lines.length && lines[index]!.trim() && !isNotesBlockStart(lines[index]!)) {
+      paragraph.push(lines[index]!.trim());
+      index += 1;
+    }
+    if (paragraph.length === 0) {
+      paragraph.push(line.trim());
+      index += 1;
+    }
+    blocks.push(<p key={key++}>{inlineText(paragraph.join(" "))}</p>);
+  }
+
+  return <div className="docs-notes">{blocks}</div>;
+}
+
+function publicPackageExports(manifest: PackageManifest): PackageExport[] {
+  return manifest.exports.filter((entry) => entry.kind !== "macro" || !entry.internal);
+}
+
+function groupPackageExports(
+  entries: PackageExport[],
+): { title: string; entries: PackageExport[] }[] {
+  const groups = new Map<string, PackageExport[]>();
+  for (const entry of entries) {
+    const title = entry.group ?? (entry.kind === "macro" ? "Macros" : "Circuits");
+    const list = groups.get(title) ?? [];
+    list.push(entry);
+    groups.set(title, list);
+  }
+  return [...groups.entries()].map(([title, list]) => ({ title, entries: list }));
+}
+
+function PackageExportArticle({
+  entry,
+  packageName,
+}: {
+  entry: PackageExport;
+  packageName: string;
+}) {
+  if (entry.kind === "macro") {
+    const macro = MACROS_BY_NAME.get(entry.name.toUpperCase());
+    const example = workedExampleFor(packageName, entry.name);
+    const args = macro?.args ?? [];
+    return (
+      <article className="docs-fn docs-package-fn" id={functionAnchor(entry.name)}>
+        <header>
+          <h4>
+            <code>{macro?.signature ?? `${entry.name}(...)`}</code>
+            <span className="docs-fn-category">macro</span>
+          </h4>
+          <p>{entry.summary}</p>
+        </header>
+        <div className="docs-fn-body">
+          <dl className="docs-fn-args">
+            {args.map((name) => (
+              <div key={name}>
+                <dt>
+                  <code>{name}</code>
+                </dt>
+                <dd>Input.</dd>
+              </div>
+            ))}
+            {macro?.variadic ? (
+              <div>
+                <dt>
+                  <code>...</code>
+                </dt>
+                <dd>Further inputs, folded by the macro.</dd>
+              </div>
+            ) : null}
+          </dl>
+          <div className="docs-fn-meta">
+            <span>
+              <strong>Result width</strong>
+              {entry.widthRule ?? "Follows compiler width rules."}
+            </span>
+            <span>
+              <strong>Expands to</strong>
+              <code>{macro?.body ?? `FOLD ${macro?.fold ?? "helper"}`}</code>
+            </span>
+            <span>
+              <strong>Package</strong>
+              {packageName}
+            </span>
+            {example ? (
+              <span>
+                <strong>Example</strong>
+                <code>{`y = ${example.call}`}</code>
+                <span className="docs-fn-expected">
+                  {example.value === undefined
+                    ? example.ports.map((port) => `${port.name} = ${port.value}`).join(", ")
+                    : example.value}
+                </span>
+              </span>
+            ) : entry.examples?.[0] ? (
+              <span>
+                <strong>Example</strong>
+                <code>{entry.examples[0]}</code>
+              </span>
+            ) : null}
+          </div>
+        </div>
+        {entry.docsText ? <DocsNotes markdown={entry.docsText} /> : null}
+      </article>
+    );
+  }
+
+  const inputs = entry.ports?.inputs ?? [];
+  const outputs = entry.ports?.outputs ?? [];
+  const example = workedExampleFor(packageName, entry.name);
+  return (
+    <article className="docs-fn docs-package-fn" id={functionAnchor(entry.name)}>
+      <header>
+        <h4>
+          <code>
+            {entry.name}({inputs.map((port) => port.name).join(", ")})
+          </code>
+          <span className="docs-fn-category">circuit</span>
+        </h4>
+        <p>{entry.summary}</p>
+      </header>
+      <div className="docs-fn-body">
+        <dl className="docs-fn-args docs-port-args">
+          {inputs.map((port) => (
+            <div key={`in-${port.name}`}>
+              <dt>
+                <code>{port.name}</code>
+                <span className="docs-port-width">{widthLabel(port.width)}</span>
+              </dt>
+              <dd>Input port.</dd>
+            </div>
+          ))}
+          {outputs.map((port) => (
+            <div key={`out-${port.name}`}>
+              <dt>
+                <code>{port.name}</code>
+                <span className="docs-port-width">{widthLabel(port.width)}</span>
+              </dt>
+              <dd>Output port.</dd>
+            </div>
+          ))}
+        </dl>
+        <div className="docs-fn-meta">
+          <span>
+            <strong>Package</strong>
+            {packageName}
+          </span>
+          <span>
+            <strong>Ports</strong>
+            {inputs.length} in, {outputs.length} out
+          </span>
+          {example ? (
+            <span>
+              <strong>Example</strong>
+              <code>{`inst = ${example.call}`}</code>
+              <span className="docs-fn-expected">
+                {example.ports.map((port) => `inst.${port.name} = ${port.value}`).join(", ")}
+              </span>
+            </span>
+          ) : null}
+        </div>
+      </div>
+      {entry.docsText ? <DocsNotes markdown={entry.docsText} /> : null}
+    </article>
+  );
+}
+
+function PackageSection({ manifest }: { manifest: PackageManifest }) {
+  const entries = publicPackageExports(manifest);
+  const groups = groupPackageExports(entries);
+  const dependencies = Object.keys(manifest.dependencies ?? {});
+
+  return (
+    <Section
+      id={packageAnchor(manifest.name)}
+      eyebrow="Packages"
+      title={manifest.name}
+      lead={manifest.description}
+    >
+      <div className="docs-package-meta">
+        <span className="docs-chip">v{manifest.version}</span>
+        <span className="docs-chip">
+          {entries.length} public {entries.length === 1 ? "function" : "functions"}
+        </span>
+        {dependencies.length > 0 ? (
+          <span className="docs-package-deps">Depends on {dependencies.join(", ")}</span>
+        ) : (
+          <span className="docs-package-deps">No package dependencies</span>
+        )}
+      </div>
+
+      <div className="docs-columns">
+        <div>
+          <h4>Import</h4>
+          <CodeBlock caption={`${manifest.name} package`} code={`IMPORT "${manifest.name}"`} />
+          <p>
+            Add this line to the top of a source file to use the functions below without a
+            qualifier. Add <code>AS alias</code> to keep them namespaced.
+          </p>
+        </div>
+        <div>
+          <h4>Functions in this package</h4>
+          <div className="docs-package-functions">
+            {groups.map((group) => (
+              <div key={group.title}>
+                <span className="docs-package-group-title">{group.title}</span>
+                <div className="docs-fn-index">
+                  {group.entries.map((entry) => (
+                    <a key={entry.name} href={`#${functionAnchor(entry.name)}`}>
+                      {entry.name}
+                    </a>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {groups.map((group) => (
+        <div className="docs-package-group" key={group.title}>
+          <h4>
+            <Layers size={14} />
+            {group.title}
+          </h4>
+          {group.entries.map((entry) => (
+            <PackageExportArticle key={entry.name} entry={entry} packageName={manifest.name} />
+          ))}
+        </div>
+      ))}
+    </Section>
+  );
+}
+
 export function DocsPage({ onBack, beginner }: DocsPageProps) {
   const pageRef = useRef<HTMLDivElement>(null);
-  const active = useActiveSection(pageRef);
+  const active = useActiveSection(pageRef, SECTIONS);
   const packageGroups = useMemo(() => {
     const map = new Map<string, string[]>();
     const add = (group: string, name: string) => {
@@ -188,10 +683,26 @@ export function DocsPage({ onBack, beginner }: DocsPageProps) {
     }
     return [...map.entries()];
   }, []);
+  const searchEntries = useMemo(
+    () =>
+      buildDocsSearchIndex({
+        sections: SECTIONS,
+        packages: PACKAGES,
+        macros: DEFAULT_PACKAGE_MACROS,
+        circuits: DEFAULT_PACKAGE_CIRCUITS,
+        glossary: GLOSSARY,
+        snippets: LANGUAGE_SNIPPETS,
+        builtins: BUILTINS,
+      }),
+    [],
+  );
 
   const jump = (id: string) => {
     const element = document.getElementById(id);
-    if (element) element.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (!element) return;
+    element.scrollIntoView?.({ behavior: "smooth", block: "start" });
+    element.classList.add("docs-target");
+    window.setTimeout(() => element.classList.remove("docs-target"), 1400);
   };
 
   return (
@@ -206,6 +717,7 @@ export function DocsPage({ onBack, beginner }: DocsPageProps) {
             <span>LogicFlow documentation</span>
           </div>
         </div>
+        <DocsSearch entries={searchEntries} onJump={jump} />
         <div className="docs-topbar-actions">
           <span className="docs-meta">{LANGUAGE_VERSION}</span>
           <span className="docs-meta">{IR_SCHEMA}</span>
@@ -276,7 +788,10 @@ export function DocsPage({ onBack, beginner }: DocsPageProps) {
               <div>
                 <span className="eyebrow">Where to go next</span>
                 <ul>
-                  <li>Read the quick start, then the width policy.</li>
+                  <li>
+                    Press <kbd>/</kbd> anywhere to search sections, functions, and packages.
+                  </li>
+                  <li>Read the syntax section, then the width policy.</li>
                   <li>Hover any built-in in the editor for its signature and tip.</li>
                   <li>Copy a snippet from the library and paste it into the editor.</li>
                 </ul>
@@ -285,83 +800,7 @@ export function DocsPage({ onBack, beginner }: DocsPageProps) {
           </section>
 
           <Section
-            id="quick-start"
-            index="01"
-            eyebrow="Getting started"
-            title="Quick start"
-            lead="One circuit, two gates, four exhaustive tests. Everything else in the language builds on this shape."
-          >
-            <CodeBlock
-              caption="half-adder.lf"
-              code={`IMPORT "@shortcircuit/gates"
-
-CIRCUIT HalfAdder
-
-INPUT a
-INPUT b
-
-sum = XOR(a, b)
-carry = AND(a, b)
-
-OUTPUT sum
-OUTPUT carry
-
-END
-
-TEST HalfAdder
-
-CASE "1 + 1"
-  INPUT a = 1
-  INPUT b = 1
-  EXPECT sum = 0
-  EXPECT carry = 1
-END
-
-END`}
-            />
-            <div className="docs-columns">
-              <div>
-                <h4>How the studio reads it</h4>
-                <p>
-                  The compiler resolves names and widths, then flattens the design into a portable
-                  graph. Simulation, the evaluation graph, the truth table, the tests, and the JSON
-                  export all read that same graph.
-                </p>
-              </div>
-              <div>
-                <h4>What to try</h4>
-                <p>
-                  Type <code>XOR</code> in the editor and pick the completion, hover the call to
-                  read its width rule, then flip the input bits in the simulation dock.
-                </p>
-              </div>
-            </div>
-          </Section>
-
-          <Section
-            id="glossary"
-            index="02"
-            eyebrow="Getting started"
-            title="Glossary"
-            lead="The words this language uses, in plain language."
-          >
-            <div className="docs-glossary">
-              {GLOSSARY.map((entry) => (
-                <article key={entry.term}>
-                  <header>
-                    <h3>{entry.term}</h3>
-                    <span className="docs-chip small">{entry.group}</span>
-                  </header>
-                  <p className="docs-glossary-short">{entry.short}</p>
-                  <p className="docs-glossary-long">{entry.long}</p>
-                </article>
-              ))}
-            </div>
-          </Section>
-
-          <Section
             id="syntax"
-            index="02"
             eyebrow="Language"
             title="Syntax"
             lead="LogicFlow is line oriented. One declaration or assignment per line, blocks closed with END."
@@ -450,11 +889,61 @@ OUTPUT a`}
                 </ul>
               </div>
             </div>
+
+            <h4>A complete program</h4>
+            <p>
+              One circuit, two gates, and four exhaustive tests. Everything else in the language
+              builds on this shape.
+            </p>
+            <CodeBlock
+              caption="half-adder.lf"
+              code={`IMPORT "@shortcircuit/gates"
+
+CIRCUIT HalfAdder
+
+INPUT a
+INPUT b
+
+sum = XOR(a, b)
+carry = AND(a, b)
+
+OUTPUT sum
+OUTPUT carry
+
+END
+
+TEST HalfAdder
+
+CASE "1 + 1"
+  INPUT a = 1
+  INPUT b = 1
+  EXPECT sum = 0
+  EXPECT carry = 1
+END
+
+END`}
+            />
+            <div className="docs-columns">
+              <div>
+                <h4>How the studio reads it</h4>
+                <p>
+                  The compiler resolves names and widths, then flattens the design into a portable
+                  graph. Simulation, the evaluation graph, the truth table, the tests, and the JSON
+                  export all read that same graph.
+                </p>
+              </div>
+              <div>
+                <h4>What to try</h4>
+                <p>
+                  Type <code>XOR</code> in the editor and pick the completion, hover the call to
+                  read its width rule, then flip the input bits in the simulation dock.
+                </p>
+              </div>
+            </div>
           </Section>
 
           <Section
             id="values"
-            index="03"
             eyebrow="Language"
             title="Values and buses"
             lead="Literals, buses, bit selection, and the ways one value becomes another."
@@ -543,7 +1032,6 @@ word    = CONCAT(upper, low_bit)`}
 
           <Section
             id="signals"
-            index="04"
             eyebrow="Language"
             title="Signals and state"
             lead="Every signal has exactly one definition: an input, a stored state, or an assignment."
@@ -579,458 +1067,7 @@ STATE armed = 1`}
           </Section>
 
           <Section
-            id="operations"
-            index="05"
-            eyebrow="Language"
-            title="Operations and packages"
-            lead="Every operation is a real node in the compiled graph. Core operations and package macros share one catalog, and hovering either in the editor shows the same details."
-          >
-            <div className="docs-defaults">
-              <span className="eyebrow">Included by default</span>
-              <p>
-                These gates and circuits come from the bundled packages, so you never have to
-                define them yourself. Gate macros expand to NAND, and package circuits expand
-                into the same graph nodes as any other circuit.
-              </p>
-              <div className="docs-default-grid">
-                {packageGroups.map((group) => (
-                  <div className="docs-default-group" key={group.title}>
-                    <h5>{group.title}</h5>
-                    <ul className="docs-default-items">
-                      {group.items.map((name) => (
-                        <li key={name}>
-                          <a href={`#fn-${name.toLowerCase()}`}>{name}</a>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {DEFAULT_PACKAGE_MACROS.length > 0 ? (
-              <div className="docs-op-group">
-                <h4>
-                  <Layers size={14} />
-                  package macros
-                </h4>
-                <table className="docs-table">
-                  <thead>
-                    <tr>
-                      <th>Call</th>
-                      <th>Result width</th>
-                      <th>What it does</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {DEFAULT_PACKAGE_MACROS.map((macro) => (
-                      <tr key={macro.name}>
-                        <td>
-                          <code>{macro.signature}</code>
-                          <span className="docs-op-tip">
-                            {macro.examples?.[0] ?? macro.summary}
-                          </span>
-                        </td>
-                        <td>{macro.widthRule ?? "Follows compiler width rules"}</td>
-                        <td>{macro.summary}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : null}
-
-            {(["gate", "bus"] as const).map((category) => (
-              <div className="docs-op-group" key={category}>
-                <h4>
-                  {category === "gate" ? <Layers size={14} /> : null}
-                  {CATEGORY_LABEL[category]}
-                </h4>
-                <table className="docs-table">
-                  <thead>
-                    <tr>
-                      <th>Call</th>
-                      <th>Result width</th>
-                      <th>What it does</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {BUILTINS.filter((spec) => spec.category === category).map((spec) => (
-                      <tr key={spec.name}>
-                        <td>
-                          <code>{spec.signature}</code>
-                          <span className="docs-op-tip">{spec.tip}</span>
-                        </td>
-                        <td>{spec.widthRule}</td>
-                        <td>{spec.description}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ))}
-
-            <h4>Circuit-shaped components</h4>
-            <table className="docs-table">
-              <thead>
-                <tr>
-                  <th>Call</th>
-                  <th>Ports</th>
-                  <th>What it does</th>
-                </tr>
-              </thead>
-              <tbody>
-                {DEFAULT_PACKAGE_CIRCUITS.map(({ circuit }) => {
-                  const inputs = circuit.ports?.inputs.map((port) => port.name) ?? [];
-                  const outputs = circuit.ports?.outputs.map((port) => port.name) ?? [];
-                  return (
-                    <tr key={circuit.name}>
-                      <td>
-                        <code>{circuit.name}({inputs.join(", ")})</code>
-                      </td>
-                      <td>
-                        {inputs.join(", ")} → {outputs.join(", ")}
-                      </td>
-                      <td>{circuit.summary}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </Section>
-
-          <Section
-            id="reference"
-            index="06"
-            eyebrow="Language"
-            title="Function reference"
-            lead="Every built-in operation and package macro, with its arguments, the width it produces, and a call example."
-          >
-            <div className="docs-fn-index">
-              {DEFAULT_PACKAGE_MACROS.map((macro) => (
-                <a key={macro.name} href={`#fn-${macro.name.toLowerCase()}`}>
-                  {macro.name}
-                </a>
-              ))}
-              {BUILTINS.map((spec) => (
-                <a key={spec.name} href={`#fn-${spec.name.toLowerCase()}`}>
-                  {spec.name}
-                </a>
-              ))}
-              {DEFAULT_PACKAGE_CIRCUITS.map(({ circuit }) => (
-                <a key={circuit.name} href={`#fn-${circuit.name.toLowerCase()}`}>
-                  {circuit.name}
-                </a>
-              ))}
-            </div>
-
-            {DEFAULT_PACKAGE_MACROS.map((macro) => {
-              const example = workedExampleFor(macro.packageName, macro.name);
-              return (
-              <article className="docs-fn" id={`fn-${macro.name.toLowerCase()}`} key={macro.name}>
-                <header>
-                  <h4>
-                    <code>{macro.signature}</code>
-                    <span className="docs-fn-category">package macro</span>
-                  </h4>
-                  <p>{macro.summary}</p>
-                </header>
-                <div className="docs-fn-body">
-                  <dl className="docs-fn-args">
-                    {macro.args.map((name) => (
-                      <div key={name}>
-                        <dt><code>{name}</code></dt>
-                        <dd>Input.</dd>
-                      </div>
-                    ))}
-                    {macro.variadic ? (
-                      <div>
-                        <dt><code>...</code></dt>
-                        <dd>Further inputs, folded by the package macro.</dd>
-                      </div>
-                    ) : null}
-                  </dl>
-                  <div className="docs-fn-meta">
-                    <span>
-                      <strong>Result width</strong>
-                      {macro.widthRule ?? "Follows compiler width rules."}
-                    </span>
-                    <span>
-                      <strong>Expands to</strong>
-                      <code>{macro.body ?? `FOLD ${macro.fold ?? "helper"}`}</code>
-                    </span>
-                    <span>
-                      <strong>Package</strong>
-                      {macro.group ?? "Package macro"}
-                    </span>
-                    {example ? (
-                      <span>
-                        <strong>Example</strong>
-                        <code>{`y = ${example.call}`}</code>
-                        <span className="docs-fn-expected">
-                          {example.value === undefined
-                            ? example.ports.map((port) => `${port.name} = ${port.value}`).join(", ")
-                            : example.value}
-                        </span>
-                      </span>
-                    ) : macro.examples?.[0] ? (
-                      <span>
-                        <strong>Example</strong>
-                        <code>{macro.examples[0]}</code>
-                      </span>
-                    ) : null}
-                  </div>
-                </div>
-              </article>
-              );
-            })}
-
-            {BUILTINS.map((spec) => (
-              <article className="docs-fn" id={`fn-${spec.name.toLowerCase()}`} key={spec.name}>
-                <header>
-                  <h4>
-                    <code>{spec.signature}</code>
-                    <span className="docs-fn-category">{spec.category}</span>
-                  </h4>
-                  <p>{spec.description}</p>
-                </header>
-                <div className="docs-fn-body">
-                  <dl className="docs-fn-args">
-                    {spec.args.map((arg) => (
-                      <div key={arg.name}>
-                        <dt>
-                          <code>{arg.name}</code>
-                        </dt>
-                        <dd>
-                          {arg.description}
-                          {arg.optional ? " Optional." : ""}
-                        </dd>
-                      </div>
-                    ))}
-                  </dl>
-                  <div className="docs-fn-meta">
-                    <span>
-                      <strong>Result width</strong>
-                      {spec.widthRule}
-                    </span>
-                    <span>
-                      <strong>Tip</strong>
-                      {spec.tip}
-                    </span>
-                    <span>
-                      <strong>Example</strong>
-                      <code>{spec.example.call}</code>
-                      <span className="docs-fn-expected">
-                        {spec.example.result} — {spec.example.note}
-                      </span>
-                    </span>
-                  </div>
-                </div>
-              </article>
-            ))}
-
-            <h4>Circuit-shaped components</h4>
-            {DEFAULT_PACKAGE_CIRCUITS.map(({ circuit, packageName }) => {
-              const inputs = circuit.ports?.inputs.map((port) => port.name) ?? [];
-              const outputs = circuit.ports?.outputs.map((port) => port.name) ?? [];
-              const example = workedExampleFor(packageName, circuit.name);
-              return (
-                <article className="docs-fn" id={`fn-${circuit.name.toLowerCase()}`} key={circuit.name}>
-                  <header>
-                    <h4>
-                      <code>{circuit.name}({inputs.join(", ")})</code>
-                      <span className="docs-fn-category">component</span>
-                    </h4>
-                    <p>{circuit.summary}</p>
-                  </header>
-                  <div className="docs-fn-body">
-                    <dl className="docs-fn-args">
-                      {inputs.map((name) => (
-                        <div key={name}>
-                          <dt><code>{name}</code></dt>
-                          <dd>Input port.</dd>
-                        </div>
-                      ))}
-                      <div>
-                        <dt><code>outputs</code></dt>
-                        <dd>{outputs.join(", ")}</dd>
-                      </div>
-                    </dl>
-                    <div className="docs-fn-meta">
-                      <span>
-                        <strong>Package</strong>
-                        {circuit.group ?? "Package circuit"}
-                      </span>
-                      <span>
-                        <strong>Tip</strong>
-                        Assign an instance, then read its output ports: <code>inst.{outputs[0] ?? "out"}</code>.
-                      </span>
-                      {example ? (
-                        <span>
-                          <strong>Example</strong>
-                          <code>{`inst = ${example.call}`}</code>
-                          <span className="docs-fn-expected">
-                            {example.ports.map((port) => `inst.${port.name} = ${port.value}`).join(", ")}
-                          </span>
-                        </span>
-                      ) : null}
-                    </div>
-                  </div>
-                </article>
-              );
-            })}
-          </Section>
-
-          <Section
-            id="widths"
-            index="07"
-            eyebrow="Language"
-            title="Width policy"
-            lead="Widths are checked before anything runs. Literals fit their context; signals never shrink silently."
-          >
-            <table className="docs-table">
-              <thead>
-                <tr>
-                  <th>Situation</th>
-                  <th>Behaviour</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>Two signals with different widths in one operation</td>
-                  <td>Compile error (E301) listing both widths.</td>
-                </tr>
-                <tr>
-                  <td>Literal wider than the context</td>
-                  <td>Compile error (E305). Literals are fitted, never truncated.</td>
-                </tr>
-                <tr>
-                  <td>NAND, package gates, package circuits</td>
-                  <td>Package macros use the common input width. Package circuits declare fixed port widths.</td>
-                </tr>
-                <tr>
-                  <td>SLICE, CONCAT, BROADCAST</td>
-                  <td>Result width follows the bits involved, never more than the width limit.</td>
-                </tr>
-                <tr>
-                  <td>ZEXT, SEXT, REPEAT, REVERSE</td>
-                  <td>Extension and reshaping are explicit; there is no implicit widening or narrowing.</td>
-                </tr>
-              </tbody>
-            </table>
-            <Note>
-              <strong>No word-level operators in the kernel.</strong> Addition, comparison, shifts,
-              and selection are package circuits or structural wiring. Use <code>ADD4</code>,{" "}
-              <code>ADD8</code>, or <code>MUX</code> instead of an implicit operator.
-            </Note>
-          </Section>
-
-          <Section
-            id="packages"
-            index="08"
-            eyebrow="Language"
-            title="Imports and packages"
-            lead="Gates and reusable circuits are packages, not hard-coded language operators. A package is active only when the source imports it."
-          >
-            <div className="docs-columns">
-              <div>
-                <h4>Import what you use</h4>
-                <CodeBlock
-                  code={`IMPORT "@shortcircuit/selection"
-
-CIRCUIT Blink
-  INPUT a
-  INPUT b
-  INPUT pick
-
-  chosen = MUX(a, b, pick)
-  OUTPUT chosen
-END`}
-                />
-                <ul className="docs-list">
-                  <li>Only imported packages expose their macros and circuits to the source.</li>
-                  <li>
-                    Each package implements its circuits in real <code>.lf</code> source.
-                  </li>
-                  <li>Package internals are compiled with your design but not exported as top-level circuits.</li>
-                </ul>
-              </div>
-              <div>
-                <h4>Import with an alias</h4>
-                <CodeBlock
-                  code={`IMPORT "@acme/display" AS display
-
-CIRCUIT Panel
-  INPUT value : BUS(4)
-
-  segments = display.SEVEN_SEGMENT(value)
-
-  OUTPUT segments.a
-  OUTPUT segments.g
-END`}
-                />
-                <ul className="docs-list">
-                  <li>
-                    <code>AS</code> adds qualified access: <code>display.SEVEN_SEGMENT</code>.
-                  </li>
-                  <li>An explicit import without an alias is available unqualified.</li>
-                  <li>
-                    Use the <strong>Packages</strong> button in the studio header to add or remove
-                    the matching <code>IMPORT</code> line. The source remains the single source of
-                    truth.
-                  </li>
-                  <li>Imports are resolved before analysis, so missing packages fail early.</li>
-                </ul>
-              </div>
-            </div>
-          </Section>
-
-          <Section
-            id="libraries"
-            index="09"
-            eyebrow="Language"
-            title="Fixed-width library"
-            lead="Arithmetic and selection are package circuits with declared widths. Nothing widens or narrows implicitly."
-          >
-            <CodeBlock
-              code={`IMPORT "@shortcircuit/arithmetic"
-IMPORT "@shortcircuit/selection"
-
-CIRCUIT AddAndSelect
-  INPUT a : BUS(8)
-  INPUT b : BUS(8)
-  INPUT choose_b
-
-  added = ADD8(a, b, 0)
-  result = MUX(a, added.sum, choose_b)
-
-  OUTPUT result
-  OUTPUT added.carry_out
-END`}
-            />
-            <ul className="docs-list">
-              <li>
-                <code>ADD4</code> and <code>ADD8</code> expose <code>sum</code> and{" "}
-                <code>carry_out</code>; chain them for wider math.
-              </li>
-              <li>
-                <code>MUX(zero, one, select)</code> is a package circuit built from NAND, OR, and{" "}
-                <code>BROADCAST</code>.
-              </li>
-              <li>
-                <code>HALF_ADDER</code> and <code>FULL_ADDER</code> are reusable one-bit building
-                blocks.
-              </li>
-              <li>
-                There are no generic <code>+</code>, comparison, shift, decoder, or reduction
-                operators. Add a package circuit for the width you need.
-              </li>
-            </ul>
-          </Section>
-
-          <Section
             id="composition"
-            index="10"
             eyebrow="Language"
             title="Composition"
             lead="Circuits are reusable. Instances are named, their outputs are read with dotted paths, and the design is flattened into one graph."
@@ -1093,7 +1130,6 @@ END`}
 
           <Section
             id="clocking"
-            index="11"
             eyebrow="Language"
             title="State and clocks"
             lead="Sequential logic is explicit. An edge triggers a block, the block computes next-state values, and every update commits together."
@@ -1139,7 +1175,6 @@ END`}
 
           <Section
             id="testing"
-            index="12"
             eyebrow="Language"
             title="Tests and truth tables"
             lead="Verification lives in the source. The runner uses the same compiled graph the simulator does."
@@ -1214,8 +1249,314 @@ END`}
           </Section>
 
           <Section
+            id="operations"
+            eyebrow="Built-in functions"
+            title="Built-in operations"
+            lead="Core operations are compiled directly by the engine. They are always available and need no IMPORT."
+          >
+            <p>
+              Built-ins fall into two groups: gate operations that work bit by bit, and bus
+              operations that reshape or inspect values. Every call becomes a node in the compiled
+              graph, and the same operations appear in editor completions and hover cards.
+            </p>
+            {(["gate", "bus"] as const).map((category) => (
+              <div className="docs-op-group" key={category}>
+                <h4>
+                  {category === "gate" ? <Layers size={14} /> : null}
+                  {CATEGORY_LABEL[category]}
+                </h4>
+                <table className="docs-table">
+                  <thead>
+                    <tr>
+                      <th>Call</th>
+                      <th>Result width</th>
+                      <th>What it does</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {BUILTINS.filter((spec) => spec.category === category).map((spec) => (
+                      <tr key={spec.name}>
+                        <td>
+                          <a href={`#${functionAnchor(spec.name)}`} className="docs-fn-link">
+                            <code>{spec.signature}</code>
+                          </a>
+                          <span className="docs-op-tip">{spec.tip}</span>
+                        </td>
+                        <td>{spec.widthRule}</td>
+                        <td>{spec.description}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+            <Note>
+              <strong>Package functions are separate.</strong> Gates such as <code>AND</code>,{" "}
+              <code>XOR</code>, and <code>MUX</code> live in packages and need an{" "}
+              <code>IMPORT</code>. Open the Packages section for the full catalog.
+            </Note>
+          </Section>
+
+          <Section
+            id="reference"
+            eyebrow="Built-in functions"
+            title="Built-in function reference"
+            lead="Every built-in operation, with its arguments, the width it produces, and a call example."
+          >
+            <div className="docs-fn-index">
+              {BUILTINS.map((spec) => (
+                <a key={spec.name} href={`#${functionAnchor(spec.name)}`}>
+                  {spec.name}
+                </a>
+              ))}
+            </div>
+
+            {BUILTINS.map((spec) => (
+              <article className="docs-fn" id={functionAnchor(spec.name)} key={spec.name}>
+                <header>
+                  <h4>
+                    <code>{spec.signature}</code>
+                    <span className="docs-fn-category">{spec.category}</span>
+                  </h4>
+                  <p>{spec.description}</p>
+                </header>
+                <div className="docs-fn-body">
+                  <dl className="docs-fn-args">
+                    {spec.args.map((arg) => (
+                      <div key={arg.name}>
+                        <dt>
+                          <code>{arg.name}</code>
+                        </dt>
+                        <dd>
+                          {arg.description}
+                          {arg.optional ? " Optional." : ""}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                  <div className="docs-fn-meta">
+                    <span>
+                      <strong>Result width</strong>
+                      {spec.widthRule}
+                    </span>
+                    <span>
+                      <strong>Tip</strong>
+                      {spec.tip}
+                    </span>
+                    <span>
+                      <strong>Example</strong>
+                      <code>{spec.example.call}</code>
+                      <span className="docs-fn-expected">
+                        {spec.example.result}. {spec.example.note}
+                      </span>
+                    </span>
+                  </div>
+                </div>
+              </article>
+            ))}
+
+            <Note>
+              <strong>Looking for a package function?</strong> Each package has its own section
+              with its macros and circuits, their arguments and ports, and worked examples.
+            </Note>
+          </Section>
+
+          <Section
+            id="widths"
+            eyebrow="Language"
+            title="Width policy"
+            lead="Widths are checked before anything runs. Literals fit their context; signals never shrink silently."
+          >
+            <table className="docs-table">
+              <thead>
+                <tr>
+                  <th>Situation</th>
+                  <th>Behaviour</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Two signals with different widths in one operation</td>
+                  <td>Compile error (E301) listing both widths.</td>
+                </tr>
+                <tr>
+                  <td>Literal wider than the context</td>
+                  <td>Compile error (E305). Literals are fitted, never truncated.</td>
+                </tr>
+                <tr>
+                  <td>NAND, package gates, package circuits</td>
+                  <td>Package macros use the common input width. Package circuits declare fixed port widths.</td>
+                </tr>
+                <tr>
+                  <td>SLICE, CONCAT, BROADCAST</td>
+                  <td>Result width follows the bits involved, never more than the width limit.</td>
+                </tr>
+                <tr>
+                  <td>ZEXT, SEXT, REPEAT, REVERSE</td>
+                  <td>Extension and reshaping are explicit; there is no implicit widening or narrowing.</td>
+                </tr>
+              </tbody>
+            </table>
+            <Note>
+              <strong>No word-level operators in the kernel.</strong> Addition, comparison, shifts,
+              and selection are package circuits or structural wiring. Use <code>ADD4</code>,{" "}
+              <code>ADD8</code>, or <code>MUX</code> instead of an implicit operator.
+            </Note>
+          </Section>
+
+          <Section
+            id="packages"
+            eyebrow="Packages"
+            title="Imports and packages"
+            lead="Packages provide gates, reusable circuits, and fixed-width functions. A package is active only when the source imports it."
+          >
+            <div className="docs-columns">
+              <div>
+                <h4>Import what you use</h4>
+                <CodeBlock
+                  code={`IMPORT "@shortcircuit/selection"
+
+CIRCUIT Blink
+  INPUT a
+  INPUT b
+  INPUT pick
+
+  chosen = MUX(a, b, pick)
+  OUTPUT chosen
+END`}
+                />
+                <ul className="docs-list">
+                  <li>Only imported packages expose their macros and circuits to the source.</li>
+                  <li>
+                    Each package implements its circuits in real <code>.lf</code> source.
+                  </li>
+                  <li>
+                    Package internals are compiled with your design but not exported as top-level
+                    circuits.
+                  </li>
+                </ul>
+              </div>
+              <div>
+                <h4>Import with an alias</h4>
+                <CodeBlock
+                  code={`IMPORT "@acme/display" AS display
+
+CIRCUIT Panel
+  INPUT value : BUS(4)
+
+  segments = display.SEVEN_SEGMENT(value)
+
+  OUTPUT segments.a
+  OUTPUT segments.g
+END`}
+                />
+                <ul className="docs-list">
+                  <li>
+                    <code>AS</code> adds qualified access: <code>display.SEVEN_SEGMENT</code>.
+                  </li>
+                  <li>An explicit import without an alias is available unqualified.</li>
+                  <li>
+                    Use the <strong>Packages</strong> button in the studio header to add or remove
+                    the matching <code>IMPORT</code> line. The source remains the single source of
+                    truth.
+                  </li>
+                  <li>Imports are resolved before analysis, so missing packages fail early.</li>
+                </ul>
+              </div>
+            </div>
+
+            <h4>Combine packages</h4>
+            <div className="docs-columns">
+              <div>
+                <CodeBlock
+                  code={`IMPORT "@shortcircuit/arithmetic"
+IMPORT "@shortcircuit/selection"
+
+CIRCUIT AddAndSelect
+  INPUT a : BUS(8)
+  INPUT b : BUS(8)
+  INPUT choose_b
+
+  added = ADD8(a, b, 0)
+  result = MUX(a, added.sum, choose_b)
+
+  OUTPUT result
+  OUTPUT added.carry_out
+END`}
+                />
+              </div>
+              <div>
+                <ul className="docs-list">
+                  <li>
+                    <code>ADD4</code> and <code>ADD8</code> expose <code>sum</code> and{" "}
+                    <code>carry_out</code>; chain them for wider math.
+                  </li>
+                  <li>
+                    <code>MUX(zero, one, select)</code> selects between equal-width values and
+                    broadcasts the one-bit select.
+                  </li>
+                  <li>
+                    <code>HALF_ADDER</code> and <code>FULL_ADDER</code> are reusable one-bit
+                    building blocks.
+                  </li>
+                  <li>
+                    There are no generic <code>+</code>, comparison, shift, decoder, or reduction
+                    operators. Add a package circuit for the width you need.
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            <h4>Bundled packages</h4>
+            <div className="docs-package-cards">
+              {PACKAGES.map((manifest) => {
+                const entries = publicPackageExports(manifest);
+                return (
+                  <button
+                    type="button"
+                    className="docs-package-card"
+                    key={manifest.name}
+                    onClick={() => jump(packageAnchor(manifest.name))}
+                  >
+                    <strong>{manifest.name}</strong>
+                    <span>{manifest.description}</span>
+                    <small>
+                      {entries.length} public {entries.length === 1 ? "function" : "functions"}
+                    </small>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="docs-defaults">
+              <span className="eyebrow">Function catalog</span>
+              <p>
+                Every public built-in and package function, grouped by library. Select a name to
+                jump to its documentation.
+              </p>
+              <div className="docs-default-grid">
+                {packageGroups.map((group) => (
+                  <div className="docs-default-group" key={group.title}>
+                    <h5>{group.title}</h5>
+                    <ul className="docs-default-items">
+                      {group.items.map((name) => (
+                        <li key={name}>
+                          <a href={`#${functionAnchor(name)}`}>{name}</a>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Section>
+
+          {PACKAGES.map((manifest) => (
+            <PackageSection key={manifest.name} manifest={manifest} />
+          ))}
+
+          <Section
             id="diagnostics"
-            index="11"
             eyebrow="Reference"
             title="Diagnostics"
             lead="Every diagnostic carries a stable code, a location, and a fix. Names are matched with a bounded edit distance, so typos get a suggestion."
@@ -1288,7 +1629,6 @@ END`}
 
           <Section
             id="limits"
-            index="12"
             eyebrow="Reference"
             title="Limits"
             lead="Bounded work keeps the compiler and the studio responsive. Every limit is a compile option."
@@ -1349,15 +1689,34 @@ END`}
           </Section>
 
           <Section
+            id="glossary"
+            eyebrow="Reference"
+            title="Glossary"
+            lead="The words this language uses, in plain language."
+          >
+            <div className="docs-glossary">
+              {GLOSSARY.map((entry) => (
+                <article key={entry.term} id={termAnchor(entry.term)}>
+                  <header>
+                    <h3>{entry.term}</h3>
+                    <span className="docs-chip small">{entry.group}</span>
+                  </header>
+                  <p className="docs-glossary-short">{entry.short}</p>
+                  <p className="docs-glossary-long">{entry.long}</p>
+                </article>
+              ))}
+            </div>
+          </Section>
+
+          <Section
             id="snippets"
-            index="13"
             eyebrow="Reference"
             title="Snippet library"
             lead="Every snippet is also available in the editor: type its name, or start typing a keyword, and pick it from the completion list."
           >
             <div className="docs-snippets">
               {LANGUAGE_SNIPPETS.map((snippet) => (
-                <article className="docs-snippet" key={snippet.id}>
+                <article className="docs-snippet" key={snippet.id} id={snippetAnchor(snippet.id)}>
                   <div>
                     <header>
                       <h4>{snippet.title}</h4>
@@ -1372,7 +1731,6 @@ END`}
 
           <Section
             id="displays"
-            index="15"
             eyebrow="Reference"
             title="Output displays"
             lead="A value can be read as a number, as LEDs, as a seven-segment digit, as a bar, or as a grid of cells."
@@ -1415,7 +1773,6 @@ END`}
 
           <Section
             id="editor"
-            index="14"
             eyebrow="Reference"
             title="Editor tips"
             lead="The editor knows the language. It completes it, explains it, and points at the problem."
@@ -1485,7 +1842,6 @@ END`}
           {beginner ? null : (
           <Section
             id="ir"
-            index="15"
             eyebrow="Reference"
             title="Portable IR"
             lead="Everything in the studio reads one serializable object. That object is the contract other tools can target."
