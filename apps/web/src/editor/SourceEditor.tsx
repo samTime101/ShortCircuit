@@ -259,8 +259,8 @@ export const SourceEditor = forwardRef<SourceEditorHandle, SourceEditorProps>(
               ]),
             ),
             basicSetup,
-            EditorState.tabSize.of(2),
-            indentUnit.of("  "),
+            EditorState.tabSize.of(4),
+            indentUnit.of("    "),
             EditorView.lineWrapping,
             EditorView.contentAttributes.of({
               "aria-label": "LogicFlow circuit source editor",

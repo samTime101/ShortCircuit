@@ -935,9 +935,12 @@ output sum
 end`;
     const formatted = formatSource(source);
     expect(formatted).toContain("CIRCUIT HalfAdder");
-    expect(formatted).toContain("  INPUT a");
-    expect(formatted).toContain("  sum = XOR(a, b)");
+    expect(formatted).toContain("    INPUT a");
+    expect(formatted).toContain("    sum = XOR(a, b)");
     expect(formatted.trimEnd().endsWith("END")).toBe(true);
+
+    const twoSpaces = formatSource(source, { indent: 2 });
+    expect(twoSpaces).toContain("  INPUT a");
   });
 });
 
@@ -1031,7 +1034,7 @@ output a
 end`;
     const formatted = formatSource(source);
     expect(formatted).toContain("// a note");
-    expect(formatted).toContain("  INPUT a");
+    expect(formatted).toContain("    INPUT a");
   });
 
   it("keeps a block comment intact while formatting", () => {
@@ -1044,7 +1047,7 @@ end`;
     const formatted = formatSource(source);
     expect(formatted).toContain("/* a block");
     expect(formatted).toContain("comment */");
-    expect(formatted).toContain("  INPUT a");
+    expect(formatted).toContain("    INPUT a");
   });
 
   it("does not re-case words inside a comment", () => {

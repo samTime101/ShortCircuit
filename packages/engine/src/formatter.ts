@@ -132,11 +132,20 @@ function scanLine(line: string, inBlock: boolean): { parts: Part[]; inBlock: boo
   return { parts, inBlock: block };
 }
 
+export interface FormatOptions {
+  /** Number of spaces or string for each indent level. Defaults to 4 spaces. */
+  indent?: number | string;
+}
+
 /**
  * A conservative source formatter. It normalizes indentation and keyword case
  * without touching comments, signal case, or expression contents.
  */
-export function formatSource(source: string): string {
+export function formatSource(source: string, options: FormatOptions = {}): string {
+  const indentUnit =
+    typeof options.indent === "string"
+      ? options.indent
+      : " ".repeat(typeof options.indent === "number" ? options.indent : 4);
   const lines = source.replace(/\r\n?/g, "\n").split("\n");
   const output: string[] = [];
   let depth = 0;
@@ -168,7 +177,7 @@ export function formatSource(source: string): string {
         inBlock && !openedBlock && originalIndent.startsWith(blockIndent)
           ? originalIndent.slice(blockIndent.length)
           : "";
-      output.push(`${"  ".repeat(depth)}${relative}${rawLine.trim()}`);
+      output.push(`${indentUnit.repeat(depth)}${relative}${rawLine.trim()}`);
       if (openedBlock) blockIndent = originalIndent;
       inBlock = nextInBlock;
       continue;
@@ -212,7 +221,7 @@ export function formatSource(source: string): string {
     const last = parts[parts.length - 1];
     if (last?.kind === "code") result = result.trimEnd();
 
-    output.push(`${"  ".repeat(depth)}${result}`);
+    output.push(`${indentUnit.repeat(depth)}${result}`);
 
     const isOnOpen = firstWord === "ON" && codePart.text.trimEnd().endsWith(":");
     if (OPENERS.has(firstWord) || isOnOpen) depth += 1;

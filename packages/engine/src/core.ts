@@ -36,7 +36,7 @@ export type {
   PackageTestReport,
 } from "./packageTests";
 export { generateTruthTable, type TruthTableOptions } from "./truthTable";
-export { formatSource } from "./formatter";
+export { formatSource, type FormatOptions } from "./formatter";
 export {
   binaryToDecimal,
   formatBinary,

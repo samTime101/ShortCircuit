@@ -1,6 +1,6 @@
 {
   "name": "@shortcircuitcli/cli",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "Command line tools for the Short Circuit LogicFlow language.",
   "license": "MIT",
   "repository": {

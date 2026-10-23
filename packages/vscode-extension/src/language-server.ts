@@ -352,7 +352,11 @@ connection.onDocumentFormatting((params: DocumentFormattingParams): TextEdit[] =
     const document = documents.get(params.textDocument.uri);
     if (!document) return [];
     const text = document.getText();
-    const formatted = formatSource(text);
+    const tabSize = params.options?.tabSize ?? 4;
+    const insertSpaces = params.options?.insertSpaces ?? true;
+    const formatted = formatSource(text, {
+      indent: insertSpaces ? tabSize : "\t",
+    });
     if (formatted === text) return [];
     const lineCount = document.lineCount;
     return [

@@ -443,7 +443,7 @@ END`);
 
     await waitFor(() => {
       expect(window.localStorage.getItem(STORAGE_KEY)).toBe(
-        "CIRCUIT HalfAdder\n  INPUT a\n  OUTPUT a\nEND",
+        "CIRCUIT HalfAdder\n    INPUT a\n    OUTPUT a\nEND",
       );
     });
     expect(document.querySelectorAll(".cm-line")).toHaveLength(4);
@@ -456,7 +456,7 @@ END`);
     });
     expect(document.querySelectorAll(".cm-line")).toHaveLength(4);
     expect(window.localStorage.getItem(STORAGE_KEY)).toBe(
-      "CIRCUIT HalfAdder\n  INPUT a\n  OUTPUT a\nEND",
+      "CIRCUIT HalfAdder\n    INPUT a\n    OUTPUT a\nEND",
     );
   });
 

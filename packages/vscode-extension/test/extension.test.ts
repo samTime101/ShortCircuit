@@ -274,6 +274,7 @@ describe("Extension Package Manifest", () => {
     const commands = pkg.contributes.commands.map((c: { command: string }) => c.command);
     expect(commands).toContain("shortcircuit.openStudio");
     expect(commands).toContain("shortcircuit.expandStudio");
+    expect(commands).toContain("shortcircuit.refreshStudio");
     expect(commands).toContain("shortcircuit.openWaveform");
     expect(commands).toContain("shortcircuit.openTruthTable");
     expect(commands).toContain("shortcircuit.runTest");
@@ -316,10 +317,10 @@ output sum
 end`;
     const formatted = formatSource(messySource);
     expect(formatted).toContain("CIRCUIT my_adder");
-    expect(formatted).toContain("  INPUT a : BUS(4)");
-    expect(formatted).toContain("  INPUT b : BUS(4)");
-    expect(formatted).toContain("  sum = AND(a, b)");
-    expect(formatted).toContain("  OUTPUT sum");
+    expect(formatted).toContain("    INPUT a : BUS(4)");
+    expect(formatted).toContain("    INPUT b : BUS(4)");
+    expect(formatted).toContain("    sum = AND(a, b)");
+    expect(formatted).toContain("    OUTPUT sum");
     expect(formatted.trimEnd().endsWith("END")).toBe(true);
   });
 

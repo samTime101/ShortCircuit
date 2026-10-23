@@ -114,6 +114,12 @@
         }
       }
     },
+    "configurationDefaults": {
+      "[logicflow]": {
+        "editor.tabSize": 4,
+        "editor.insertSpaces": true
+      }
+    },
     "commands": [
       {
         "command": "shortcircuit.openStudio",
