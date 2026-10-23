@@ -2,6 +2,7 @@ import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadLocalPackages } from "../src/packages";
+import { normalizePackageFile } from "../src/registry";
 import {
   cleanupTempDirs,
   tempDir,
@@ -65,6 +66,18 @@ describe("local package loading", () => {
     expect(loaded.bundle.packages[0]!.name).toBe("@test/double");
   });
 
+  it("allows a local package named like a formerly bundled package", () => {
+    const root = tempDir();
+    writeDoublePackage(root, {
+      name: "@shortcircuit/gates",
+      packageName: "@shortcircuit/gates",
+    });
+
+    const loaded = loadLocalPackages([root]);
+
+    expect(loaded.bundle.packages[0]!.name).toBe("@shortcircuit/gates");
+  });
+
   it("rejects a package.json name mismatch", () => {
     const root = tempDir();
     writeDoublePackage(root, { packageName: "@test/other" });
@@ -77,6 +90,38 @@ describe("local package loading", () => {
     writeDoublePackage(root, { packageVersion: "9.9.9" });
 
     expect(() => loadLocalPackages([root])).toThrow(/does not match package.json version/);
+  });
+
+  it("rejects an invalid package name and version", () => {
+    const invalidName = tempDir();
+    writeDoublePackage(invalidName, { name: "double", packageName: "double" });
+    expect(() => loadLocalPackages([invalidName])).toThrow(/Invalid package name/);
+
+    const invalidVersion = tempDir();
+    writeDoublePackage(invalidVersion, { version: "one" });
+    expect(() => loadLocalPackages([invalidVersion])).toThrow(/Invalid package version/);
+  });
+
+  it("rejects source paths that leave the package directory", () => {
+    const root = tempDir();
+    const outside = tempDir();
+    writeText(outside, "outside.lf", "MACRO TWICE(x)\n  BODY NAND(x, x)\nEND\n");
+    writeText(
+      root,
+      "manifest.json",
+      `${JSON.stringify(
+        {
+          schema: "shortcircuit.package/v1",
+          name: "@test/double",
+          version: "0.1.0",
+          exports: [{ kind: "macro", name: "TWICE", source: "../outside.lf" }],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    expect(() => loadLocalPackages([root])).toThrow(/must stay inside/);
   });
 
   it("rejects a missing export source", () => {
@@ -104,18 +149,20 @@ describe("local package loading", () => {
     expect(() => loadLocalPackages([first, second])).toThrow(/defined by both/);
   });
 
-  it("rejects a package name that is already bundled", () => {
-    const root = tempDir();
-    writeDoublePackage(root, { name: "@shortcircuit/gates", packageName: "@shortcircuit/gates" });
-
-    expect(() => loadLocalPackages([root])).toThrow(/already bundled/);
-  });
-
-  it("reports a missing package path", () => {
+  it("reports a missing package path and a directory without a manifest", () => {
     expect(() => loadLocalPackages([join(tempDir(), "missing")])).toThrow(/Could not find package/);
-  });
-
-  it("reports a directory without a manifest", () => {
     expect(() => loadLocalPackages([tempDir()])).toThrow(/No manifest.json/);
+  });
+});
+
+describe("registry package paths", () => {
+  it("normalizes relative paths and rejects escapes or URLs", () => {
+    expect(normalizePackageFile("./macros/twice/macro.lf")).toBe("macros/twice/macro.lf");
+    expect(normalizePackageFile("macros\\twice\\macro.lf")).toBe("macros/twice/macro.lf");
+
+    expect(() => normalizePackageFile("../outside.lf")).toThrow(/inside/);
+    expect(() => normalizePackageFile("https://example.com/package.lf")).toThrow(/relative/);
+    expect(() => normalizePackageFile("C:\\package.lf")).toThrow(/relative/);
+    expect(() => normalizePackageFile("macros/twice.lf?raw")).toThrow(/relative/);
   });
 });

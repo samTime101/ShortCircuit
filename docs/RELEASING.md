@@ -29,7 +29,7 @@ immediately. To publish, bump the CLI version.
 Use semver:
 
 - Patch: bug fixes and internal changes.
-- Minor: new commands, options, or bundled packages.
+- Minor: new commands, options, or web default package changes.
 - Major: breaking changes to commands, output, or package behavior.
 
 The version in `packages/cli/package.json` is the version that gets published.
@@ -101,12 +101,14 @@ The workflow:
 If the version is already published, the workflow skips the test, build, and
 publish steps. Bump the version if you intended to release.
 
-## Releasing a package registry change
+## Releasing a web package snapshot change
 
-The default packages live in the `vendor/ShortCircuit-Packages` submodule.
+The web studio's default packages live in the `vendor/ShortCircuit-Packages`
+submodule. The CLI does not ship or load that snapshot; CLI users install or
+link packages from a project.
 
 1. Add or update the package in the package repository.
-2. Register it in `registry.json`.
+2. Register it in the package repository's `registry.json`.
 3. From `vendor/ShortCircuit-Packages`, run:
 
    ```bash
@@ -122,23 +124,30 @@ The default packages live in the `vendor/ShortCircuit-Packages` submodule.
    git commit -m "chore: update package submodule"
    ```
 
-6. Bump the CLI version in `packages/cli/package.json`.
-7. Refresh the lockfile:
+6. Rebuild the web app to verify the new snapshot:
+
+   ```bash
+   npm run build -w @shortcircuit/web
+   ```
+
+7. Bump the CLI version only when the CLI or engine changed. Refresh the
+   lockfile, then commit and push:
 
    ```bash
    npm install --package-lock-only
+   git add packages/cli/package.json package-lock.json
+   git commit -m "chore(cli): release v<version>"
+   git push origin main
    ```
 
-8. Commit the version and lockfile and push to `main`.
-
-The submodule pointer update changes the package snapshot that the CLI build
-uses. The CLI version bump is what makes npm publish a new package. If you push
-the submodule pointer without a version bump, the workflow runs and skips the
-publish because the version is already on npm. No new package is shipped.
+The submodule pointer update changes only the web studio's bundled snapshot. It
+does not change what the CLI can compile. Publish the package to the registry
+for CLI users to install it. If you push the pointer without a CLI version bump,
+the workflow runs and skips publishing because the version is already on npm.
 
 A change inside the package repository alone does not update this repository's
 submodule pointer and does not trigger this workflow. The pointer commit is part
-of the release.
+of the web snapshot release.
 
 ## Manual release
 
@@ -149,13 +158,15 @@ rejected.
 ## Verify a release
 
 ```bash
-VERSION=0.2.0
+VERSION=0.3.0
 npm view @shortcircuitcli/cli version
 npm view "@shortcircuitcli/cli@$VERSION" dist.tarball
 npm install -g @shortcircuitcli/cli@latest
+mkdir -p /tmp/shortcircuit-release-check
+cd /tmp/shortcircuit-release-check
+shortcircuit init
 shortcircuit package list
 shortcircuit package init --help
-shortcircuit package registry --root /path/to/ShortCircuit-Packages
 ```
 
 Set `VERSION` to the version you released.
@@ -204,11 +215,17 @@ publishing to `https://registry.npmjs.org`.
 Run `npm install --package-lock-only`, commit the updated `package-lock.json`,
 and push again.
 
-### The package update is in the repository but not in the CLI
+### The package update is in the repository but not in the web studio
 
 The `vendor/ShortCircuit-Packages` submodule pointer was not updated, or the
-package registry was not rebuilt before committing. See
+package snapshot was not rebuilt before committing. See
 [Package authoring](PACKAGES.md) for the package checklist.
+
+### The package update is not available to the CLI
+
+The CLI installs packages from a registry, not from this repository's vendor
+snapshot. Publish the package to the registry, then run
+`shortcircuit package install <name> --refresh` in the project.
 
 ### The workflow created a tag but not a release
 

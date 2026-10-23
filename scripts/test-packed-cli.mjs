@@ -1,5 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -8,49 +9,31 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const cliDir = join(root, "packages", "cli");
 const tempRoot = mkdtempSync(join(tmpdir(), "shortcircuit-cli-pack-"));
 const tarballDir = join(tempRoot, "tarball");
 const projectDir = join(tempRoot, "project");
+const packageDir = join(projectDir, "packages", "double");
+const registryDir = join(tempRoot, "registry");
+const cacheDir = join(tempRoot, "cache");
 
-const SOURCE = `IMPORT "@shortcircuit/gates"
-
-CIRCUIT HalfAdder
-  INPUT a
-  INPUT b
-
-  sum = XOR(a, b)
-  carry = AND(a, b)
-
-  OUTPUT sum
-  OUTPUT carry
-END
-
-TEST HalfAdder
-  CASE "both high"
-    INPUT a = 1
-    INPUT b = 1
-    EXPECT sum = 0
-    EXPECT carry = 1
-  END
-END
-`;
-
-function run(bin, args, cwd) {
+function run(bin, args, cwd, env = process.env) {
   return execFileSync(bin, args, {
     cwd,
+    env,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "inherit"],
   });
 }
 
-function runFailure(bin, args, cwd) {
+function runFailure(bin, args, cwd, env = process.env) {
   const result = spawnSync(bin, args, {
     cwd,
+    env,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -62,6 +45,11 @@ function runFailure(bin, args, cwd) {
     stdout: result.stdout ?? "",
     stderr: result.stderr ?? "",
   };
+}
+
+function write(path, contents) {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, contents);
 }
 
 try {
@@ -107,138 +95,203 @@ try {
   const packageHelp = run(bin, ["package", "help"], projectDir);
   for (const command of [
     "package list",
-    "package registry",
+    "package install",
+    "package link",
     "package init",
     "package build",
     "package test",
     "package check",
+    "package register",
   ]) {
     if (!packageHelp.includes(`shortcircuit ${command}`)) {
       throw new Error(`package help is missing ${command}:\n${packageHelp}`);
     }
   }
-  const initHelp = run(bin, ["package", "init", "--help"], projectDir);
-  if (!initHelp.includes("--name") || !initHelp.includes("--dependencies")) {
-    throw new Error(`package init help is incomplete:\n${initHelp}`);
+  if (packageHelp.includes("package registry")) {
+    throw new Error(`package help still documents the removed registry command:\n${packageHelp}`);
   }
 
-  const missingRegistry = runFailure(bin, ["package", "build"], projectDir);
-  if (!missingRegistry.stderr.includes("Could not find the Short Circuit package registry")) {
-    throw new Error(`unexpected missing registry output:\n${missingRegistry.stderr}`);
-  }
-
-  const fakeRoot = join(tempRoot, "fake-registry");
-  mkdirSync(join(fakeRoot, "scripts"), { recursive: true });
-  writeFileSync(
-    join(fakeRoot, "package.json"),
-    `${JSON.stringify({ name: "@shortcircuit/packages", version: "0.1.0" }, null, 2)}\n`,
-  );
-  writeFileSync(
-    join(fakeRoot, "registry.json"),
-    `${JSON.stringify({ schema: "shortcircuit.registry/v1", packages: [] }, null, 2)}\n`,
-  );
-  writeFileSync(
-    join(fakeRoot, "scripts", "package.mjs"),
-    "const command = process.argv[2];\n" +
-      "process.stdout.write(`fake package ${process.argv.slice(2).join(' ')}\\n`);\n" +
-      "if (command === 'check') process.exitCode = 7;\n",
-  );
-
-  const registryJson = JSON.parse(
-    run(bin, ["package", "registry", "--json", "--root", fakeRoot], projectDir),
-  );
-  if (!Array.isArray(registryJson.packages) || registryJson.packages.length !== 0) {
-    throw new Error(`unexpected registry JSON:\n${JSON.stringify(registryJson)}`);
-  }
-
-  const delegated = run(
-    bin,
-    ["package", "build", "--root", fakeRoot],
+  const distPath = join(
     projectDir,
+    "node_modules",
+    "@shortcircuitcli",
+    "cli",
+    "dist",
+    "cli.js",
   );
-  if (!delegated.includes("fake package build")) {
-    throw new Error(`package build did not delegate:\n${delegated}`);
+  const bundle = readFileSync(distPath, "utf8");
+  if (bundle.includes("macros/and/macro.lf")) {
+    throw new Error("the packed CLI still ships the default package snapshot");
   }
 
-  const failed = runFailure(
-    bin,
-    ["package", "check", "--root", fakeRoot],
-    projectDir,
+  run(bin, ["init"], projectDir);
+  if (!existsSync(join(projectDir, "shortcircuit.json"))) {
+    throw new Error("shortcircuit init did not create a project manifest");
+  }
+  const compiledProject = run(bin, ["compile", "src/main.lf"], projectDir);
+  if (!compiledProject.includes("Compiled 1 circuit")) {
+    throw new Error(`unexpected project compile output:\n${compiledProject}`);
+  }
+
+  write(
+    join(projectDir, "gates.lf"),
+    `IMPORT "@shortcircuit/gates"\n\nCIRCUIT Gates\n  INPUT a\n  INPUT b\n  y = AND(a, b)\n  OUTPUT y\nEND\n`,
   );
-  if (failed.status !== 7) {
-    throw new Error(`package check did not return the child status: ${failed.status}`);
+  const noDefaults = runFailure(bin, ["compile", "gates.lf"], projectDir);
+  if (!noDefaults.stderr.includes("E602")) {
+    throw new Error(`the CLI unexpectedly loaded bundled packages:\n${noDefaults.stderr}`);
+  }
+
+  mkdirSync(packageDir, { recursive: true });
+  const init = run(
+    bin,
+    [
+      "package",
+      "init",
+      "--name",
+      "@test/double",
+      "--export",
+      "TWICE",
+      "--kind",
+      "macro",
+      "--description",
+      "Double inversion for the packed CLI test.",
+      "--yes",
+    ],
+    packageDir,
+  );
+  if (!init.includes("Created package @test/double@0.1.0")) {
+    throw new Error(`unexpected package init output:\n${init}`);
+  }
+  if (!init.includes("MACRO")) {
+    throw new Error(`package init did not explain MACRO vs CIRCUIT:\n${init}`);
+  }
+
+  const check = run(bin, ["package", "check"], packageDir);
+  if (!check.includes("Built @test/double@0.1.0") || !check.includes("passed")) {
+    throw new Error(`unexpected package check output:\n${check}`);
+  }
+
+  const registration = JSON.parse(
+    run(bin, ["package", "register", "--dry-run", "--json"], packageDir),
+  );
+  if (registration.registryEntry?.name !== "@test/double") {
+    throw new Error(`unexpected registration output:\n${JSON.stringify(registration)}`);
+  }
+
+  const linked = run(bin, ["package", "link", "packages/double"], projectDir);
+  if (!linked.includes("no files were copied or symlinked")) {
+    throw new Error(`unexpected package link output:\n${linked}`);
+  }
+
+  write(
+    join(projectDir, "local.lf"),
+    `IMPORT "@test/double"\n\nCIRCUIT Local\n  INPUT a\n  INPUT b\n  y = TWICE(a, b)\n  OUTPUT y\nEND\n`,
+  );
+  const localCompiled = run(bin, ["compile", "local.lf"], projectDir);
+  if (!localCompiled.includes("Compiled 1 circuit")) {
+    throw new Error(`unexpected local package compile output:\n${localCompiled}`);
   }
 
   const listed = run(bin, ["package", "list"], projectDir);
-  const gatesRow = listed
-    .split("\n")
-    .find((line) => line.startsWith("@shortcircuit/gates"));
-  if (!gatesRow || !gatesRow.includes("bundled")) {
+  if (!listed.includes("@test/double") || !listed.includes("local")) {
     throw new Error(`unexpected package list output:\n${listed}`);
   }
 
-  writeFileSync(join(projectDir, "half-adder.lf"), SOURCE);
-  const compiled = run(bin, ["compile", "half-adder.lf"], projectDir);
-  if (!compiled.includes("Compiled 1 circuit")) {
-    throw new Error(`unexpected compile output:\n${compiled}`);
-  }
-
-  const tested = run(bin, ["test", "half-adder.lf"], projectDir);
-  if (!tested.includes("1 passed, 0 failed")) {
-    throw new Error(`unexpected test output:\n${tested}`);
-  }
-
-  const localDir = join(projectDir, "local-package");
-  mkdirSync(join(localDir, "macros", "twice"), { recursive: true });
-  writeFileSync(
-    join(localDir, "manifest.json"),
-    JSON.stringify(
+  write(
+    join(registryDir, "registry.json"),
+    `${JSON.stringify(
       {
-        schema: "shortcircuit.package/v1",
-        name: "@test/double",
-        version: "0.1.0",
-        exports: [
+        schema: "shortcircuit.registry/v1",
+        packages: [
           {
-            kind: "macro",
-            name: "TWICE",
-            source: "macros/twice/macro.lf",
+            name: "@test/remote",
+            version: "0.1.0",
+            manifest: "packages/remote/manifest.json",
           },
         ],
       },
       null,
       2,
-    ),
+    )}\n`,
   );
-  writeFileSync(
-    join(localDir, "macros", "twice", "macro.lf"),
-    "MACRO TWICE(x)\n  BODY NAND(NAND(x, x), NAND(x, x))\nEND\n",
+  write(
+    join(registryDir, "packages", "remote", "manifest.json"),
+    `${JSON.stringify(
+      {
+        schema: "shortcircuit.package/v1",
+        name: "@test/remote",
+        version: "0.1.0",
+        description: "Remote test package.",
+        exports: [
+          {
+            kind: "macro",
+            name: "REMOTE",
+            source: "macros/remote/macro.lf",
+          },
+        ],
+      },
+      null,
+      2,
+    )}\n`,
   );
-  writeFileSync(
-    join(projectDir, "local.lf"),
-    `IMPORT "@test/double"
+  write(
+    join(registryDir, "packages", "remote", "package.json"),
+    `${JSON.stringify({ name: "@test/remote", version: "0.1.0" }, null, 2)}\n`,
+  );
+  write(
+    join(registryDir, "packages", "remote", "macros", "remote", "macro.lf"),
+    "MACRO REMOTE(x)\n  BODY NAND(x, x)\nEND\n",
+  );
+  const registryUrl = pathToFileURL(join(registryDir, "registry.json")).href;
+  const env = { ...process.env, SHORTCIRCUIT_CACHE: cacheDir };
 
-CIRCUIT Local
-  INPUT a
-  y = TWICE(a)
-  OUTPUT y
-END
-`,
-  );
-  const localCompiled = run(
+  const installedRemote = run(
     bin,
-    ["compile", "local.lf", "--package", localDir],
+    ["package", "install", "@test/remote", "--registry", registryUrl],
     projectDir,
+    env,
   );
-  if (!localCompiled.includes("Compiled 1 circuit")) {
-    throw new Error(`unexpected local package compile output:\n${localCompiled}`);
+  if (!installedRemote.includes("@test/remote")) {
+    throw new Error(`unexpected registry install output:\n${installedRemote}`);
   }
 
-  console.log("Package authoring commands work in the packed CLI.");
+  write(
+    join(projectDir, "remote.lf"),
+    `IMPORT "@test/remote"\n\nCIRCUIT RemoteCircuit\n  INPUT a\n  y = REMOTE(a)\n  OUTPUT y\nEND\n`,
+  );
+  const remoteCompiled = run(bin, ["compile", "remote.lf"], projectDir);
+  if (!remoteCompiled.includes("Compiled 1 circuit")) {
+    throw new Error(`unexpected registry package compile output:\n${remoteCompiled}`);
+  }
+
+  const upstream = run(
+    bin,
+    ["package", "list", "upstream", "--registry", registryUrl, "--refresh"],
+    projectDir,
+    env,
+  );
+  if (!upstream.includes("@test/remote") || !upstream.includes("0.1.0")) {
+    throw new Error(`unexpected upstream list output:\n${upstream}`);
+  }
+
+  const removed = run(bin, ["package", "uninstall", "remote"], projectDir);
+  if (!removed.includes("Removed @test/remote")) {
+    throw new Error(`unexpected uninstall output:\n${removed}`);
+  }
+  if (existsSync(join(projectDir, ".shortcircuit", "packages", "@test", "remote"))) {
+    throw new Error("uninstall did not remove the registry package store");
+  }
+  if (!existsSync(join(packageDir, "manifest.json"))) {
+    throw new Error("uninstall deleted path-linked package files");
+  }
+
+  console.log("Packed CLI package workflow passed.");
   console.log(`Installed ${installed.name}@${installed.version} in a clean project.`);
-  console.log(gatesRow.trim());
-  console.log(compiled.trim());
-  console.log(tested.trim().split("\n").at(-1));
+  console.log(compiledProject.trim());
+  console.log(init.trim().split("\n")[0]);
   console.log(localCompiled.trim());
+  console.log(remoteCompiled.trim());
 } catch (error) {
   console.error(error instanceof Error ? error.message : error);
   process.exitCode = 1;

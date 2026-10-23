@@ -1,6 +1,5 @@
 import {
-  DEFAULT_PACKAGE_BUNDLE,
-  compile,
+  compileCore as compile,
   exportVerilog,
   formatSource,
   generateTruthTable,
@@ -8,8 +7,7 @@ import {
   type CompileOptions,
   type CompileResult,
   type PackageBundle,
-  type PackageManifest,
-} from "@shortcircuit/engine";
+} from "@shortcircuit/engine/core";
 
 export interface DelegatedCommand {
   command: string;
@@ -29,15 +27,18 @@ export interface CommandResult {
 
 export interface CommandOptions {
   json?: boolean;
+  verbose?: boolean;
   circuit?: string;
   out?: string;
   write?: boolean;
   packages?: PackageBundle;
-  packageOrigins?: Map<string, string>;
 }
 
 function compileOptions(options: CommandOptions): CompileOptions {
-  return options.packages ? { packages: options.packages } : {};
+  return {
+    disableDefaultPackages: true,
+    ...(options.packages ? { packages: options.packages } : {}),
+  };
 }
 
 function compileSource(source: string, options: CommandOptions): CompileResult {
@@ -196,73 +197,131 @@ export function formatCommand(source: string, options: CommandOptions = {}): Com
   return { code: 0, stdout: formatted, stderr: "" };
 }
 
-interface PackageListRow {
-  manifest: PackageManifest;
-  origin: string;
+export interface PackageListRow {
+  name: string;
+  version: string;
+  origin: "local" | "registry";
+  path: string;
+  exports: number | null;
+  state: "ok" | "missing" | "not installed";
+}
+
+export interface UpstreamPackageListRow {
+  name: string;
+  version: string;
+  description?: string;
+  exports: number | null;
+  installedVersion?: string;
+  state: "ok" | "error";
+  error?: string;
 }
 
 function pad(value: string, width: number): string {
   return value.padEnd(width);
 }
 
-export function packageListCommand(options: CommandOptions = {}): CommandResult {
-  const defaultPackages = DEFAULT_PACKAGE_BUNDLE.packages;
-  const defaultSet = new Set(defaultPackages);
-  const customPackages = options.packages?.packages ?? [];
-  const allPackages = [...defaultPackages, ...customPackages];
-  const origins = options.packageOrigins ?? new Map<string, string>();
-
-  const rows: PackageListRow[] = allPackages.map((manifest) => {
-    const isDefault = defaultSet.has(manifest);
-    return {
-      manifest,
-      origin: isDefault ? "bundled" : (origins.get(manifest.name) ?? "local"),
-    };
-  });
-
-  if (options.json) {
-    return {
-      code: 0,
-      stdout: `${JSON.stringify(
-        {
-          packages: rows.map((row) => ({
-            name: row.manifest.name,
-            version: row.manifest.version,
-            description: row.manifest.description,
-            origin: row.origin,
-            exports: row.manifest.exports.length,
-          })),
-        },
-        null,
-        2,
-      )}\n`,
-      stderr: "",
-    };
-  }
-
-  const headers = ["NAME", "VERSION", "EXPORTS", "ORIGIN"];
-  const values = rows.map((row) => [
-    row.manifest.name,
-    row.manifest.version,
-    String(row.manifest.exports.length),
-    row.origin,
-  ]);
+function formatRows(
+  headers: string[],
+  values: string[][],
+): { lines: string[]; widths: number[] } {
   const widths = headers.map((header, column) =>
     Math.max(header.length, ...values.map((value) => value[column]!.length)),
   );
   const formatRow = (cells: string[]) =>
     cells
-      .map((cell, column) => (column === cells.length - 1 ? cell : pad(cell, widths[column]!)))
+      .map((cell, column) =>
+        column === cells.length - 1 ? cell : pad(cell, widths[column]!),
+      )
       .join("  ");
-  const lines = [formatRow(headers), ...values.map(formatRow)];
-  const bundledCount = rows.filter((row) => row.origin === "bundled").length;
-  const localCount = rows.length - bundledCount;
+  return { lines: [formatRow(headers), ...values.map(formatRow)], widths };
+}
+
+export function packageListCommand(
+  rows: PackageListRow[],
+  options: CommandOptions = {},
+): CommandResult {
+  if (options.json) {
+    return {
+      code: 0,
+      stdout: `${JSON.stringify({ packages: rows }, null, 2)}\n`,
+      stderr: "",
+    };
+  }
+
+  if (rows.length === 0) {
+    return {
+      code: 0,
+      stdout:
+        "No packages installed. Run shortcircuit package install <name> or " +
+        "shortcircuit package link <package>.\n",
+      stderr: "",
+    };
+  }
+
+  const headers = options.verbose
+    ? ["NAME", "VERSION", "ORIGIN", "STATE", "EXPORTS", "PATH"]
+    : ["NAME", "VERSION", "ORIGIN", "STATE", "PATH"];
+  const values = rows.map((row) => {
+    const base = [row.name, row.version, row.origin, row.state];
+    if (options.verbose) {
+      base.push(row.exports === null ? "-" : String(row.exports));
+    }
+    base.push(row.path);
+    return base;
+  });
+  const { lines } = formatRows(headers, values);
   lines.push("");
   lines.push(
-    `${rows.length} package${rows.length === 1 ? "" : "s"}, ${bundledCount} bundled, ${localCount} local. Import a package in source to use its exports.`,
+    `${rows.length} package${rows.length === 1 ? "" : "s"}. ` +
+      "Local packages are read in place; registry packages are stored in .shortcircuit/packages.",
   );
-
   return { code: 0, stdout: `${lines.join("\n")}\n`, stderr: "" };
+}
+
+export function packageUpstreamListCommand(
+  rows: UpstreamPackageListRow[],
+  options: CommandOptions = {},
+): CommandResult {
+  if (options.json) {
+    return {
+      code: 0,
+      stdout: `${JSON.stringify({ packages: rows }, null, 2)}\n`,
+      stderr: "",
+    };
+  }
+
+  if (rows.length === 0) {
+    return { code: 0, stdout: "The upstream registry has no packages.\n", stderr: "" };
+  }
+
+  const headers = options.verbose
+    ? ["NAME", "LATEST", "INSTALLED", "EXPORTS", "DESCRIPTION"]
+    : ["NAME", "LATEST", "INSTALLED", "DESCRIPTION"];
+  const values = rows.map((row) => {
+    const description =
+      row.state === "error"
+        ? `error: ${row.error ?? "unknown"}`
+        : (row.description ?? "");
+    if (options.verbose) {
+      return [
+        row.name,
+        row.version,
+        row.installedVersion ?? "-",
+        row.exports === null ? "-" : String(row.exports),
+        description,
+      ];
+    }
+    return [row.name, row.version, row.installedVersion ?? "-", description];
+  });
+  const { lines } = formatRows(headers, values);
+  const failures = rows.filter((row) => row.state === "error");
+  if (failures.length > 0) {
+    lines.push("");
+    for (const failure of failures) {
+      lines.push(`Could not read ${failure.name}: ${failure.error ?? "unknown error"}`);
+    }
+  }
+  return { code: failures.length > 0 ? 1 : 0, stdout: `${lines.join("\n")}\n`, stderr: "" };
 }
 
 export function exportIrCommand(source: string, options: CommandOptions = {}): CommandResult {

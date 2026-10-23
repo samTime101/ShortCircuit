@@ -1,125 +1,60 @@
 # Creating a Short Circuit package
 
-This guide creates a real package from scratch, builds the bundled snapshot,
-runs its tests, and uses it from a circuit.
+This guide creates a package with the CLI, builds it, tests it, links it into a
+project, and prepares it for a registry submission.
 
-The example package is `@acme/parity`. It exports one macro, `PARITY3(a, b, c)`,
-and depends on the bundled `@shortcircuit/gates` package.
+Packages are source-first. Implementations live in `.lf` files. A manifest
+contains catalog metadata and source pointers; it never contains a macro body
+or a circuit body.
 
-> Packages are source-first. Implementations live in `.lf` files. The manifest
-> contains catalog metadata and source pointers only; it never contains a macro
-> body or circuit body.
-
----
-
-## 1. One-time setup
-
-Clone the main repository with its package submodule:
-
-```bash
-git clone --recurse-submodules https://github.com/samTime101/ShortCircuit.git
-cd ShortCircuit
-npm ci
-```
-
-If the repository is already cloned, initialize the submodule once:
-
-```bash
-git submodule update --init --recursive
-```
-
-The package repository lives at:
-
-```text
-vendor/ShortCircuit-Packages/
-```
-
-Check that the bundle builds before making changes:
-
-```bash
-cd vendor/ShortCircuit-Packages
-node scripts/build.mjs
-```
-
-You should see:
-
-```text
-Wrote dist/packages.json (3 packages)
-```
+> The CLI does not ship a package registry checkout. Package creation,
+> installation, and testing work in any directory. The web studio keeps its own
+> bundled snapshot, so its behavior is unchanged.
 
 ---
 
-## Quick start: scaffold with the CLI
+## Package names and exports
 
-The main CLI can create a package from anywhere inside a Short Circuit checkout:
+Package names are scoped npm-style names:
+
+```text
+@samip101/com16bit
+@acme/parity
+@shortcircuit/gates
+```
+
+The package name is not the export name. A package can export one or more
+public names:
+
+```text
+Package: @samip101/com16bit
+Export:  COM16BIT
+```
+
+Exports come in two kinds:
+
+- **MACRO** is a reusable expression such as `AND(a, b)` or `XOR(a, b)`.
+  Macros expand into the circuit that uses them. They are a good fit for small
+  combinational expressions.
+- **CIRCUIT** is a reusable block with named ports, such as `ADD4` or
+  `COM16BIT`. Circuits are instantiated as nodes and can have their own internal
+  structure.
+
+---
+
+## Quick start: scaffold a package
+
+Run the command from an empty directory or pass a directory to create:
 
 ```bash
 shortcircuit package init
 ```
 
-It finds `vendor/ShortCircuit-Packages` from the current directory. Use
-`--root` when the registry is elsewhere. The repository alias still works:
+The command explains MACRO versus CIRCUIT before creating files. With no flags,
+it prompts for the name, export, kind, description, version, license, and
+dependencies.
 
-```bash
-npm run package:init
-```
-
-Or run it from the package repository:
-
-```bash
-cd vendor/ShortCircuit-Packages
-npm run package:init
-```
-
-With no flags, it asks for each value:
-
-```text
-What is the name of the package? (e.g. @acme/parity): @acme/parity
-Public export name (PARITY): PARITY3
-Export kind (macro or circuit) (macro):
-Description (A Short Circuit package.): Three-input parity built from NAND.
-Version (0.1.0):
-License (MIT):
-Dependencies (comma-separated, blank for none): @shortcircuit/gates
-Auto-import without an IMPORT? (y/N): y
-```
-
-Press Enter to accept the value in brackets. Package names are scoped npm
-names such as `@acme/parity`. The command creates `package.json`,
-`manifest.json`, a `.lf` source file, docs, and a package test. It also adds the
-package to `registry.json` unless `--no-registry` is used.
-
-The generated source is a NAND scaffold. Replace it with the real
-implementation, then build and test:
-
-```bash
-shortcircuit package build   # validate manifests and rebuild dist/packages.json
-shortcircuit package test    # build, then run the package tests
-shortcircuit package check   # build and test in one command
-shortcircuit package registry # show registered packages and export counts
-```
-
-The repository aliases run the same commands:
-
-```bash
-npm run package:build
-npm run package:test
-npm run package:check
-npm run package:list
-```
-
-`package test` runs `npm run test:packages` in the main repository. If the
-package repository is checked out outside the main repository, pass `--main` or
-point `SHORTCIRCUIT_ROOT` at the main checkout:
-
-```bash
-shortcircuit package test --root /path/to/ShortCircuit-Packages \
-  --main /path/to/ShortCircuit
-```
-
-### Non-interactive init
-
-For scripts and automation, pass the fields directly:
+For scripts and automation:
 
 ```bash
 shortcircuit package init \
@@ -127,62 +62,74 @@ shortcircuit package init \
   --export PARITY3 \
   --kind macro \
   --description "Three-input parity built from NAND." \
-  --dependencies @shortcircuit/gates
+  --dependencies @shortcircuit/gates \
+  --yes
 ```
 
-The repository alias is:
-
-```bash
-npm run package:init -- \
-  --name @acme/parity \
-  --export PARITY3 \
-  --kind macro \
-  --description "Three-input parity built from NAND." \
-  --dependencies @shortcircuit/gates
-```
+Useful flags:
 
 | Flag | Meaning |
 | --- | --- |
-| `--name <@scope/name>` | Scoped package name. Required when not prompted. |
-| `--export <NAME>` | Public macro or circuit name. Defaults to the upper-case directory name. |
+| `--name <@scope/name>` | Scoped package name. Required when not prompting. |
+| `--export <NAME>` | Public macro or circuit name. Defaults to the upper-case package name. |
 | `--kind <macro\|circuit>` | Export kind. Default: `macro`. |
 | `--description <text>` | Catalog description. |
 | `--version <semver>` | Package version. Default: `0.1.0`. |
 | `--license <id>` | License identifier. Default: `MIT`. |
 | `--dependencies <list>` | Comma-separated package names. |
-| `--auto-import` | Enable legacy `recommendedAutoImport` metadata. |
-| `--no-registry` | Do not edit `registry.json`. |
-| `--force` | Replace an existing package directory and registry entry. |
-| `--yes` | Accept defaults and never prompt. `--name` is still required. |
-| `--root <dir>` | Package registry checkout. The CLI finds `vendor/ShortCircuit-Packages` by default. |
+| `--force` | Replace generated files in an existing package. |
+| `--yes` | Use defaults and never prompt. `--name` is still required. |
 
-When stdin is not a TTY, init behaves like `--yes`: it uses defaults for fields
-that were not passed and requires `--name`.
+The scaffold creates:
 
-The numbered steps below show exactly what the CLI generates, which is useful
-when you want to understand or hand-edit every file.
+```text
+package.json
+manifest.json
+macros/<export>/macro.lf     # or circuits/<export>/circuit.lf
+docs/<export>.md             # or circuits/<export>/docs.md
+tests/<package>.test.lf
+shortcircuit.lock.json
+.gitignore
+```
+
+The generated source is a NAND scaffold. Replace it with the real
+implementation and update the docs and tests.
 
 ---
 
-## 2. Create the package directory
+## Build and test
 
-> **Using the CLI?** Skip steps 2 through 8. `shortcircuit package init` creates the package
-> directory, `package.json`, `manifest.json`, `.lf` source, docs, tests, and the
-> registry entry for you. The manual steps below show exactly what it generates,
-> or how to build a package by hand.
-
-From the package repository root (`vendor/ShortCircuit-Packages`):
+From the package directory:
 
 ```bash
-mkdir -p packages/parity/macros/parity3
-mkdir -p packages/parity/docs
-mkdir -p packages/parity/tests
+shortcircuit package build   # validate and write dist/packages.json
+shortcircuit package test    # run the package's .lf tests
+shortcircuit package check   # build and test
 ```
 
-The layout is:
+`package build` validates the manifest, package metadata, source paths, docs,
+tests, and export declarations, then writes a one-package
+`dist/packages.json` bundle.
+
+`package test` compiles each package-level or export-level test with the package
+and its installed dependencies. Registry dependencies must be installed first:
+
+```bash
+shortcircuit package install
+shortcircuit package test
+```
+
+Path dependencies are read in place and need no install step, but they must be
+recorded in the manifest and lockfile.
+
+---
+
+## Manifest and source layout
+
+A minimal package looks like this:
 
 ```text
-packages/parity/
+parity/
   package.json
   manifest.json
   macros/
@@ -194,56 +141,7 @@ packages/parity/
     parity.test.lf
 ```
 
-A package can also contain ordinary circuits under `circuits/<name>/`.
-
----
-
-## 3. Create `package.json`
-
-`package.json` is Node package metadata. Its `name` and `version` must match
-`manifest.json`; the build script checks this.
-
-Create `packages/parity/package.json`:
-
-```json
-{
-  "name": "@acme/parity",
-  "version": "0.1.0",
-  "description": "Three-input parity built from the Short Circuit gates package.",
-  "license": "MIT",
-  "dependencies": {
-    "@shortcircuit/gates": "^0.1.0"
-  }
-}
-```
-
-If your package uses another package's exports, declare that dependency in both
-`package.json` and `manifest.json`.
-
----
-
-## 4. Create the macro source
-
-Create `packages/parity/macros/parity3/macro.lf`:
-
-```logicflow
-MACRO PARITY3(a, b, c)
-  BODY XOR(a, b, c)
-END
-```
-
-`XOR` is provided by `@shortcircuit/gates`. A package macro can use the kernel
-`NAND` operation, structural operations, and exports from packages it depends
-on.
-
-The macro source is the implementation. Do not copy the body into the
-manifest.
-
----
-
-## 5. Create the manifest
-
-Create `packages/parity/manifest.json`:
+`manifest.json`:
 
 ```json
 {
@@ -251,151 +149,203 @@ Create `packages/parity/manifest.json`:
   "name": "@acme/parity",
   "version": "0.1.0",
   "engine": "^0.1.0",
-  "description": "Three-input parity built from NAND-derived gates.",
-  "dependencies": {
-    "@shortcircuit/gates": "^0.1.0"
-  },
+  "description": "Three-input parity built from NAND.",
   "tests": "tests/parity.test.lf",
   "exports": [
     {
       "kind": "macro",
       "name": "PARITY3",
       "source": "macros/parity3/macro.lf",
-      "group": "Parity",
-      "summary": "One when an odd number of inputs are high.",
+      "group": "Arithmetic",
+      "summary": "Three-input parity.",
       "docs": "docs/parity3.md",
-      "examples": [
-        "y = PARITY3(a, b, c)"
-      ],
+      "examples": ["y = PARITY3(a, b, c)"],
       "widthRule": "Result width = common input width"
     }
   ]
 }
 ```
 
-Important fields:
+- `source` points at the `.lf` file that declares the export.
+- `docs` points at a Markdown file.
+- `tests` at the package level names package tests.
+- A circuit export can also provide its own `tests` file and port metadata.
+- Paths must stay inside the package directory.
 
-| Field | Meaning |
-| --- | --- |
-| `name`, `version` | Must match `package.json`. |
-| `engine` | Compatible engine version. |
-| `recommendedAutoImport` | Optional legacy metadata kept for package compatibility. It does not activate the package; every source still needs an explicit `IMPORT`. |
-| `dependencies` | Package names whose exports this package may use. |
-| `tests` | Package-wide tests. Per-circuit tests can also use an export's `tests` field. |
-| `exports` | Public macros and circuits. Each entry points at a real source file. |
-| `internal` | Optional; hides an export from docs and completions while keeping it usable by other package sources. |
-| `ports` | Optional catalog metadata for circuit exports. The compiler still reads the real ports from the circuit source. |
+`package.json` is optional, but recommended. When present, its `name` and
+`version` must match `manifest.json`.
 
-For a circuit export, use `"kind": "circuit"` and point `source` at a normal
-`.lf` file containing `CIRCUIT <name>`.
-
----
-
-## 6. Add docs
-
-Create `packages/parity/docs/parity3.md`:
-
-````markdown
-# PARITY3
-
-`PARITY3(a, b, c)` returns one when an odd number of its three inputs are high.
-
-- `a`, `b`, `c`: one-bit or bus inputs of the same width.
-- Result: the common input width.
+A macro source declares only the public macro:
 
 ```logicflow
-y = PARITY3(a, b, c)
+MACRO PARITY3(a, b, c)
+  BODY XOR(XOR(a, b), c)
+END
 ```
-````
 
-Package docs are embedded into the bundled snapshot and can be shown by a host.
-
----
-
-## 7. Add package tests
-
-Create `packages/parity/tests/parity.test.lf`:
+A circuit source declares an ordinary circuit:
 
 ```logicflow
-CIRCUIT PARITY3_TEST
+CIRCUIT COM16BIT
   INPUT a
   INPUT b
-  INPUT c
+  INPUT cin
 
-  y = PARITY3(a, b, c)
+  sum = XOR(XOR(a, b), cin)
+  carry = OR(AND(a, b), AND(cin, XOR(a, b)))
 
-  OUTPUT y
-END
-
-TEST PARITY3_TEST
-  CASE "no inputs high"
-    INPUT a = 0
-    INPUT b = 0
-    INPUT c = 0
-    EXPECT y = 0
-  END
-
-  CASE "one input high"
-    INPUT a = 1
-    INPUT b = 0
-    INPUT c = 0
-    EXPECT y = 1
-  END
-
-  CASE "two inputs high"
-    INPUT a = 1
-    INPUT b = 1
-    INPUT c = 0
-    EXPECT y = 0
-  END
-
-  CASE "three inputs high"
-    INPUT a = 1
-    INPUT b = 1
-    INPUT c = 1
-    EXPECT y = 1
-  END
+  OUTPUT sum
+  OUTPUT carry
 END
 ```
 
-The test wrapper circuit is test-only. It must not redefine a public export.
-Package tests run through the same compiler and simulator as user tests.
+Package circuits should use only the kernel `NAND` and their declared
+dependencies. They are compiled with the package's dependencies and do not see
+the web studio's default snapshot.
 
----
-
-## 8. Register the package
-
-Add the package to `vendor/ShortCircuit-Packages/registry.json`:
+Dependencies use the same scoped names and semver ranges:
 
 ```json
 {
-  "name": "@acme/parity",
-  "version": "0.1.0",
-  "manifest": "packages/parity/manifest.json"
+  "dependencies": {
+    "@shortcircuit/gates": "^0.1.0"
+  }
 }
 ```
 
-The full file should now look like:
+Registry packages cannot declare `path:` dependencies. Path links are for local
+development in a project.
+
+---
+
+## Use a package in a project
+
+Create a project first:
+
+```bash
+shortcircuit init
+```
+
+Install a registry package:
+
+```bash
+shortcircuit package install @shortcircuit/gates
+```
+
+This writes a dependency such as `"@shortcircuit/gates": "^0.1.0"` and installs
+the resolved version into `.shortcircuit/packages`. `shortcircuit.lock.json`
+records the exact version, resolved URL, integrity, and transitive
+dependencies.
+
+Then import it in source:
+
+```logicflow
+IMPORT "@shortcircuit/gates"
+
+CIRCUIT HalfAdder
+  INPUT a
+  INPUT b
+  sum = XOR(a, b)
+  carry = AND(a, b)
+  OUTPUT sum
+  OUTPUT carry
+END
+```
+
+### Link a local package
+
+During package development, link the directory instead of installing it:
+
+```bash
+shortcircuit package link com16bit
+shortcircuit package link @samip101/com16bit
+shortcircuit package link packages/com16bit
+shortcircuit package link /absolute/path/to/com16bit
+```
+
+`link` writes a path dependency:
+
+```json
+{
+  "dependencies": {
+    "@samip101/com16bit": "path:packages/com16bit"
+  }
+}
+```
+
+The package is read in place. No files are copied and no symlink is created.
+`package uninstall com16bit` removes the dependency entry but never deletes the
+linked package files. Use `--force` to replace a conflicting registry
+dependency with a path link.
+
+### One-off local packages
+
+For a single compile without changing the project manifest:
+
+```bash
+shortcircuit compile circuit.lf --package packages/com16bit
+shortcircuit compile circuit.lf --package packages/com16bit/manifest.json
+```
+
+`--package` is repeatable. This loads the package for that command only.
+
+---
+
+## Install, update, and verify
+
+```bash
+shortcircuit package list
+shortcircuit package list upstream --refresh
+shortcircuit package install
+shortcircuit package update
+shortcircuit package update @shortcircuit/gates --latest
+shortcircuit package uninstall @shortcircuit/gates
+shortcircuit package install --frozen
+```
+
+- `package list` reads `shortcircuit.lock.json` and reports each package's
+  version, origin (`local` or `registry`), state, export count, and path.
+- `package list upstream` fetches the registry index and each package manifest.
+- `package install` with no name installs everything in the manifest.
+- `package update` stays within saved ranges. `--latest` moves the saved range
+  to the latest version.
+- `package install --frozen` fails if the lockfile or package store is
+  incomplete.
+- `package uninstall` removes a direct dependency, prunes unreachable registry
+  packages, and leaves path-linked files alone.
+
+Useful flags:
+
+| Flag | Meaning |
+| --- | --- |
+| `--registry <url>` | Use a specific registry index, including a `file://` path. |
+| `--offline` | Use only cached registry data and package archives. |
+| `--refresh` | Ignore cached registry data. |
+| `--frozen` | Verify the lockfile and package store without changing them. |
+| `--force` | Replace a conflicting dependency or generated file. |
+| `--save-exact` | Save an exact version instead of a caret range. |
+| `--latest` | Update the saved range to the latest version. |
+
+The default registry is:
+
+```text
+https://raw.githubusercontent.com/samTime101/ShortCircuit-Packages/main/registry.json
+```
+
+Override it with `--registry`, a project `registry` field, or
+`SHORTCIRCUIT_REGISTRY_URL`. Cache data lives in `SHORTCIRCUIT_CACHE`, then
+`$XDG_CACHE_HOME/shortcircuit`, then `~/.cache/shortcircuit`.
+
+---
+
+## Registry format
+
+A registry index can be flat (v1):
 
 ```json
 {
   "schema": "shortcircuit.registry/v1",
   "packages": [
-    {
-      "name": "@shortcircuit/gates",
-      "version": "0.1.0",
-      "manifest": "packages/gates/manifest.json"
-    },
-    {
-      "name": "@shortcircuit/arithmetic",
-      "version": "0.1.0",
-      "manifest": "packages/arithmetic/manifest.json"
-    },
-    {
-      "name": "@shortcircuit/selection",
-      "version": "0.1.0",
-      "manifest": "packages/selection/manifest.json"
-    },
     {
       "name": "@acme/parity",
       "version": "0.1.0",
@@ -405,261 +355,132 @@ The full file should now look like:
 }
 ```
 
-The registry is static. Packages are not discovered by scanning directories or
-calling GitHub.
+or versioned (v2):
+
+```json
+{
+  "schema": "shortcircuit.registry/v2",
+  "packages": [
+    {
+      "name": "@acme/parity",
+      "description": "Three-input parity.",
+      "versions": {
+        "0.1.0": {
+          "manifest": "packages/parity-0.1.0/manifest.json"
+        }
+      }
+    }
+  ]
+}
+```
+
+Manifest paths are relative to the registry index. Package files are fetched
+from the manifest's directory. A package can also be served from a `file://`
+registry during development and tests.
+
+The installer records a SHA-256 integrity over the canonical package payload it
+downloads: the manifest, optional `package.json`, sources, docs, tests, and
+`README`/`LICENSE` files.
 
 ---
 
-## 9. Build and validate the bundle
+## Prepare a registry submission
 
-From the main repository or the package repository:
+`package register` validates the package, runs its tests, records the payload
+integrity, and writes a submission bundle:
 
 ```bash
-shortcircuit package build
+shortcircuit package register
+shortcircuit package register --dry-run
+shortcircuit package register --dry-run --json
 ```
 
-The repository alias `npm run package:build` does the same. This runs
-`node scripts/build.mjs`. Expected output:
+The bundle is written under:
 
 ```text
-Wrote dist/packages.json (4 packages)
+.shortcircuit/register/<package>-<version>/
+  submission.json
+  package/
+    manifest.json
+    package.json
+    ...
 ```
 
-The build script checks that:
+`submission.json` contains a ready-to-copy registry entry, the payload
+integrity, and every payload file. Registration refuses path dependencies
+because a published package must resolve its dependencies from the registry.
 
-- every manifest uses `shortcircuit.package/v1`;
-- `package.json` and `manifest.json` names and versions agree;
-- every export points at an existing source file;
-- the source really declares the exported `MACRO` or `CIRCUIT`;
-- macro manifests do not contain implementation fields such as `body`, `args`,
-  `fold`, or `variadic`;
-- docs and tests referenced by the manifest exist.
-
-Do not edit `dist/packages.json` by hand. It is generated.
+Opening the pull request against the package registry is still manual. Copy the
+registry entry and package files from the submission bundle, then follow the
+registry repository's contribution instructions.
 
 ---
 
-## 10. Run the package tests
+## Troubleshooting
 
-From the main repository or the package repository:
+### `E602 Cannot import "@acme/parity"`
+
+The source has an `IMPORT` but the package is not loaded. Check:
+
+```bash
+shortcircuit package list
+shortcircuit package install
+```
+
+For a linked package, verify the manifest name matches the import and the path
+dependency exists in `shortcircuit.json`.
+
+### `Dependency ... is not installed`
+
+Run `shortcircuit package install` in the project or package root. For a
+package under development, its own registry dependencies need their own lockfile
+and install.
+
+### `Package ... does not match package.json name/version`
+
+If `package.json` exists, its `name` and `version` must match `manifest.json`.
+Update one or remove `package.json` if it is not needed.
+
+### `... is not declared in ...`
+
+The manifest export's `source` does not contain a matching `MACRO <NAME>(` or
+`CIRCUIT <NAME>` declaration. Check the export name and source path.
+
+### `Path dependency ... points to ... which does not exist`
+
+The linked directory is missing or moved. Update the dependency or run
+`shortcircuit package link` again from the project root.
+
+### `No version of ... satisfies ...`
+
+The requested range cannot be met by the registry's available versions. Run
+`shortcircuit package list upstream --refresh` and adjust the range.
+
+### `... is missing from .shortcircuit/packages`
+
+The package store is incomplete. Run `shortcircuit package install` (without
+`--frozen`) to restore it, or remove the store and reinstall from cache.
+
+### A package compiles but its test fails
+
+Run it directly to see the diagnostics:
 
 ```bash
 shortcircuit package test
 ```
 
-The repository alias `npm run package:test` does the same. This rebuilds the
-bundle, then runs `npm run test:packages` in the main repository. If the
-registry is outside the main checkout, pass `--main`:
-
-```bash
-shortcircuit package test --main /path/to/ShortCircuit
-```
-
-You can also run the test directly from the main repository:
-
-```bash
-cd ../..
-npx vitest run packages/engine/test/packages.test.ts
-```
-
-That test calls `runPackageTests()` against the bundled snapshot, so the new
-package and all existing package tests run together.
-
-To run the whole project:
-
-```bash
-npm test
-npm run typecheck
-npm run build
-```
-
-You can also run package tests directly from the engine API:
-
-```ts
-import { runPackageTests } from "@shortcircuit/engine";
-
-const report = runPackageTests();
-console.log(report.ok, report.passed, report.failed);
-```
-
----
-
-## 11. Use the package in a circuit
-
-The export is available only after an explicit import:
-
-```logicflow
-IMPORT "@acme/parity"
-
-CIRCUIT Odd
-  INPUT a
-  INPUT b
-  INPUT c
-
-  y = PARITY3(a, b, c)
-
-  OUTPUT y
-END
-```
-
-Use an alias for qualified access:
-
-```logicflow
-IMPORT "@acme/parity" AS parity
-
-CIRCUIT Odd
-  INPUT a
-  INPUT b
-  INPUT c
-
-  y = parity.PARITY3(a, b, c)
-
-  OUTPUT y
-END
-```
-
-Missing packages report `E602`. Reusing an alias for two packages reports
-`E603`.
-
----
-
-## 12. Commit the package and submodule pointer
-
-Commit the package repository first:
-
-```bash
-git -C vendor/ShortCircuit-Packages add -A
-git -C vendor/ShortCircuit-Packages commit -m "feat: add parity package"
-git -C vendor/ShortCircuit-Packages push origin main
-```
-
-Then commit the updated submodule pointer in the main repository:
-
-```bash
-git add vendor/ShortCircuit-Packages
-git commit -m "chore: update package submodule"
-git push origin main
-```
-
-The main repository must point at the package commit that contains the built
-`dist/packages.json`; otherwise CI and Vercel cannot compile the engine.
-
-Updating the submodule pointer changes the package snapshot, but it does not
-publish a new npm version. To ship the new package to CLI users, bump the CLI
-version in `packages/cli/package.json` and push to `main`. The release workflow
-publishes new versions automatically. See [RELEASING.md](RELEASING.md).
-
----
-
-## 13. Using a custom package outside the registry
-
-The CLI can load a package directory directly. It reads `manifest.json`,
-resolves every source path, and inlines the source, docs, and tests:
-
-```bash
-shortcircuit compile circuit.lf --package /path/to/package
-shortcircuit package list --package /path/to/package
-```
-
-`--package` accepts a directory or a `manifest.json` path and can be repeated.
-It makes the package available to the source; the source still needs an
-`IMPORT "@acme/parity"` line before using its exports. Local package names must
-not collide with the bundled snapshot.
-
-The studio package manager lists packages from the bundled snapshot. A host can
-also load a different bundle through the compiler API:
-
-```ts
-import { compile, type PackageBundle } from "@shortcircuit/engine";
-
-const bundle: PackageBundle = {
-  schema: "shortcircuit.packages/v1",
-  packages: [
-    // Manifests with sourceText/docsText/testText embedded, like dist/packages.json.
-  ],
-};
-
-const result = compile(source, {
-  packages: bundle,
-  disableDefaultPackages: false,
-});
-```
-
-Use `disableDefaultPackages: true` when you want only the supplied bundle.
-`packages` accepts either a full `PackageBundle` or an array of manifests.
-
----
-
-## 14. Troubleshooting
-
-### `Cannot find module '../../../vendor/ShortCircuit-Packages/dist/packages.json'`
-
-The submodule is missing. Run:
-
-```bash
-git submodule update --init --recursive
-```
-
-or clone with `--recurse-submodules`.
-
-### `Could not find the Short Circuit package registry`
-
-Run the authoring command from inside the main checkout, initialize the
-submodule, or pass the registry path directly:
-
-```bash
-git submodule update --init --recursive
-shortcircuit package build --root /path/to/ShortCircuit-Packages
-```
-
-If the registry is outside the main checkout, point `package test` and
-`package check` at the main repository with `--main`.
-
-### `package validation failed: ... is not declared in ...`
-
-The exported name in `manifest.json` does not match the `MACRO` or `CIRCUIT`
-declaration in the source file. Names must match exactly.
-
-### `package validation failed: ... does not match package.json ...`
-
-The `name` or `version` fields differ between `package.json` and
-`manifest.json`.
-
-### `E601` or a duplicate export error
-
-Export names must be unique across the loaded catalog. Two packages cannot
-export the same macro name.
-
-### `E602 Cannot import ...`
-
-The package is not installed in the project. Check the package name, or load a
-local package with `--package` in the CLI. If the package is installed, use the
-same name in the source `IMPORT`.
-
-### `E200 ... is reserved`
-
-Package macro and circuit export names are reserved while their package is
-imported. Rename the user circuit or signal, or remove the import if the
-package is not needed.
-
-### A package source compiles but the test wrapper does not
-
-Package tests are compiled with imports for the package and its dependencies.
-Check that the wrapper uses the correct exported name and that every dependency
-is listed in both `package.json` and `manifest.json`.
+Check that the package source uses only the kernel `NAND` and its declared
+dependencies, and that every test imports or instantiates the export correctly.
 
 ---
 
 ## Minimal checklist
 
-```text
-[ ] Run shortcircuit package init (or create packages/<name>/ by hand)
-[ ] Put implementations in .lf files
-[ ] Point every export at its source
-[ ] Add docs and tests
-[ ] Add the manifest to registry.json (package init does this by default)
-[ ] Run shortcircuit package build
-[ ] Run shortcircuit package test
-[ ] Commit and push the package repository
-[ ] Commit the updated submodule pointer in the main repository
-```
+- Scoped package name, for example `@acme/parity`.
+- Separate export name, for example `PARITY3`.
+- `manifest.json` with `schema`, `name`, `version`, and `exports`.
+- Source files with matching `MACRO` or `CIRCUIT` declarations.
+- Docs and tests.
+- `shortcircuit package check` passes.
+- `shortcircuit package register --dry-run` passes.
+- Registry dependencies instead of path dependencies for publication.

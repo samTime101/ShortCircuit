@@ -167,11 +167,13 @@ CIRCUIT Panel
 END
 ```
 
-Packages are available only when the source imports them. The bundled
-`@shortcircuit/gates`, `@shortcircuit/selection`, `@shortcircuit/arithmetic`,
-and `@shortcircuit/comparison` packages still need an explicit `IMPORT` in
-every file that uses their exports. `recommendedAutoImport` is legacy manifest
-metadata and does not activate a package.
+Packages are available only when the source imports them. The web studio
+bundles `@shortcircuit/gates`, `@shortcircuit/selection`,
+`@shortcircuit/arithmetic`, and `@shortcircuit/comparison`, but they still need
+an explicit `IMPORT` in every file that uses their exports. The CLI does not
+ship that snapshot; install or link the packages a project imports.
+`recommendedAutoImport` is legacy manifest metadata and does not activate a
+package.
 
 - An import with an alias adds qualified access through that alias.
 - An import without an alias adds unqualified access.
@@ -185,9 +187,10 @@ metadata and does not activate a package.
 - The studio's **Packages** button edits the source `IMPORT` lines directly.
   Checking a package adds its import and unchecking removes it. There is no
   separate enabled-package state.
-- Hosts can compile against custom bundles with `packages` and omit the bundled
-  snapshot with `disableDefaultPackages`, but neither option bypasses the
-  source import requirement.
+- Hosts can compile against custom bundles with `packages` and omit the
+  engine's default snapshot with `disableDefaultPackages`, but neither option
+  bypasses the source import requirement. The CLI uses the default-free
+  `@shortcircuit/engine/core` entry and supplies the project's packages.
 - Package implementation files are real `.lf` sources. Manifests contain
   catalog metadata and source pointers, not embedded circuit logic.
 
@@ -892,6 +895,7 @@ in §7.3 is rewritten in place between the generated markers.
 | Maximum diagnostics collected | 100 |
 
 `compile(source, options)` can tighten or adjust these for a host. Hosts can
-supply custom package bundles with `packages` and omit the bundled snapshot
-with `disableDefaultPackages`. Package activation still comes from the source
-`IMPORT` lines.
+supply custom package bundles with `packages` and omit the engine's default
+snapshot with `disableDefaultPackages`. Package activation still comes from the
+source `IMPORT` lines. The CLI calls the default-free core entry, so its bundle
+does not include the web snapshot.

@@ -32,6 +32,7 @@ short-circuit/
 │  ├─ src/analyzer.ts            # validation + elaboration to flat IR
 │  ├─ src/builtins.ts            # core operation metadata
 │  ├─ src/packages.ts            # package catalog + .lf macro parser
+│  ├─ src/defaultPackages.ts     # web-only bundled package snapshot
 │  ├─ src/snippets.ts            # language snippet library
 │  ├─ src/values.ts              # bigint bit values, literal parsing, masks
 │  ├─ src/diagnostics.ts         # stable codes, suggestions, ordering
@@ -192,10 +193,12 @@ partial IR as if it were valid.
 
 ### 2.4 Packages
 
-`compile()` resolves the bundled package snapshot plus any host-provided
-packages. Macro exports point at real `.lf` files; `packages.ts` parses their
-`MACRO` declarations, validates the exported name, and registers the resolved
-body/fold. A macro body is never stored in JSON.
+`@shortcircuit/engine` resolves the web default package snapshot plus any
+host-provided packages. `@shortcircuit/engine/core` is the default-free entry
+used by the CLI: it resolves only the packages the host supplies, so a CLI
+bundle never embeds the web snapshot. Macro exports point at real `.lf` files;
+`packages.ts` parses their `MACRO` declarations, validates the exported name,
+and registers the resolved body/fold. A macro body is never stored in JSON.
 
 `resolvePackageImports` applies source-level `IMPORT` declarations to the
 loaded catalog. Only imported packages expose exports to user code. An import
@@ -203,9 +206,10 @@ without an alias adds unqualified access; an alias adds qualified access.
 `packageClosure` then loads those packages plus their declared dependencies so
 package implementations can resolve their own calls, while dependency exports
 stay out of the user namespace and completions. Missing packages and duplicate
-aliases are `E602` and `E603`. Hosts can add bundles with `packages` and omit
-the bundled snapshot with `disableDefaultPackages`, but no host option bypasses
-the source import requirement.
+aliases are `E602` and `E603`. Hosts can add bundles with `packages`; the root
+engine injects its default snapshot through `defaultPackages`, while
+`disableDefaultPackages` omits it. The core entry leaves `defaultPackages`
+unset. No host option bypasses the source import requirement.
 
 Package circuits are parsed from their `.lf` sources and registered as internal
 structures. They can be instantiated by user circuits and by other package

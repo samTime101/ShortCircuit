@@ -1,67 +1,37 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { run } from "../src/cli";
-import { cleanupTempDirs, tempDir, writeText } from "./helpers";
+import {
+  cleanupTempDirs,
+  readJson,
+  tempDir,
+  writeDoublePackage,
+  writeText,
+} from "./helpers";
 
 afterEach(cleanupTempDirs);
 
-function writeRegistryRepo(root: string): void {
-  writeText(
-    root,
-    "package.json",
-    `${JSON.stringify({ name: "@shortcircuit/packages", version: "0.1.0" }, null, 2)}\n`,
-  );
-  writeText(
-    root,
-    "registry.json",
-    `${JSON.stringify({ schema: "shortcircuit.registry/v1", packages: [] }, null, 2)}\n`,
-  );
-  writeText(root, "scripts/package.mjs", "// test package authoring entry\n");
-}
-
-function writeManifest(root: string, relative: string, exportNames: string[]): void {
-  writeText(
-    root,
-    relative,
-    `${JSON.stringify(
-      {
-        schema: "shortcircuit.package/v1",
-        name: "@test/package",
-        version: "0.1.0",
-        exports: exportNames.map((name) => ({
-          kind: "macro",
-          name,
-          source: "macros/test/macro.lf",
-        })),
-      },
-      null,
-      2,
-    )}\n`,
-  );
-}
+const noRead = () => {
+  throw new Error("package commands should not read a source file");
+};
 
 function runPackage(
   args: string[],
   cwd: string,
   env: Record<string, string | undefined> = process.env,
 ) {
-  return run(
-    ["package", ...args],
-    () => {
-      throw new Error("package commands should not read a source file");
-    },
-    () => undefined,
-    { cwd, env },
-  );
+  return run(["package", ...args], noRead, () => undefined, {
+    cwd,
+    env,
+    interactive: false,
+  });
 }
 
 describe("package authoring commands", () => {
-  it("scaffolds through the package authoring delegate", () => {
+  it("scaffolds a package locally without a registry checkout", async () => {
     const root = tempDir();
-    writeRegistryRepo(root);
-
-    const result = runPackage(
+    const result = await runPackage(
       [
         "init",
         "--name",
@@ -78,278 +48,184 @@ describe("package authoring commands", () => {
         "MIT",
         "--dependencies",
         "@shortcircuit/gates",
-        "--no-registry",
-        "--force",
         "--yes",
-        "--auto-import",
       ],
       root,
     );
 
     expect(result.code).toBe(0);
     expect(result.stderr).toBe("");
-    expect(result.delegate?.command).toBe(process.execPath);
-    expect(result.delegate?.cwd).toBe(root);
-    expect(result.delegate?.args).toEqual([
-      join(root, "scripts", "package.mjs"),
-      "init",
-      "--name",
-      "@acme/parity",
-      "--export",
-      "PARITY3",
-      "--kind",
-      "macro",
-      "--description",
-      "Three-input parity.",
-      "--version",
-      "0.2.0",
-      "--license",
-      "MIT",
-      "--dependencies",
-      "@shortcircuit/gates",
-      "--no-registry",
-      "--force",
-      "--yes",
-      "--auto-import",
-    ]);
+    expect(result.stdout).toContain("MACRO");
+    expect(result.stdout).toContain("CIRCUIT");
+    expect(result.stdout).toContain("Created package @acme/parity@0.2.0");
+
+    const manifest = readJson<Record<string, unknown>>(join(root, "manifest.json"));
+    expect(manifest).toMatchObject({
+      schema: "shortcircuit.package/v1",
+      name: "@acme/parity",
+      version: "0.2.0",
+      dependencies: { "@shortcircuit/gates": "^0.1.0" },
+    });
+    expect(existsSync(join(root, "package.json"))).toBe(true);
+    expect(existsSync(join(root, "shortcircuit.lock.json"))).toBe(true);
+    expect(existsSync(join(root, "macros/parity3/macro.lf"))).toBe(true);
+    expect(existsSync(join(root, "docs/parity3.md"))).toBe(true);
+    expect(existsSync(join(root, "tests/parity.test.lf"))).toBe(true);
+    expect(readFileSync(join(root, ".gitignore"), "utf8")).toContain(".shortcircuit/");
   });
 
-  it("consumes the root flag instead of forwarding it", () => {
-    const root = tempDir();
-    writeRegistryRepo(root);
-    const outside = tempDir();
-
-    const result = runPackage(
-      ["init", "--root", root, "--name", "@acme/parity", "--yes"],
-      outside,
-    );
-
-    expect(result.code).toBe(0);
-    expect(result.delegate?.cwd).toBe(root);
-    expect(result.delegate?.args).not.toContain("--root");
-  });
-
-  it("finds the registry from a nested directory", () => {
-    const root = tempDir();
-    writeRegistryRepo(root);
-    const nested = join(root, "apps", "web");
-    mkdirSync(nested, { recursive: true });
-
-    const result = runPackage(["build"], nested);
-
-    expect(result.code).toBe(0);
-    expect(result.delegate?.cwd).toBe(root);
-    expect(result.delegate?.args.slice(1)).toEqual(["build"]);
-  });
-
-  it("finds the vendored registry from the main checkout", () => {
-    const main = tempDir();
-    const root = join(main, "vendor", "ShortCircuit-Packages");
-    writeRegistryRepo(root);
-    const nested = join(main, "packages", "engine");
-    mkdirSync(nested, { recursive: true });
-
-    const result = runPackage(["check"], nested);
-
-    expect(result.code).toBe(0);
-    expect(result.delegate?.cwd).toBe(root);
-    expect(result.delegate?.args.slice(1)).toEqual(["check"]);
-  });
-
-  it("passes the main checkout to test and check commands", () => {
-    const root = tempDir();
-    writeRegistryRepo(root);
-    const main = tempDir();
-
-    for (const subcommand of ["test", "check"]) {
-      const result = runPackage([subcommand, "--main", main], root, {
-        PATH: process.env.PATH,
-      });
-
-      expect(result.code).toBe(0);
-      expect(result.delegate?.args.slice(1)).toEqual([subcommand]);
-      expect(result.delegate?.env?.SHORTCIRCUIT_ROOT).toBe(main);
-    }
-  });
-
-  it("reports a missing registry", () => {
-    const empty = tempDir();
-
-    const result = runPackage(["build"], empty);
-
+  it("requires a name when not prompting", async () => {
+    const result = await runPackage(["init", "--yes"], tempDir());
     expect(result.code).toBe(1);
-    expect(result.stderr).toContain("Could not find the Short Circuit package registry");
-    expect(result.stderr).toContain("--root");
+    expect(result.stderr).toContain("Missing --name");
   });
 
-  it("accepts the main checkout as an explicit root", () => {
-    const main = tempDir();
-    const root = join(main, "vendor", "ShortCircuit-Packages");
-    writeRegistryRepo(root);
+  it("does not overwrite an existing package without --force", async () => {
+    const root = tempDir();
+    await runPackage(["init", "--name", "@acme/parity", "--yes"], root);
+    const again = await runPackage(["init", "--name", "@acme/parity", "--yes"], root);
+    expect(again.code).toBe(1);
+    expect(again.stderr).toContain("already exists");
 
-    const result = runPackage(["build", "--root", main], tempDir());
+    const forced = await runPackage(
+      ["init", "--name", "@acme/parity", "--export", "PARITY4", "--force", "--yes"],
+      root,
+    );
+    expect(forced.code).toBe(0);
+  });
+
+  it("scaffolds a circuit package", async () => {
+    const root = tempDir();
+    const result = await runPackage(
+      ["init", "--name", "@acme/buffer", "--kind", "circuit", "--yes"],
+      root,
+    );
 
     expect(result.code).toBe(0);
-    expect(result.delegate?.cwd).toBe(root);
+    expect(existsSync(join(root, "circuits/buffer/circuit.lf"))).toBe(true);
+    const manifest = readJson<{ exports: Array<{ kind: string; name: string }> }>(
+      join(root, "manifest.json"),
+    );
+    expect(manifest.exports[0]).toMatchObject({ kind: "circuit", name: "BUFFER" });
   });
 
-  it("reports an invalid explicit root", () => {
-    const empty = tempDir();
+  it("builds and tests a package locally", async () => {
+    const root = tempDir();
+    await runPackage(
+      ["init", "--name", "@test/example", "--export", "EXAMPLE", "--yes"],
+      root,
+    );
 
-    const result = runPackage(["build", "--root", empty], tempDir());
+    const build = await runPackage(["build"], root);
+    expect(build.code).toBe(0);
+    expect(build.stdout).toContain("Built @test/example@0.1.0");
+    const bundle = readJson<{ schema: string; packages: Array<{ name: string }> }>(
+      join(root, "dist/packages.json"),
+    );
+    expect(bundle.schema).toBe("shortcircuit.packages/v1");
+    expect(bundle.packages[0]!.name).toBe("@test/example");
 
+    const test = await runPackage(["test"], root);
+    expect(test.code).toBe(0);
+    expect(test.stdout).toContain("PASS");
+    expect(test.stdout).toContain("2 passed");
+
+    const check = await runPackage(["check"], root);
+    expect(check.code).toBe(0);
+    expect(check.stdout).toContain("Built @test/example@0.1.0");
+    expect(check.stdout).toContain("2 passed");
+  });
+
+  it("runs a package from a nested directory", async () => {
+    const root = tempDir();
+    await runPackage(["init", "--name", "@test/nested", "--yes"], root);
+    const nested = join(root, "src");
+    const result = await runPackage(["test"], nested);
+    expect(result.code).toBe(0);
+  });
+
+  it("reports dependencies that are not installed", async () => {
+    const root = tempDir();
+    writeDoublePackage(root, { dependencies: { "@test/parent": "^0.1.0" } });
+    const result = await runPackage(["test"], root);
     expect(result.code).toBe(1);
-    expect(result.stderr).toContain("Could not find the Short Circuit package registry at");
+    expect(result.stderr).toContain("is not installed");
   });
 
-  it("lists registry packages as text", () => {
+  it("prepares a registration submission", async () => {
     const root = tempDir();
-    writeRegistryRepo(root);
-    writeManifest(root, "packages/gates/manifest.json", ["AND", "OR"]);
-    writeText(root, "packages/broken/manifest.json", "{");
-    writeText(
-      root,
-      "registry.json",
-      `${JSON.stringify(
-        {
-          schema: "shortcircuit.registry/v1",
-          packages: [
-            {
-              name: "@shortcircuit/gates",
-              version: "0.1.0",
-              manifest: "packages/gates/manifest.json",
-            },
-            {
-              name: "@acme/broken",
-              version: "0.2.0",
-              manifest: "packages/broken/manifest.json",
-            },
-            {
-              name: "@acme/missing",
-              version: "0.3.0",
-              manifest: "packages/missing/manifest.json",
-            },
-          ],
-        },
-        null,
-        2,
-      )}\n`,
-    );
+    await runPackage(["init", "--name", "@acme/parity", "--yes"], root);
 
-    const result = runPackage(["registry"], root);
-
-    expect(result.code).toBe(0);
-    expect(result.stdout).toContain("@shortcircuit/gates@0.1.0 (2 exports)");
-    expect(result.stdout).toContain("@acme/broken@0.2.0 (invalid manifest)");
-    expect(result.stdout).toContain("@acme/missing@0.3.0 (manifest missing)");
-  });
-
-  it("lists registry packages as JSON", () => {
-    const root = tempDir();
-    writeRegistryRepo(root);
-    writeManifest(root, "packages/gates/manifest.json", ["AND"]);
-    writeText(
-      root,
-      "registry.json",
-      `${JSON.stringify(
-        {
-          schema: "shortcircuit.registry/v1",
-          packages: [
-            {
-              name: "@shortcircuit/gates",
-              version: "0.1.0",
-              manifest: "packages/gates/manifest.json",
-            },
-          ],
-        },
-        null,
-        2,
-      )}\n`,
-    );
-
-    const result = runPackage(["registry", "--json"], root);
-    const data = JSON.parse(result.stdout) as {
-      packages: Array<Record<string, unknown>>;
+    const dryRun = await runPackage(["register", "--dry-run"], root);
+    expect(dryRun.code).toBe(0);
+    const dryRunData = JSON.parse(dryRun.stdout) as {
+      registryEntry: { name: string; version: string; manifest: string };
+      integrity: string;
+      files: string[];
     };
+    expect(dryRunData.registryEntry).toEqual({
+      name: "@acme/parity",
+      version: "0.1.0",
+      manifest: "packages/parity/manifest.json",
+    });
+    expect(dryRunData.integrity).toMatch(/^sha256-/);
+    expect(dryRunData.files).toContain("manifest.json");
+    expect(existsSync(join(root, ".shortcircuit/register/parity-0.1.0/submission.json"))).toBe(
+      false,
+    );
 
-    expect(result.code).toBe(0);
-    expect(data.packages).toEqual([
-      {
-        name: "@shortcircuit/gates",
-        version: "0.1.0",
-        manifest: "packages/gates/manifest.json",
-        exports: 1,
-        state: "ok",
-      },
-    ]);
+    const registered = await runPackage(["register"], root);
+    expect(registered.code).toBe(0);
+    expect(registered.stdout).toContain("Created registration submission");
+    expect(existsSync(join(root, ".shortcircuit/register/parity-0.1.0/submission.json"))).toBe(
+      true,
+    );
   });
 
-  it("reports an empty registry", () => {
+  it("rejects path dependencies when registering", async () => {
     const root = tempDir();
-    writeRegistryRepo(root);
+    const linked = join(root, "linked");
+    writeDoublePackage(linked);
+    writeDoublePackage(root, { dependencies: { "@test/double": "path:linked" } });
 
-    const result = runPackage(["registry"], root);
-
-    expect(result.code).toBe(0);
-    expect(result.stdout).toBe("No packages registered.\n");
+    const result = await runPackage(["register", "--dry-run"], root);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("path link");
   });
 
-  it("shows package help without a registry", () => {
-    const empty = tempDir();
-
-    const result = runPackage(["help"], empty);
-    const init = runPackage(["init", "--help"], empty);
+  it("shows package help without a project or registry", async () => {
+    const result = await runPackage(["help"], tempDir());
+    const init = await runPackage(["init", "--help"], tempDir());
 
     expect(result.code).toBe(0);
-    expect(result.stdout).toContain("shortcircuit package init");
-    expect(result.stdout).toContain("shortcircuit package build");
-    expect(result.stdout).toContain("shortcircuit package test");
-    expect(result.stdout).toContain("shortcircuit package check");
-    expect(result.stdout).toContain("shortcircuit package registry");
+    for (const command of [
+      "package list",
+      "package list upstream",
+      "package install",
+      "package uninstall",
+      "package update",
+      "package link",
+      "package init",
+      "package build",
+      "package test",
+      "package check",
+      "package register",
+    ]) {
+      expect(result.stdout).toContain(command);
+    }
     expect(init.code).toBe(0);
     expect(init.stdout).toContain("--name <@scope/name>");
     expect(init.stdout).toContain("--dependencies <list>");
-    expect(init.stdout).toContain("--root <dir>");
+    expect(init.stdout).not.toContain("--root");
   });
 
-  it("shows package help when no subcommand is given", () => {
-    const result = runPackage([], tempDir());
+  it("rejects unknown package commands and extra arguments", async () => {
+    const unknown = await runPackage(["installable"], tempDir());
+    expect(unknown.code).toBe(1);
+    expect(unknown.stderr).toContain("Unknown package command");
 
-    expect(result.code).toBe(0);
-    expect(result.stdout).toContain("Short Circuit package commands");
-  });
-
-  it("rejects an unknown package command", () => {
-    const result = runPackage(["install"], tempDir());
-
-    expect(result.code).toBe(1);
-    expect(result.stderr).toContain("Unknown package command");
-    expect(result.stderr).toContain("shortcircuit package help");
-  });
-
-  it("rejects extra arguments", () => {
-    const root = tempDir();
-    writeRegistryRepo(root);
-
-    const result = runPackage(["build", "circuit.lf"], root);
-
-    expect(result.code).toBe(1);
-    expect(result.stderr).toContain("does not take a file");
-  });
-
-  it("requires values for options", () => {
-    const root = tempDir();
-    writeRegistryRepo(root);
-
-    const main = runPackage(["test", "--main"], root);
-    const name = runPackage(["init", "--name"], root);
-    const packageRoot = runPackage(["build", "--root"], tempDir());
-
-    expect(main.code).toBe(1);
-    expect(main.stderr).toContain("Option --main needs a value");
-    expect(name.code).toBe(1);
-    expect(name.stderr).toContain("Option --name needs a value");
-    expect(packageRoot.code).toBe(1);
-    expect(packageRoot.stderr).toContain("Option --root needs a value");
+    const extra = await runPackage(["build", "circuit.lf"], tempDir());
+    expect(extra.code).toBe(1);
+    expect(extra.stderr).toContain("takes no file");
   });
 });

@@ -14,8 +14,7 @@ const VALUE_FLAGS = new Set([
   "width",
   "rows",
   "package",
-  "root",
-  "main",
+  "registry",
   "name",
   "export",
   "kind",
@@ -111,6 +110,7 @@ export interface HelpEntry {
 }
 
 export const HELP: HelpEntry[] = [
+  { usage: "shortcircuit init [dir]", description: "Create a new Short Circuit project." },
   { usage: "shortcircuit compile <file>", description: "Compile a file and print the diagnostics." },
   { usage: "shortcircuit test <file>", description: "Run the TEST blocks and report the results." },
   {
@@ -124,28 +124,48 @@ export const HELP: HelpEntry[] = [
     description: "Write Verilog modules, with a testbench.",
   },
   {
-    usage: "shortcircuit package list [--json] [--package <dir>]",
-    description: "List bundled and local packages available to the compiler.",
+    usage: "shortcircuit package list [--json] [--verbose]",
+    description: "List installed and linked project packages.",
   },
   {
-    usage: "shortcircuit package registry [--json] [--root <dir>]",
-    description: "List packages registered for authoring.",
+    usage: "shortcircuit package list upstream [--json] [--verbose]",
+    description: "List packages available from the upstream registry.",
+  },
+  {
+    usage: "shortcircuit package install [name] [--save-exact]",
+    description: "Install dependencies, or add a package and install it.",
+  },
+  {
+    usage: "shortcircuit package uninstall <name>",
+    description: "Remove a direct dependency without deleting local files.",
+  },
+  {
+    usage: "shortcircuit package update [name] [--latest]",
+    description: "Update dependencies within their version ranges.",
+  },
+  {
+    usage: "shortcircuit package link <name|path> [--force]",
+    description: "Use a local package by path, with no symlink or copy.",
   },
   {
     usage: "shortcircuit package init [flags]",
-    description: "Create a package, source, docs, tests, and registry entry.",
+    description: "Create a package, source, docs, and tests locally.",
   },
   {
-    usage: "shortcircuit package build [--root <dir>]",
-    description: "Validate package manifests and rebuild the bundle.",
+    usage: "shortcircuit package build",
+    description: "Validate the package and build dist/packages.json.",
   },
   {
-    usage: "shortcircuit package test [--root <dir>] [--main <dir>]",
-    description: "Build, then run the package tests.",
+    usage: "shortcircuit package test",
+    description: "Run the package tests against its installed dependencies.",
   },
   {
-    usage: "shortcircuit package check [--root <dir>] [--main <dir>]",
-    description: "Build and test the package registry.",
+    usage: "shortcircuit package check",
+    description: "Build and test the package in one command.",
+  },
+  {
+    usage: "shortcircuit package register [--dry-run]",
+    description: "Validate a package and prepare a registry submission.",
   },
 ];
 
@@ -161,31 +181,66 @@ export function helpText(): string {
   lines.push("  --write                    Change the file in place (format).");
   lines.push("  --out <file>               Write to a file instead of standard output.");
   lines.push("  --circuit <name>           Choose a circuit (truth-table).");
-  lines.push("  --package <dir>            Load a local package directory or manifest. Repeatable.");
-  lines.push("  --root <dir>               Package registry checkout for authoring commands.");
-  lines.push("  --main <dir>               Main checkout for package tests.");
+  lines.push("  --package <dir>            Load an explicit local package. Repeatable.");
+  lines.push("  --registry <url>           Use a different package registry index.");
+  lines.push("  --offline                  Use only cached registry data.");
+  lines.push("  --refresh                  Ignore cached registry data.");
+  lines.push("  --frozen                   Fail if the lockfile and store are incomplete.");
+  lines.push("  --force                    Replace a conflicting dependency or file.");
+  lines.push("  --save-exact               Save an exact version when installing.");
+  lines.push("  --latest                   Update the saved range to the latest version.");
+  lines.push("  --verbose                  Include export counts and extra columns.");
+  lines.push("  --dry-run                  Validate without writing a submission.");
+  lines.push("  --yes                      Use defaults and never prompt.");
   lines.push("");
-  lines.push('Run "shortcircuit package help" for package authoring details.');
+  lines.push('Run "shortcircuit package help" for package commands.');
   lines.push("");
   return lines.join("\n");
+}
+
+export function initHelpText(): string {
+  return `Create a Short Circuit project
+
+Usage:
+  shortcircuit init
+  shortcircuit init my-project
+
+Options:
+  --force                    Replace an existing project manifest.
+  --registry <url>           Set the project package registry.
+  --help                     Show this message.
+
+The command creates shortcircuit.json, shortcircuit.lock.json, src/main.lf,
+and a .gitignore entry for .shortcircuit/ and dist/.
+`;
 }
 
 export function packageHelpText(): string {
   return `Short Circuit package commands
 
 Usage:
-  shortcircuit package list [--json] [--package <dir>]
-      List bundled and local packages available to the compiler.
-  shortcircuit package registry [--json] [--root <dir>]
-      List packages registered for authoring.
+  shortcircuit package list [--json] [--verbose]
+      List installed and path-linked packages in this project or package.
+  shortcircuit package list upstream [--json] [--verbose] [--offline] [--refresh]
+      List packages available from the upstream registry.
+  shortcircuit package install [name] [--save-exact] [--force] [--offline] [--frozen]
+      Resolve the manifest, or add a package and install it.
+  shortcircuit package uninstall <name>
+      Remove a direct dependency. Local path package files are never deleted.
+  shortcircuit package update [name] [--latest] [--offline]
+      Update one or all registry dependencies within their ranges.
+  shortcircuit package link <name|path> [--force]
+      Store a path dependency in the manifest. No symlink and no copy.
   shortcircuit package init [flags]
-      Create a package, source, docs, tests, and registry entry.
-  shortcircuit package build [--root <dir>]
-      Validate manifests and rebuild dist/packages.json.
-  shortcircuit package test [--root <dir>] [--main <dir>]
-      Build, then run the package tests.
-  shortcircuit package check [--root <dir>] [--main <dir>]
-      Build and test the package registry.
+      Create a package, source, docs, and tests locally.
+  shortcircuit package build
+      Validate the package and write dist/packages.json.
+  shortcircuit package test
+      Run the package tests against installed dependencies.
+  shortcircuit package check
+      Build and test the package.
+  shortcircuit package register [--dry-run] [--out <dir>] [--json]
+      Validate and prepare a registry submission.
 
 Run "shortcircuit package init --help" for init flags.
 `;
@@ -206,12 +261,22 @@ Options:
   --version <semver>         Package version. Default: 0.1.0.
   --license <id>             License identifier. Default: MIT.
   --dependencies <list>      Comma-separated package names.
-  --auto-import              Enable recommendedAutoImport.
-  --no-registry              Do not edit registry.json.
-  --force                    Replace an existing package directory.
+  --force                    Overwrite generated files in an existing package.
   --yes                      Use defaults and never prompt.
-  --root <dir>               Package registry checkout.
+  --help                     Show this message.
 
-The package is created under <root>/packages/<package-directory>.
+The package is created in the current directory (or the directory positional).
+`;
+}
+
+export function packageListHelpText(): string {
+  return `List project packages
+
+Usage:
+  shortcircuit package list [--json] [--verbose]
+  shortcircuit package list upstream [--json] [--verbose] [--offline] [--refresh]
+
+"package list" reads the project lockfile. "package list upstream" fetches the
+registry index and each package manifest.
 `;
 }

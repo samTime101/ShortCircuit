@@ -1,203 +1,617 @@
-import { existsSync, readFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import type { FlagValue } from "./args";
-import type { CommandResult, DelegatedCommand } from "./commands";
+import { createInterface } from "node:readline/promises";
+import {
+  loadLocalPackages,
+  type LocalPackageLoad,
+} from "./packages";
+import {
+  emptyLock,
+  PACKAGE_SCHEMA,
+  readLock,
+  readRootState,
+  storePackageDirectory,
+  writeJson,
+  writeLock,
+  type RootContext,
+  type RootState,
+} from "./project";
+import {
+  defaultExportName,
+  packageDirectoryName,
+  parseDependencies,
+  slugify,
+  validateExportName,
+  validatePackageName,
+  validateVersion,
+} from "./packageSpec";
+import {
+  packageIntegrity,
+} from "./registry";
+import { readPackageFiles } from "./installer";
+import { runPackageTestsCore as runPackageTests } from "@shortcircuit/engine/core";
+import type { CommandResult } from "./commands";
 
-const PACKAGE_ROOT_NAME = "@shortcircuit/packages";
-
-const INIT_VALUE_FLAGS = [
-  "name",
-  "export",
-  "kind",
-  "description",
-  "version",
-  "license",
-  "dependencies",
-] as const;
-
-const INIT_BOOLEAN_FLAGS = ["no-registry", "force", "yes", "auto-import"] as const;
-
-function readPackageName(directory: string): string | null {
-  try {
-    const raw = readFileSync(join(directory, "package.json"), "utf8");
-    const parsed = JSON.parse(raw) as { name?: unknown };
-    return typeof parsed.name === "string" ? parsed.name : null;
-  } catch {
-    return null;
-  }
+export interface PackageInitOptions {
+  directory: string;
+  name?: string;
+  exportName?: string;
+  kind?: string;
+  description?: string;
+  version?: string;
+  license?: string;
+  dependencies?: string;
+  force?: boolean;
+  yes?: boolean;
+  interactive?: boolean;
 }
 
-/** Check whether a directory is the Short Circuit package registry checkout. */
-export function isPackageRegistryRoot(directory: string): boolean {
-  return (
-    readPackageName(directory) === PACKAGE_ROOT_NAME &&
-    existsSync(join(directory, "registry.json")) &&
-    existsSync(join(directory, "scripts", "package.mjs"))
-  );
+interface Prompter {
+  ask(label: string, defaultValue?: string): Promise<string>;
+  close(): void;
 }
 
-function registryCandidate(directory: string): string | null {
-  if (isPackageRegistryRoot(directory)) return directory;
-  const nested = join(directory, "vendor", "ShortCircuit-Packages");
-  return isPackageRegistryRoot(nested) ? nested : null;
-}
-
-/**
- * Find the package registry checkout. The search starts at the working
- * directory and walks up, so the CLI works from the repository root, a nested
- * app directory, or the package repository itself.
- */
-export function findPackageRegistry(cwd: string, explicitRoot?: string): string {
-  const start = resolve(cwd);
-  if (explicitRoot !== undefined) {
-    const requested = resolve(start, explicitRoot);
-    const found = registryCandidate(requested);
-    if (found) return found;
-    throw new Error(
-      `Could not find the Short Circuit package registry at ${requested}. ` +
-        "Pass --root with a package registry checkout or the main repository.",
-    );
-  }
-
-  let directory = start;
-  while (true) {
-    const found = registryCandidate(directory);
-    if (found) return found;
-    const parent = dirname(directory);
-    if (parent === directory) break;
-    directory = parent;
-  }
-
-  throw new Error(
-    "Could not find the Short Circuit package registry. Run this inside a " +
-      "Short Circuit checkout with the package submodule initialized, or pass " +
-      "--root /path/to/ShortCircuit-Packages. To initialize the submodule, run " +
-      "git submodule update --init --recursive.",
-  );
-}
-
-/** Convert parsed init flags back into the authoring CLI's argument list. */
-export function initArguments(flags: Record<string, FlagValue>): string[] {
-  const args: string[] = [];
-  for (const name of INIT_VALUE_FLAGS) {
-    const value = flags[name];
-    if (value === undefined) continue;
-    if (typeof value === "string") {
-      args.push(`--${name}`, value);
-    } else if (Array.isArray(value)) {
-      const last = value[value.length - 1];
-      if (last === undefined) throw new Error(`Option --${name} needs a value.`);
-      args.push(`--${name}`, last);
-    } else {
-      throw new Error(`Option --${name} needs a value.`);
-    }
-  }
-  for (const name of INIT_BOOLEAN_FLAGS) {
-    if (flags[name] === true) args.push(`--${name}`);
-  }
-  return args;
-}
-
-export function packageDelegate(
-  root: string,
-  subcommand: "init" | "build" | "test" | "check",
-  args: string[],
-  env: Record<string, string | undefined>,
-): DelegatedCommand {
+function prompter(): Prompter {
+  const readline = createInterface({ input: process.stdin, output: process.stdout });
   return {
-    command: process.execPath,
-    args: [join(root, "scripts", "package.mjs"), subcommand, ...args],
-    cwd: root,
-    env,
+    async ask(label: string, defaultValue = ""): Promise<string> {
+      const suffix = defaultValue ? ` (${defaultValue})` : "";
+      const answer = (await readline.question(`${label}${suffix}: `)).trim();
+      return answer || defaultValue;
+    },
+    close() {
+      readline.close();
+    },
   };
 }
 
-type ManifestState = "ok" | "missing" | "invalid";
+const MACRO_EXPLANATION = `Package exports come in two kinds:
 
-interface RegistryRow {
+  MACRO   A reusable expression, such as AND(a, b) or XOR(a, b).
+          Macros are expanded into the circuit that uses them.
+  CIRCUIT A reusable circuit with ports, such as ADD4.
+          Circuits are instantiated as nodes.
+
+Choose CIRCUIT when the export needs named ports, internal state, or a stable
+block boundary. Choose MACRO for small combinational expressions.`;
+
+function packageJsonFor(options: {
   name: string;
   version: string;
-  manifest: string;
-  exports: number | null;
-  state: ManifestState;
+  description: string;
+  license: string;
+  dependencies: string[];
+}): Record<string, unknown> {
+  return {
+    name: options.name,
+    version: options.version,
+    description: options.description,
+    license: options.license,
+    ...(options.dependencies.length > 0
+      ? {
+          dependencies: Object.fromEntries(
+            options.dependencies.map((dependency) => [dependency, "^0.1.0"]),
+          ),
+        }
+      : {}),
+  };
 }
 
-function registryRows(root: string): RegistryRow[] | CommandResult {
-  const registryPath = join(root, "registry.json");
-  let registry: { packages?: unknown };
-  try {
-    registry = JSON.parse(readFileSync(registryPath, "utf8")) as { packages?: unknown };
-  } catch {
-    return {
-      code: 1,
-      stdout: "",
-      stderr: `Could not read ${registryPath}.\n`,
-    };
-  }
-
-  if (!Array.isArray(registry.packages)) {
-    return {
-      code: 1,
-      stdout: "",
-      stderr: `Invalid registry file at ${registryPath}: packages must be an array.\n`,
-    };
-  }
-
-  return registry.packages.map((raw) => {
-    const entry = (typeof raw === "object" && raw !== null ? raw : {}) as Record<
-      string,
-      unknown
-    >;
-    const name = typeof entry.name === "string" ? entry.name : "unknown";
-    const version = typeof entry.version === "string" ? entry.version : "0.0.0";
-    const manifest = typeof entry.manifest === "string" ? entry.manifest : "";
-    let exports: number | null = null;
-    let state: ManifestState = "missing";
-
-    if (manifest) {
-      const manifestPath = resolve(root, manifest);
-      if (existsSync(manifestPath)) {
-        try {
-          const parsed = JSON.parse(readFileSync(manifestPath, "utf8")) as {
-            exports?: unknown;
-          };
-          exports = Array.isArray(parsed.exports) ? parsed.exports.length : 0;
-          state = "ok";
-        } catch {
-          state = "invalid";
+function manifestFor(options: {
+  name: string;
+  version: string;
+  exportName: string;
+  kind: "macro" | "circuit";
+  description: string;
+  dependencies: string[];
+}): Record<string, unknown> {
+  const macro = options.kind === "macro";
+  const slug = slugify(options.exportName);
+  const source = macro ? `macros/${slug}/macro.lf` : `circuits/${slug}/circuit.lf`;
+  const docs = macro ? `docs/${slug}.md` : `circuits/${slug}/docs.md`;
+  const tests = `tests/${packageDirectoryName(options.name)}.test.lf`;
+  return {
+    schema: PACKAGE_SCHEMA,
+    name: options.name,
+    version: options.version,
+    engine: "^0.1.0",
+    description: options.description,
+    ...(options.dependencies.length > 0
+      ? {
+          dependencies: Object.fromEntries(
+            options.dependencies.map((dependency) => [dependency, "^0.1.0"]),
+          ),
         }
+      : {}),
+    tests,
+    exports: [
+      {
+        kind: options.kind,
+        name: options.exportName,
+        source,
+        group: macro ? "Macros" : "Circuits",
+        summary: options.description,
+        docs,
+        examples: macro
+          ? [`y = ${options.exportName}(a, b)`]
+          : [`inst = ${options.exportName}(a, b)`, `y = inst.y`],
+        ...(macro
+          ? { widthRule: "Result width = common input width" }
+          : {
+              ports: {
+                inputs: [
+                  { name: "a", width: 1 },
+                  { name: "b", width: 1 },
+                ],
+                outputs: [{ name: "y", width: 1 }],
+              },
+            }),
+      },
+    ],
+  };
+}
+
+function macroSource(name: string): string {
+  return `MACRO ${name}(a, b)
+  BODY NAND(a, b)
+END
+`;
+}
+
+function circuitSource(name: string): string {
+  return `CIRCUIT ${name}
+  INPUT a
+  INPUT b
+
+  y = NAND(a, b)
+
+  OUTPUT y
+END
+`;
+}
+
+function macroDocs(name: string): string {
+  return `# ${name}
+
+Describe what \`${name}\` does.
+
+This scaffold uses the kernel \`NAND\` operation. Replace the body and this
+documentation with the real behavior.
+
+\`\`\`logicflow
+y = ${name}(a, b)
+\`\`\`
+`;
+}
+
+function circuitDocs(name: string): string {
+  return `# ${name}
+
+Describe what \`${name}\` does.
+
+## Ports
+
+| Port | Direction | Width |
+| --- | --- | --- |
+| \`a\` | input | 1 |
+| \`b\` | input | 1 |
+| \`y\` | output | 1 |
+
+This scaffold uses the kernel \`NAND\` operation. Replace the circuit and this
+documentation with the real behavior.
+`;
+}
+
+function macroTest(name: string): string {
+  return `CIRCUIT ${name}_TEST
+  INPUT a
+  INPUT b
+
+  y = ${name}(a, b)
+
+  OUTPUT y
+END
+
+TEST ${name}_TEST
+  CASE "both high"
+    INPUT a = 1
+    INPUT b = 1
+    EXPECT y = 0
+  END
+
+  CASE "one high"
+    INPUT a = 1
+    INPUT b = 0
+    EXPECT y = 1
+  END
+END
+`;
+}
+
+function circuitTest(name: string): string {
+  return `CIRCUIT ${name}_TEST
+  INPUT a
+  INPUT b
+
+  gate = ${name}(a, b)
+  y = gate.y
+
+  OUTPUT y
+END
+
+TEST ${name}_TEST
+  CASE "both high"
+    INPUT a = 1
+    INPUT b = 1
+    EXPECT y = 0
+  END
+
+  CASE "one high"
+    INPUT a = 1
+    INPUT b = 0
+    EXPECT y = 1
+  END
+END
+`;
+}
+
+function ensureGitignore(directory: string): void {
+  const path = join(directory, ".gitignore");
+  const existing = existsSync(path) ? readFileSync(path, "utf8") : "";
+  const entries = new Set(
+    existing
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean),
+  );
+  for (const entry of [".shortcircuit/", "dist/"]) entries.add(entry);
+  writeFileSync(path, `${[...entries].join("\n")}\n`);
+}
+
+function writePackageFile(directory: string, path: string, contents: string): void {
+  const file = join(directory, path);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, contents);
+}
+
+async function promptValue(
+  interactive: boolean,
+  prompt: Prompter | null,
+  label: string,
+  defaultValue: string,
+): Promise<string> {
+  if (!interactive || !prompt) return defaultValue;
+  return prompt.ask(label, defaultValue);
+}
+
+export async function initPackage(options: PackageInitOptions): Promise<CommandResult> {
+  const directory = resolve(options.directory);
+  const interactive = options.interactive === true;
+  const prompt = interactive ? prompter() : null;
+  const output: string[] = [];
+  if (interactive) process.stdout.write(`${MACRO_EXPLANATION}\n\n`);
+
+  try {
+    let name = options.name?.trim();
+    if (!name) {
+      if (!interactive || !prompt) {
+        throw new Error(
+          "Missing --name. Use --name @scope/package, or run interactively.",
+        );
       }
+      name = await prompt.ask("Package name", "@acme/parity");
+    }
+    name = validatePackageName(name);
+
+    let exportName = options.exportName?.trim();
+    if (!exportName) {
+      exportName = await promptValue(
+        interactive,
+        prompt,
+        "Public export name",
+        defaultExportName(name),
+      );
+    }
+    exportName = validateExportName(exportName);
+
+    let kind = (options.kind ?? "macro").trim().toLowerCase();
+    if (interactive && prompt && options.kind === undefined) {
+      kind = (await prompt.ask("Export kind (macro or circuit)", "macro"))
+        .trim()
+        .toLowerCase();
+    }
+    if (kind !== "macro" && kind !== "circuit") {
+      throw new Error(`Unknown export kind "${kind}". Use macro or circuit.`);
     }
 
-    return { name, version, manifest, exports, state };
-  });
+    const description =
+      (options.description ?? "").trim() ||
+      (await promptValue(
+        interactive,
+        prompt,
+        "Description",
+        "A Short Circuit package.",
+      ));
+    const version = validateVersion(
+      (options.version ?? "").trim() ||
+        (await promptValue(interactive, prompt, "Version", "0.1.0")),
+    );
+    const license =
+      (options.license ?? "").trim() ||
+      (await promptValue(interactive, prompt, "License", "MIT"));
+    const dependencyText =
+      options.dependencies ??
+      (interactive && prompt ? await prompt.ask("Dependencies (comma separated)", "") : "");
+    const dependencies = parseDependencies(dependencyText);
+    if (dependencies.includes(name)) {
+      throw new Error("A package cannot depend on itself.");
+    }
+
+    if (existsSync(join(directory, "manifest.json")) && !options.force) {
+      throw new Error(
+        `A package already exists at ${directory}. Use --force to replace its generated files.`,
+      );
+    }
+    mkdirSync(directory, { recursive: true });
+
+    const manifest = manifestFor({
+      name,
+      version,
+      exportName,
+      kind: kind as "macro" | "circuit",
+      description,
+      dependencies,
+    });
+    const exported = (manifest.exports as Array<Record<string, unknown>>)[0]!;
+    const sourcePath = String(exported.source);
+    const docsPath = String(exported.docs);
+    const testPath = String(manifest.tests);
+
+    writeJson(join(directory, "package.json"), packageJsonFor({
+      name,
+      version,
+      description,
+      license,
+      dependencies,
+    }));
+    writeJson(join(directory, "manifest.json"), manifest);
+    writePackageFile(
+      directory,
+      sourcePath,
+      kind === "macro" ? macroSource(exportName) : circuitSource(exportName),
+    );
+    writePackageFile(
+      directory,
+      docsPath,
+      kind === "macro" ? macroDocs(exportName) : circuitDocs(exportName),
+    );
+    writePackageFile(
+      directory,
+      testPath,
+      kind === "macro" ? macroTest(exportName) : circuitTest(exportName),
+    );
+    writeLock(
+      {
+        kind: "package",
+        root: directory,
+        manifestPath: join(directory, "manifest.json"),
+        lockPath: join(directory, "shortcircuit.lock.json"),
+      },
+      emptyLock(),
+    );
+    ensureGitignore(directory);
+
+    if (!interactive) output.push(`${MACRO_EXPLANATION}\n`);
+    output.push(`Created package ${name}@${version} in ${directory}`);
+    output.push(`  ${sourcePath}`);
+    output.push(`  ${docsPath}`);
+    output.push(`  ${testPath}`);
+    output.push("");
+    output.push("Next:");
+    output.push("  shortcircuit package test");
+    output.push("  shortcircuit package check");
+    output.push(`  shortcircuit package link ${name}   # from a project root`);
+    return { code: 0, stdout: `${output.join("\n")}\n`, stderr: "" };
+  } finally {
+    prompt?.close();
+  }
 }
 
-export function packageRegistryCommand(root: string, json: boolean): CommandResult {
-  const rows = registryRows(root);
-  if (!Array.isArray(rows)) return rows;
+export interface PackageEnvironment {
+  load: LocalPackageLoad;
+  state: RootState;
+}
 
-  if (json) {
+export function loadPackageEnvironment(context: RootContext): PackageEnvironment {
+  const state = readRootState(context);
+  const lock = readLock(context);
+  const paths = [context.root];
+
+  for (const [name, entry] of Object.entries(lock.packages)) {
+    if (name === state.name) continue;
+    const directory =
+      entry.type === "path"
+        ? resolve(context.root, entry.path ?? ".")
+        : storePackageDirectory(context.root, name);
+    if (!existsSync(join(directory, "manifest.json"))) {
+      throw new Error(
+        `Package ${name} is not installed at ${directory}. Run shortcircuit package install.`,
+      );
+    }
+    paths.push(directory);
+  }
+
+  for (const name of Object.keys(state.dependencies)) {
+    if (name === state.name) continue;
+    if (!lock.packages[name]) {
+      throw new Error(
+        `Dependency ${name} is not installed. Run shortcircuit package install.`,
+      );
+    }
+  }
+
+  return { load: loadLocalPackages(paths), state };
+}
+
+export function buildPackage(context: RootContext): CommandResult {
+  const load = loadLocalPackages([context.root]);
+  const state = readRootState(context);
+  const manifest = load.bundle.packages.find((entry) => entry.name === state.name);
+  if (!manifest) {
+    throw new Error(`Package ${state.name ?? context.root} was not loaded.`);
+  }
+  const out = join(context.root, "dist", "packages.json");
+  writeJson(out, {
+    schema: "shortcircuit.packages/v1",
+    generatedAt: new Date().toISOString(),
+    packages: [manifest],
+  });
+  return {
+    code: 0,
+    stdout:
+      `Built ${manifest.name}@${manifest.version}: ${manifest.exports.length} export` +
+      `${manifest.exports.length === 1 ? "" : "s"}.\n${out}\n`,
+    stderr: "",
+  };
+}
+
+export function testPackage(context: RootContext): CommandResult {
+  const { load, state } = loadPackageEnvironment(context);
+  const report = runPackageTests({
+    packages: load.bundle,
+    disableDefaultPackages: true,
+  });
+  const lines: string[] = [];
+  for (const file of report.files) {
+    const label =
+      file.kind === "package"
+        ? `${file.packageName}@${file.packageVersion} package tests`
+        : `${file.packageName}@${file.packageVersion} ${file.exportName} tests`;
+    lines.push(`${file.ok ? "PASS" : "FAIL"}  ${label}`);
+    for (const diagnostic of file.diagnostics) {
+      lines.push(
+        `  ${diagnostic.severity}  ${diagnostic.code}  ${diagnostic.line}:${diagnostic.column}  ${diagnostic.message}`,
+      );
+    }
+    if (file.run) {
+      for (const suite of file.run.suites) {
+        lines.push(`  ${suite.pass ? "pass" : "fail"}  ${suite.name}`);
+      }
+    }
+  }
+  lines.push("");
+  lines.push(
+    `${report.passed} passed, ${report.failed} failed, ${report.unsupported} unsupported (${report.elapsedMs.toFixed(1)} ms)`,
+  );
+  if (report.files.length === 0) {
+    lines.push(`No tests declared by ${state.name ?? context.root}.`);
+  }
+  return {
+    code: report.ok ? 0 : 1,
+    stdout: `${lines.join("\n")}\n`,
+    stderr: "",
+  };
+}
+
+export function checkPackage(context: RootContext): CommandResult {
+  const build = buildPackage(context);
+  if (build.code !== 0) return build;
+  const test = testPackage(context);
+  return {
+    code: test.code,
+    stdout: `${build.stdout}\n${test.stdout}`,
+    stderr: test.stderr,
+  };
+}
+
+export interface RegisterOptions {
+  dryRun?: boolean;
+  out?: string;
+  json?: boolean;
+}
+
+export function registerPackage(
+  context: RootContext,
+  options: RegisterOptions = {},
+): CommandResult {
+  const state = readRootState(context);
+  if (!state.name || !state.version) {
+    throw new Error("A package manifest needs a name and version before registering.");
+  }
+  for (const [name, spec] of Object.entries(state.dependencies)) {
+    if (spec.startsWith("path:")) {
+      throw new Error(
+        `Package ${state.name} depends on ${name} through a path link. ` +
+          "Replace path dependencies with registry versions before registering.",
+      );
+    }
+  }
+
+  const check = checkPackage(context);
+  if (check.code !== 0) return check;
+
+  const files = readPackageFiles(context.root);
+  const integrity = packageIntegrity(files);
+  const directory = packageDirectoryName(state.name);
+  const registryEntry = {
+    name: state.name,
+    version: state.version,
+    manifest: `packages/${directory}/manifest.json`,
+  };
+  const submission = {
+    schema: "shortcircuit.submission/v1",
+    generatedAt: new Date().toISOString(),
+    registryEntry,
+    integrity,
+    files,
+  };
+
+  if (options.dryRun) {
     return {
       code: 0,
-      stdout: `${JSON.stringify({ packages: rows }, null, 2)}\n`,
+      stdout: `${JSON.stringify(
+        {
+          registryEntry,
+          integrity,
+          files: Object.keys(files).sort(),
+        },
+        null,
+        2,
+      )}\n`,
       stderr: "",
     };
   }
 
-  if (rows.length === 0) {
-    return { code: 0, stdout: "No packages registered.\n", stderr: "" };
+  const outDirectory = resolve(
+    context.root,
+    options.out ?? join(".shortcircuit", "register", `${directory}-${state.version}`),
+  );
+  const submissionPath = join(outDirectory, "submission.json");
+  writeJson(submissionPath, submission);
+  for (const [path, contents] of Object.entries(files)) {
+    writePackageFile(join(outDirectory, "package"), path, contents);
   }
 
-  const lines = ["Packages:"];
-  for (const row of rows) {
-    const detail =
-      row.state === "missing"
-        ? " (manifest missing)"
-        : row.state === "invalid"
-          ? " (invalid manifest)"
-          : ` (${row.exports} export${row.exports === 1 ? "" : "s"})`;
-    lines.push(`  ${row.name}@${row.version}${detail}`);
+  if (options.json) {
+    return {
+      code: 0,
+      stdout: `${JSON.stringify({ submission: submissionPath, registryEntry, integrity }, null, 2)}\n`,
+      stderr: "",
+    };
   }
-  return { code: 0, stdout: `${lines.join("\n")}\n`, stderr: "" };
+  return {
+    code: 0,
+    stdout:
+      `Created registration submission for ${state.name}@${state.version}.\n` +
+      `  ${submissionPath}\n` +
+      `  integrity ${integrity}\n\n` +
+      "Open a pull request against the package registry and copy the package files " +
+      "and registry entry from the submission.\n",
+    stderr: "",
+  };
 }

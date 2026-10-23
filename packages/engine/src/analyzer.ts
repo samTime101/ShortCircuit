@@ -156,6 +156,7 @@ const DEFAULT_OPTIONS: Required<CompileOptions> = {
   maxWidth: 4096,
   maxDiagnostics: 100,
   packages: [],
+  defaultPackages: { schema: "shortcircuit.packages/v1", packages: [] },
   disableDefaultPackages: false,
 };
 

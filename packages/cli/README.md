@@ -27,6 +27,19 @@ npm update -g @shortcircuitcli/cli
 
 The explicit `@latest` install is the most reliable.
 
+## Create a project
+
+```bash
+shortcircuit init
+shortcircuit init my-project --registry https://example.com/registry.json
+cd my-project
+shortcircuit compile src/main.lf
+shortcircuit test src/main.lf
+```
+
+`init` creates `shortcircuit.json`, `shortcircuit.lock.json`, `src/main.lf`,
+and a `.gitignore` entry for `.shortcircuit/` and `dist/`.
+
 ## Commands
 
 ```bash
@@ -42,21 +55,17 @@ Every command exits with 0 on success and 1 on a diagnostic error or a failed
 test, so it works in a pipeline. `--json` prints machine-readable output where
 it is available.
 
-The CLI bundles the compiler, simulator, and default LogicFlow package snapshot,
-so it runs offline after installation.
+The CLI bundles the compiler and simulator. It does **not** ship the default
+package snapshot used by the web studio. Install or link the packages a project
+imports before compiling it.
 
 ## Packages
 
-`package list` shows the bundled packages and any local packages you load,
-along with their export counts and origin:
+Packages are scoped npm-style names. The package name is separate from the
+export it provides, for example package `@samip101/com16bit` exports
+`COM16BIT`.
 
-```bash
-shortcircuit package list
-shortcircuit package list --json
-shortcircuit package list --package /path/to/package
-```
-
-Activate a package by adding an `IMPORT` line to the source:
+The compiler kernel provides `NAND`. Everything else comes from packages:
 
 ```logicflow
 IMPORT "@shortcircuit/gates"
@@ -71,50 +80,112 @@ CIRCUIT HalfAdder
 END
 ```
 
-The CLI, studio, and engine API all read the same imports. Load a local package
-directory or a `manifest.json` path with `--package`:
+### Project commands
 
 ```bash
-shortcircuit compile circuit.lf --package /path/to/package
+shortcircuit package list
+shortcircuit package list --json
+shortcircuit package list upstream
+shortcircuit package list upstream --refresh
+
+shortcircuit package install
+shortcircuit package install @shortcircuit/gates
+shortcircuit package install @shortcircuit/gates@^0.1.0
+shortcircuit package install @shortcircuit/gates --save-exact
+
+shortcircuit package update
+shortcircuit package update @shortcircuit/gates
+shortcircuit package update @shortcircuit/gates --latest
+
+shortcircuit package uninstall @shortcircuit/gates
 ```
 
-`--package` is repeatable. Local packages must use a name that is not already
-bundled. The loader inlines the package source, docs, and tests.
+Registry packages are downloaded into `.shortcircuit/packages` and recorded in
+`shortcircuit.lock.json` with their resolved URL and SHA-256 integrity. One
+version of a package name is active at a time. `package install` with no name
+installs everything in `shortcircuit.json`.
+
+Useful flags:
+
+| Flag | Meaning |
+| --- | --- |
+| `--registry <url>` | Use a specific registry index, including a `file://` fixture. |
+| `--offline` | Use only cached registry data and package archives. |
+| `--refresh` | Ignore cached registry data. |
+| `--frozen` | Fail if the lockfile or `.shortcircuit/packages` is incomplete. |
+| `--force` | Replace a conflicting dependency or generated file. |
+| `--save-exact` | Save an exact version instead of a caret range. |
+| `--latest` | Change the saved range to the latest version. |
+
+The default registry is
+`https://raw.githubusercontent.com/samTime101/ShortCircuit-Packages/main/registry.json`.
+Set `SHORTCIRCUIT_REGISTRY_URL` or a project's `registry` field to override it.
+Cached data lives in `SHORTCIRCUIT_CACHE`, then `$XDG_CACHE_HOME/shortcircuit`,
+then `~/.cache/shortcircuit`.
+
+### Local packages
+
+`package link` records a `path:` dependency in `shortcircuit.json`:
+
+```bash
+shortcircuit package link com16bit
+shortcircuit package link packages/com16bit
+shortcircuit package link /absolute/path/to/com16bit
+```
+
+The package is read in place. No files are copied and no symlink is created.
+`package uninstall` removes the dependency entry but never deletes the linked
+package directory.
+
+For a one-off compile without changing the project, use `--package`:
+
+```bash
+shortcircuit compile circuit.lf --package packages/com16bit
+```
+
+`--package` is repeatable.
 
 ### Authoring packages
 
-The CLI can drive the package registry from a Short Circuit checkout:
+Package authoring works in any directory. It does not require a checkout of the
+package registry:
 
 ```bash
 shortcircuit package init
-shortcircuit package init --name @acme/parity --export PARITY3 --kind macro
-shortcircuit package build
-shortcircuit package test
-shortcircuit package check
-shortcircuit package registry
+shortcircuit package init \
+  --name @acme/parity \
+  --export PARITY3 \
+  --kind macro \
+  --description "Three-input parity built from NAND." \
+  --dependencies @shortcircuit/gates \
+  --yes
+
+shortcircuit package build   # validate and write dist/packages.json
+shortcircuit package test    # run the package's .lf tests
+shortcircuit package check   # build and test
+shortcircuit package register --dry-run
 ```
 
-`init` prompts for the package fields, then writes the package directory,
-source, docs, tests, and registry entry. Use `shortcircuit package init --help`
+`package init` explains the two export kinds before creating files:
+
+- **MACRO** is a reusable expression such as `AND(a, b)`. Macros expand into
+  the circuit that uses them.
+- **CIRCUIT** is a reusable block with named ports. Circuits are instantiated
+  as nodes.
+
+The scaffold writes `package.json`, `manifest.json`, `.lf` source, docs, tests,
+an empty lockfile, and a `.gitignore`. Use `shortcircuit package init --help`
 for every flag.
 
-The commands find `vendor/ShortCircuit-Packages` from the current directory, or
-accept `--root`:
+`package register` validates the package, runs its tests, records the payload
+integrity, and writes a submission bundle under
+`.shortcircuit/register/<package>-<version>/`. `--dry-run` prints the registry
+entry, integrity, and file list without writing. Opening the registry pull
+request is still a manual step.
 
-```bash
-shortcircuit package build --root /path/to/ShortCircuit-Packages
-```
-
-`package test` and `package check` run the main repository tests. Use `--main`
-when the package registry is outside the main checkout:
-
-```bash
-shortcircuit package test --root /path/to/ShortCircuit-Packages \
-  --main /path/to/ShortCircuit
-```
-
-`package list` shows packages available to the compiler. `package registry`
-shows packages registered for authoring.
+Packages can declare registry dependencies. `package test` and
+`package register` resolve them from the package's own `shortcircuit.lock.json`
+after `shortcircuit package install` in that directory.
 
 ## Source
 

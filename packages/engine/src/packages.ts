@@ -1,4 +1,3 @@
-import defaultBundleJson from "../../../vendor/ShortCircuit-Packages/dist/packages.json";
 import type {
   AssignmentAst,
   CircuitAst,
@@ -100,8 +99,6 @@ export interface PackageCatalog {
   readonly circuits: PackageCircuitSource[];
   readonly diagnostics: Diagnostic[];
 }
-
-export const DEFAULT_PACKAGE_BUNDLE = defaultBundleJson as unknown as PackageBundle;
 
 const EMPTY_BUNDLE: PackageBundle = {
   schema: "shortcircuit.packages/v1",
@@ -560,10 +557,12 @@ function normalizeBundle(input?: PackageBundle | PackageManifest[]): PackageBund
   return input;
 }
 
-/** Merge the default package snapshot with any host-provided packages. */
+/** Merge the host-provided default package snapshot with any explicit packages. */
 export function resolvePackageBundle(options: CompileOptions): PackageBundle {
   const bundles: PackageBundle[] = [];
-  if (!options.disableDefaultPackages) bundles.push(DEFAULT_PACKAGE_BUNDLE);
+  if (!options.disableDefaultPackages && options.defaultPackages) {
+    bundles.push(options.defaultPackages);
+  }
   const custom = normalizeBundle(options.packages);
   if (custom.packages.length > 0) bundles.push(custom);
 
@@ -620,7 +619,8 @@ export function resolvePackageImports(
         line: declaration.span.line,
         column: declaration.span.column,
         length: declaration.span.length,
-        hint: "Check the package name, or load a local package with --package in the CLI.",
+        hint:
+          "Check the package name, run shortcircuit package install <package>, or load a local package with --package in the CLI.",
       });
       continue;
     }
@@ -704,19 +704,3 @@ export function packageCircuitAsts(
       packageVersion: entry.packageVersion,
     }));
 }
-
-
-/**
- * The default package catalog used by the editor and docs. Compilation builds
- * its own catalog from the current options, so this constant is safe to use for
- * read-only metadata such as completions.
- */
-export const DEFAULT_PACKAGE_CATALOG = createPackageCatalog([DEFAULT_PACKAGE_BUNDLE]);
-
-/** Public macros from the default packages, in manifest order. */
-export const DEFAULT_PACKAGE_MACROS = [...DEFAULT_PACKAGE_CATALOG.macros.values()].filter(
-  (macro) => !macro.internal,
-);
-
-/** Public package circuits from the default packages, in manifest order. */
-export const DEFAULT_PACKAGE_CIRCUITS = DEFAULT_PACKAGE_CATALOG.circuits;

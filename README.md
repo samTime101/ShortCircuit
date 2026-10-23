@@ -35,7 +35,7 @@ Comments use `//` for a line and `/* ... */` for a block that may span lines. Lo
 ## What works in v0.1
 
 - **Readable hardware expressions** — function-style gates, named signals, comments, no semicolons or braces.
-- **Packages:** the kernel provides `NAND`; bundled packages add `NOT`, `AND`, `OR`, `BUFFER`, `NOR`, `XOR`, `XNOR`, `MUX`, `HALF_ADDER`, `FULL_ADDER`, `ADD4`, `ADD8`, `COMPARE1`, `COMPARE2`, `COMPARE4`, and `COMPARE8`. Add an `IMPORT` line before using them. Gates, selection, arithmetic, and comparison are package source; the compiler kernel keeps `NAND` and structural wiring.
+- **Packages:** the kernel provides `NAND`; the web studio bundles a default snapshot that adds `NOT`, `AND`, `OR`, `BUFFER`, `NOR`, `XOR`, `XNOR`, `MUX`, `HALF_ADDER`, `FULL_ADDER`, `ADD4`, `ADD8`, `COMPARE1`, `COMPARE2`, `COMPARE4`, and `COMPARE8`. The CLI does not ship those packages; install or link the packages a project imports. Add an `IMPORT` line before using them. Gates, selection, arithmetic, and comparison are package source; the compiler kernel keeps `NAND` and structural wiring.
 - **Static validation first** — undeclared/duplicate signals, width mismatches, missing ports, illegal recursion, combinational loops and clock conflicts are diagnosed before simulation.
 - **Buses** — `BUS(8)` declarations, indexing (`data[3]`), inclusive slices (`data[7:4]`), concatenation, broadcast, sign/zero extension, repetition and reversal.
 - **Composition** — reusable `CIRCUIT` blocks, positional or named instance ports, nested scopes and flattened IR.
@@ -83,11 +83,13 @@ shortcircuit package build
 shortcircuit package test
 ```
 
-The commands find `vendor/ShortCircuit-Packages` from the checkout. If the CLI
-is not installed globally, the repository aliases do the same thing:
+The commands work in any directory and do not need a package-registry
+checkout. If the CLI is not installed globally, the repository aliases run the
+built CLI:
 
 ```bash
-npm run package:init
+npm run cli:build
+npm run package:init -- --name @acme/parity --export PARITY3 --yes
 npm run package:build
 npm run package:test
 ```
@@ -108,7 +110,8 @@ short-circuit/
 │  ├─ src/truthTable.ts    Exhaustive enumeration
 │  ├─ src/formatter.ts     Canonical source formatting
 │  ├─ src/builtins.ts      Core operation metadata: signatures, widths, examples
-│  ├─ src/packages.ts      Package catalog, .lf macro parser, offline bundle
+│  ├─ src/packages.ts      Package catalog, .lf macro parser, package loader
+│  ├─ src/defaultPackages.ts Web-only bundled package snapshot
 │  ├─ src/snippets.ts      Language snippet library
 │  ├─ src/plainLanguage.ts Plain-language layer for diagnostics
 │  └─ src/types.ts         Portable IR + public API types
@@ -216,24 +219,21 @@ it is available.
 
 ### Packages
 
-The CLI ships with the bundled package snapshot. `package list` shows every
-installed package, its export count, and where it came from:
+The CLI does not ship the default package snapshot used by the web studio.
+Create a project, then install or link the packages it imports:
 
 ```bash
+shortcircuit init
+shortcircuit package install @shortcircuit/gates
 shortcircuit package list
-shortcircuit package list --json
+shortcircuit package list upstream --refresh
 ```
 
-Package authoring uses the same binary. It finds the package registry in the
-current checkout, or accepts `--root`:
-
-```bash
-shortcircuit package init
-shortcircuit package build
-shortcircuit package test
-shortcircuit package check
-shortcircuit package registry
-```
+`package install` resolves the project manifest, downloads registry packages
+into `.shortcircuit/packages`, and records exact versions, URLs, and SHA-256
+integrity in `shortcircuit.lock.json`. One version of a package name is active
+at a time. Use `--offline` to work from the cache and `--frozen` to verify that
+the lockfile and package store are complete.
 
 Activate a package by adding an `IMPORT` line to the source. Every command
 reads the same imports:
@@ -251,18 +251,44 @@ CIRCUIT HalfAdder
 END
 ```
 
-Load a local package directory, or point directly at its manifest, so the
-source can import it:
+Link a package from the project by its short name, full scoped name, or
+directory:
+
+```bash
+shortcircuit package link com16bit
+shortcircuit package link @samip101/com16bit
+shortcircuit package link packages/com16bit
+```
+
+`link` stores a `path:` dependency and reads the package in place. It creates no
+symlink and copies no files. `package uninstall` removes the dependency entry
+but never deletes a linked package's files.
+
+For a one-off compile without changing the project, load an explicit local
+package directory or `manifest.json`:
 
 ```bash
 shortcircuit compile circuit.lf --package /path/to/package
-shortcircuit package list --package /path/to/package/manifest.json
+shortcircuit compile circuit.lf --package /path/to/package/manifest.json
 ```
 
-`--package` is repeatable. Local packages must use a name that is not already
-bundled. The loader inlines the package source, docs, and tests, so the same
-directory layout works with the engine API. The CLI, studio, and engine API all
-require the same explicit imports.
+`--package` is repeatable. The loader inlines the package source, docs, and
+tests, so the same directory layout works with the engine API. The CLI, studio,
+and engine API all require the same explicit imports.
+
+Package authoring also works locally and does not require a registry checkout:
+
+```bash
+shortcircuit package init
+shortcircuit package build
+shortcircuit package test
+shortcircuit package check
+shortcircuit package register --dry-run
+```
+
+`package register` writes a validated submission bundle under
+`.shortcircuit/register/`; opening the registry pull request is manual. See
+[`docs/PACKAGES.md`](docs/PACKAGES.md) for the complete workflow.
 
 ### Releasing
 
@@ -284,7 +310,7 @@ To release a compiler or package change:
 
    ```bash
    git add packages/cli/package.json package-lock.json
-   git commit -m "chore(cli): release v0.2.0"
+   git commit -m "chore(cli): release v0.3.0"
    git push origin main
    ```
 

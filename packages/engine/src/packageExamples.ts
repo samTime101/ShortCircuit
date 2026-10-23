@@ -8,6 +8,8 @@ import type {
 import { Parser } from "./parser";
 import {
   DEFAULT_PACKAGE_CATALOG,
+} from "./defaultPackages";
+import {
   type PackageCatalog,
   type PackageCircuitExport,
   type PackageMacroExport,

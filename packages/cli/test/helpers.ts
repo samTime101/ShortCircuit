@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -23,6 +23,35 @@ export function writeText(root: string, relative: string, contents: string): voi
   writeFileSync(path, contents);
 }
 
+export function readJson<T = unknown>(path: string): T {
+  return JSON.parse(readFileSync(path, "utf8")) as T;
+}
+
+export function writeProject(
+  root: string,
+  dependencies: Record<string, string> = {},
+  registry?: string,
+): void {
+  writeText(
+    root,
+    "shortcircuit.json",
+    `${JSON.stringify(
+      {
+        schema: "shortcircuit.project/v1",
+        dependencies,
+        ...(registry ? { registry } : {}),
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  writeText(
+    root,
+    "shortcircuit.lock.json",
+    `${JSON.stringify({ schema: "shortcircuit.lock/v1", packages: {} }, null, 2)}\n`,
+  );
+}
+
 export interface DoublePackageOptions {
   name?: string;
   version?: string;
@@ -31,6 +60,7 @@ export interface DoublePackageOptions {
   writePackageJson?: boolean;
   docs?: boolean;
   tests?: boolean;
+  dependencies?: Record<string, string>;
 }
 
 export function writeDoublePackage(root: string, options: DoublePackageOptions = {}): void {
@@ -41,6 +71,7 @@ export function writeDoublePackage(root: string, options: DoublePackageOptions =
     name,
     version,
     description: "Test double inversion package.",
+    ...(options.dependencies ? { dependencies: options.dependencies } : {}),
     exports: [
       {
         kind: "macro",

@@ -1,4 +1,4 @@
-import { compile } from "./index";
+import { compile } from "./compile";
 import {
   resolvePackageBundle,
   type PackageBundle,

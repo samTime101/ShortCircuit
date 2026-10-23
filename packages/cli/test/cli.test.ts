@@ -1,310 +1,828 @@
+import { existsSync, lstatSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { listFlag, parseArgs } from "../src/args";
 import { run } from "../src/cli";
-import { cleanupTempDirs, tempDir, writeDoublePackage } from "./helpers";
+import type { FetchLike } from "../src/registry";
+import {
+  cleanupTempDirs,
+  readJson,
+  tempDir,
+  writeDoublePackage,
+  writeProject,
+} from "./helpers";
+import { RegistryFixture } from "./registryFixture";
 
 afterEach(cleanupTempDirs);
 
-const SOURCE = `IMPORT "@shortcircuit/gates"
-
-CIRCUIT HalfAdder
-INPUT a
-INPUT b
-
-sum = XOR(a, b)
-carry = AND(a, b)
-
-OUTPUT sum
-OUTPUT carry
-END
-
-TEST HalfAdder
-CASE "both high"
-  INPUT a = 1
-  INPUT b = 1
-  EXPECT sum = 0
-  EXPECT carry = 1
-END
-END`;
-
-const BROKEN = `IMPORT "@shortcircuit/gates"
-
-CIRCUIT Broken
-INPUT a
-x = AND(a, missing)
-OUTPUT x
-END`;
-
 const NAND_SOURCE = `CIRCUIT NandOnly
-INPUT a
-INPUT b
-y = NAND(a, b)
-OUTPUT y
+  INPUT a
+  INPUT b
+
+  y = NAND(a, b)
+
+  OUTPUT y
 END`;
 
-const LOCAL_SOURCE = `IMPORT "@test/double"
+const NAND_TEST_SOURCE = `${NAND_SOURCE}
+
+TEST NandOnly
+  CASE "both high"
+    INPUT a = 1
+    INPUT b = 1
+    EXPECT y = 0
+  END
+
+  CASE "one high"
+    INPUT a = 1
+    INPUT b = 0
+    EXPECT y = 1
+  END
+END`;
+
+const BROKEN_SOURCE = `CIRCUIT Broken
+  INPUT a
+  x = NAND(a, missing)
+  OUTPUT x
+END`;
+
+const DOUBLE_SOURCE = `IMPORT "@test/double"
 
 CIRCUIT LocalDouble
-INPUT a
-y = TWICE(a)
-OUTPUT y
+  INPUT a
+  y = TWICE(a)
+  OUTPUT y
 END`;
 
-const LOCAL_TEST_SOURCE = `${LOCAL_SOURCE}
-
-TEST LocalDouble
-CASE "high"
-  INPUT a = 1
-  EXPECT y = 1
-END
-END`;
-
-function withFile(contents: string) {
-  const writes = new Map<string, string>();
-  const read = (file: string) => {
-    if (file === "circuit.lf") return contents;
-    throw new Error("missing file");
-  };
-  const write = (file: string, data: string) => {
-    writes.set(file, data);
-  };
-  return { read, write, writes };
+interface CliOptions {
+  cwd: string;
+  read?: (file: string) => string;
+  write?: (file: string, contents: string) => void;
+  fetch?: FetchLike;
+  env?: Record<string, string | undefined>;
 }
 
-function packageRow(stdout: string, name: string): string {
-  return stdout.split("\n").find((line) => line.startsWith(name)) ?? "";
-}
-
-describe("command line", () => {
-  it("parses commands, positionals, and flags", () => {
-    const parsed = parseArgs(["truth-table", "a.lf", "--circuit", "Adder", "--json"]);
-    expect(parsed.command).toBe("truth-table");
-    expect(parsed.positionals).toEqual(["a.lf"]);
-    expect(parsed.flags.circuit).toBe("Adder");
-    expect(parsed.flags.json).toBe(true);
+function runCli(args: string[], options: CliOptions) {
+  const read =
+    options.read ??
+    ((file: string) => readFileSync(join(options.cwd, file), "utf8"));
+  return run(args, read, options.write ?? (() => undefined), {
+    cwd: options.cwd,
+    env: options.env ?? process.env,
+    fetch: options.fetch,
+    interactive: false,
   });
+}
 
-  it("parses repeatable package flags", () => {
+function runPackage(args: string[], options: CliOptions) {
+  return runCli(
+    ["package", ...args],
+    {
+      ...options,
+      read: () => {
+        throw new Error("package commands do not read source files");
+      },
+    },
+  );
+}
+
+describe("argument parsing", () => {
+  it("parses repeatable value flags and equals values", () => {
     const parsed = parseArgs([
       "compile",
-      "a.lf",
+      "main.lf",
       "--package",
-      "pkg-a",
-      "--package=pkg-b",
+      "a",
+      "--package",
+      "b",
+      "--out=result.json",
     ]);
 
-    expect(parsed.flags.package).toEqual(["pkg-a", "pkg-b"]);
-    expect(listFlag(parsed.flags, "package")).toEqual(["pkg-a", "pkg-b"]);
+    expect(parsed.command).toBe("compile");
+    expect(parsed.positionals).toEqual(["main.lf"]);
+    expect(listFlag(parsed.flags, "package")).toEqual(["a", "b"]);
+    expect(parsed.flags.out).toBe("result.json");
   });
 
-  it("rejects a package flag without a value", () => {
-    const parsed = parseArgs(["compile", "a.lf", "--package"]);
-    expect(() => listFlag(parsed.flags, "package")).toThrow("needs a value");
+  it("keeps a package path whole", () => {
+    const parsed = parseArgs(["compile", "main.lf", "--package", "packages/a,b"]);
+    expect(listFlag(parsed.flags, "package")).toEqual(["packages/a,b"]);
   });
 
-  it("compiles a file and reports a clean result", () => {
-    const { read, write } = withFile(SOURCE);
-    const result = run(["compile", "circuit.lf"], read, write);
+  it("reports a missing value flag", () => {
+    const parsed = parseArgs(["compile", "main.lf", "--package"]);
+    expect(parsed.flags.package).toBe(true);
+    expect(() => listFlag(parsed.flags, "package")).toThrow(/needs a value/);
+  });
+});
+
+describe("core commands", () => {
+  it("compiles a circuit with the kernel NAND", async () => {
+    const result = await runCli(["compile", "circuit.lf"], {
+      cwd: tempDir(),
+      read: () => NAND_SOURCE,
+    });
+
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toBe("Compiled 1 circuit, 3 nodes.\n");
+  });
+
+  it("reports compile diagnostics", async () => {
+    const result = await runCli(["compile", "circuit.lf"], {
+      cwd: tempDir(),
+      read: () => BROKEN_SOURCE,
+    });
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("E201");
+    expect(result.stderr).toContain("Failed with 1 error");
+  });
+
+  it("runs tests and reports each case", async () => {
+    const result = await runCli(["test", "circuit.lf"], {
+      cwd: tempDir(),
+      read: () => NAND_TEST_SOURCE,
+    });
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("PASS  NandOnly");
+    expect(result.stdout).toContain("pass  both high");
+    expect(result.stdout).toContain("2 passed, 0 failed");
+  });
+
+  it("prints a truth table", async () => {
+    const result = await runCli(["truth-table", "circuit.lf"], {
+      cwd: tempDir(),
+      read: () => NAND_SOURCE,
+    });
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("a | b | y");
+    expect(result.stdout).toContain("1 | 1 | 0");
+  });
+
+  it("prints JSON diagnostics", async () => {
+    const result = await runCli(["compile", "circuit.lf", "--json"], {
+      cwd: tempDir(),
+      read: () => BROKEN_SOURCE,
+    });
+
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stdout) as {
+      ok: boolean;
+      diagnostics: Array<{ code: string }>;
+    };
+    expect(payload.ok).toBe(false);
+    expect(payload.diagnostics.some((diagnostic) => diagnostic.code === "E201")).toBe(true);
+  });
+
+  it("formats a file in place with --write", async () => {
+    const cwd = tempDir();
+    let written = "";
+    const result = await runCli(["format", "circuit.lf", "--write"], {
+      cwd,
+      read: () => "CIRCUIT   Formatted\n INPUT a\n OUTPUT a\nEND\n",
+      write: (_file, contents) => {
+        written = contents;
+      },
+    });
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("Formatted circuit.lf");
+    expect(written).toContain("CIRCUIT");
+    expect(written).toContain("Formatted");
+  });
+
+  it("exports IR and Verilog through the kernel", async () => {
+    const ir = await runCli(["export-ir", "circuit.lf"], {
+      cwd: tempDir(),
+      read: () => NAND_SOURCE,
+    });
+    const verilog = await runCli(["export-verilog", "circuit.lf"], {
+      cwd: tempDir(),
+      read: () => NAND_SOURCE,
+    });
+
+    expect(ir.code).toBe(0);
+    expect(JSON.parse(ir.stdout)).toMatchObject({ schema: "shortcircuit.ir/v1" });
+    expect(verilog.code).toBe(0);
+    expect(verilog.stdout).toContain("module NandOnly");
+  });
+
+  it("writes export output with --out", async () => {
+    const cwd = tempDir();
+    let writtenPath = "";
+    let written = "";
+    const result = await runCli(["export-ir", "circuit.lf", "--out", "build/circuit.json"], {
+      cwd,
+      read: () => NAND_SOURCE,
+      write: (file, contents) => {
+        writtenPath = file;
+        written = contents;
+      },
+    });
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("Wrote build/circuit.json");
+    expect(writtenPath).toBe(join(cwd, "build/circuit.json"));
+    expect(JSON.parse(written)).toMatchObject({ schema: "shortcircuit.ir/v1" });
+  });
+
+  it("rejects an unknown command and a missing file", async () => {
+    const unknown = await runCli(["nope", "circuit.lf"], { cwd: tempDir(), read: () => NAND_SOURCE });
+    const missing = await runCli(["compile"], { cwd: tempDir() });
+
+    expect(unknown.code).toBe(1);
+    expect(unknown.stderr).toContain('Unknown command "nope"');
+    expect(missing.code).toBe(1);
+    expect(missing.stderr).toContain("No file given");
+  });
+
+  it("prints help for the new command surface", async () => {
+    const result = await runCli(["help"], { cwd: tempDir() });
+
+    expect(result.code).toBe(0);
+    for (const text of [
+      "shortcircuit init",
+      "shortcircuit package list",
+      "shortcircuit package install",
+      "shortcircuit package link",
+      "shortcircuit package register",
+    ]) {
+      expect(result.stdout).toContain(text);
+    }
+    expect(result.stdout).not.toContain("--root");
+    expect(result.stdout).not.toContain("--main");
+    expect(result.stdout).not.toContain("shortcircuit package registry");
+  });
+});
+
+describe("project packages", () => {
+  it("does not load the former bundled package snapshot", async () => {
+    const cwd = tempDir();
+    await runCli(["init"], { cwd });
+    const result = await runCli(["compile", "gates.lf"], {
+      cwd,
+      read: () => `IMPORT "@shortcircuit/gates"\n\nCIRCUIT Gates\n  INPUT a\n  INPUT b\n  y = AND(a, b)\n  OUTPUT y\nEND`,
+    });
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("E602");
+    expect(result.stderr).toContain('Cannot import "@shortcircuit/gates"');
+  });
+
+  it("loads an explicit local package for a single compile", async () => {
+    const cwd = tempDir();
+    writeDoublePackage(join(cwd, "packages/double"));
+
+    const result = await runCli(
+      ["compile", "hello.lf", "--package", "packages/double"],
+      { cwd, read: () => DOUBLE_SOURCE },
+    );
+
     expect(result.code).toBe(0);
     expect(result.stderr).toBe("");
   });
 
-  it("fails with a non-zero exit code on a diagnostic error", () => {
-    const { read, write } = withFile(BROKEN);
-    const result = run(["compile", "circuit.lf"], read, write);
+  it("links a local package by name and compiles against it", async () => {
+    const cwd = tempDir();
+    await runCli(["init"], { cwd });
+    const packageDir = join(cwd, "packages/double");
+    writeDoublePackage(packageDir);
+
+    const link = await runPackage(["link", "double"], { cwd });
+    expect(link.code).toBe(0);
+    expect(link.stdout).toContain("Linked @test/double@0.1.0");
+    expect(link.stdout).toContain("no files were copied or symlinked");
+
+    const manifest = readJson<{ dependencies: Record<string, string> }>(
+      join(cwd, "shortcircuit.json"),
+    );
+    expect(manifest.dependencies).toEqual({ "@test/double": "path:packages/double" });
+
+    const lock = readJson<{
+      packages: Record<string, { type: string; path: string; version: string }>;
+    }>(join(cwd, "shortcircuit.lock.json"));
+    expect(lock.packages["@test/double"]).toMatchObject({
+      type: "path",
+      path: "packages/double",
+      version: "0.1.0",
+    });
+    expect(existsSync(join(cwd, ".shortcircuit/packages"))).toBe(false);
+    expect(lstatSync(packageDir).isSymbolicLink()).toBe(false);
+
+    const compile = await runCli(["compile", "hello.lf"], {
+      cwd,
+      read: () => DOUBLE_SOURCE,
+    });
+    expect(compile.code).toBe(0);
+
+    const list = await runPackage(["list"], { cwd });
+    expect(list.code).toBe(0);
+    expect(list.stdout).toContain("@test/double");
+    expect(list.stdout).toContain("local");
+    expect(list.stdout).toContain("packages/double");
+
+    const json = await runPackage(["list", "--json"], { cwd });
+    expect(JSON.parse(json.stdout)).toMatchObject({
+      packages: [
+        {
+          name: "@test/double",
+          version: "0.1.0",
+          origin: "local",
+          path: "packages/double",
+          state: "ok",
+        },
+      ],
+    });
+  });
+
+  it("links a local package by directory", async () => {
+    const cwd = tempDir();
+    await runCli(["init"], { cwd });
+    writeDoublePackage(join(cwd, "packages/double"));
+
+    const link = await runPackage(["link", "packages/double"], { cwd });
+    expect(link.code).toBe(0);
+    expect(link.stdout).toContain("Linked @test/double@0.1.0");
+
+    const manifest = readJson<{ dependencies: Record<string, string> }>(
+      join(cwd, "shortcircuit.json"),
+    );
+    expect(manifest.dependencies).toEqual({ "@test/double": "path:packages/double" });
+  });
+
+  it("verifies path-linked packages with --frozen", async () => {
+    const cwd = tempDir();
+    await runCli(["init"], { cwd });
+    const packageDir = join(cwd, "packages/double");
+    writeDoublePackage(packageDir);
+    await runPackage(["link", "double"], { cwd });
+
+    const frozen = await runPackage(["install", "--frozen"], { cwd });
+    expect(frozen.code).toBe(0);
+    expect(frozen.stdout).toContain("up to date");
+
+    writeDoublePackage(packageDir, { version: "0.2.0" });
+    const stale = await runPackage(["install", "--frozen"], { cwd });
+    expect(stale.code).toBe(1);
+    expect(stale.stderr).toContain("locked at 0.1.0");
+  });
+
+  it("rejects package update for a path-linked package", async () => {
+    const cwd = tempDir();
+    await runCli(["init"], { cwd });
+    writeDoublePackage(join(cwd, "packages/double"));
+    await runPackage(["link", "double"], { cwd });
+
+    const result = await runPackage(["update", "double"], { cwd });
     expect(result.code).toBe(1);
-    expect(result.stderr).toContain("E201");
+    expect(result.stderr).toContain("linked from path:packages/double");
   });
 
-  it("runs the test blocks", () => {
-    const { read, write } = withFile(SOURCE);
-    const result = run(["test", "circuit.lf"], read, write);
-    expect(result.code).toBe(0);
-    expect(result.stdout).toContain("PASS");
-    expect(result.stdout).toContain("1 passed");
+  it("does not delete path-linked files when uninstalling", async () => {
+    const cwd = tempDir();
+    await runCli(["init"], { cwd });
+    const packageDir = join(cwd, "packages/double");
+    writeDoublePackage(packageDir);
+    await runPackage(["link", "double"], { cwd });
+
+    const removed = await runPackage(["uninstall", "double"], { cwd });
+    expect(removed.code).toBe(0);
+    expect(removed.stdout).toContain("Path-linked files were not deleted");
+    expect(existsSync(join(packageDir, "manifest.json"))).toBe(true);
+
+    const manifest = readJson<{ dependencies: Record<string, string> }>(
+      join(cwd, "shortcircuit.json"),
+    );
+    expect(manifest.dependencies).toEqual({});
+    const lock = readJson<{ packages: Record<string, unknown> }>(
+      join(cwd, "shortcircuit.lock.json"),
+    );
+    expect(lock.packages).toEqual({});
   });
 
-  it("prints a truth table", () => {
-    const { read, write } = withFile(SOURCE);
-    const result = run(["truth-table", "circuit.lf"], read, write);
-    expect(result.code).toBe(0);
-    expect(result.stdout).toContain("a | b | sum | carry");
-    expect(result.stdout).toContain("1 | 1 | 0 | 1");
+  it("prints an empty package list and rejects an unknown list target", async () => {
+    const cwd = tempDir();
+    await runCli(["init"], { cwd });
+
+    const list = await runPackage(["list"], { cwd });
+    expect(list.code).toBe(0);
+    expect(list.stdout).toContain("No packages installed");
+
+    const unknown = await runPackage(["list", "bundled"], { cwd });
+    expect(unknown.code).toBe(1);
+    expect(unknown.stderr).toContain("Unknown package list target");
   });
 
-  it("formats a file in place with --write", () => {
-    const { read, write, writes } = withFile("  circuit x = 1\n");
-    const result = run(["format", "circuit.lf", "--write"], read, write);
-    expect(result.code).toBe(0);
-    expect(writes.get("circuit.lf")).toBe("CIRCUIT x = 1\n");
-  });
+  it("requires an installed dependency before compiling against it", async () => {
+    const cwd = tempDir();
+    writeProject(cwd, { "@test/double": "^0.1.0" });
 
-  it("exports the IR and Verilog", () => {
-    const { read, write } = withFile(SOURCE);
-    const ir = run(["export-ir", "circuit.lf"], read, write);
-    expect(ir.code).toBe(0);
-    expect(JSON.parse(ir.stdout).schema).toBe("shortcircuit.ir/v1");
+    const result = await runCli(["compile", "hello.lf"], {
+      cwd,
+      read: () => DOUBLE_SOURCE,
+    });
 
-    const verilog = run(["export-verilog", "circuit.lf"], read, write);
-    expect(verilog.code).toBe(0);
-    expect(verilog.stdout).toContain("module HalfAdder");
-  });
-
-  it("prints machine-readable output with --json", () => {
-    const { read, write } = withFile(SOURCE);
-    const result = run(["test", "circuit.lf", "--json"], read, write);
-    expect(result.code).toBe(0);
-    const parsed = JSON.parse(result.stdout);
-    expect(parsed.passed).toBe(1);
-  });
-
-  it("shows the help for an unknown command", () => {
-    const { read, write } = withFile(SOURCE);
-    const result = run(["nonsense", "circuit.lf"], read, write);
     expect(result.code).toBe(1);
-    expect(result.stdout).toContain("Usage:");
+    expect(result.stderr).toContain("@test/double is not installed");
+  });
+});
+
+describe("registry-backed package commands", () => {
+  function setupRegistry() {
+    const registry = new RegistryFixture();
+    registry.addPackage({
+      name: "@test/double",
+      version: "0.1.0",
+      description: "Double inversion.",
+      manifest: {
+        exports: [
+          {
+            kind: "macro",
+            name: "TWICE",
+            source: "macros/twice/macro.lf",
+            summary: "Double inversion.",
+          },
+        ],
+      },
+      files: {
+        "macros/twice/macro.lf":
+          "MACRO TWICE(x)\n  BODY NAND(NAND(x, x), NAND(x, x))\nEND\n",
+      },
+    });
+    return registry;
+  }
+
+  it("lists upstream packages and installs one from the registry", async () => {
+    const cwd = tempDir();
+    await runCli(["init"], { cwd });
+    const registry = setupRegistry();
+    const env = { ...process.env, SHORTCIRCUIT_CACHE: join(cwd, ".cache") };
+
+    const upstream = await runPackage(
+      ["list", "upstream", "--registry", registry.url, "--refresh"],
+      { cwd, fetch: registry.fetch, env },
+    );
+    expect(upstream.code).toBe(0);
+    expect(upstream.stdout).toContain("@test/double");
+    expect(upstream.stdout).toContain("0.1.0");
+    expect(upstream.stdout).toContain("Double inversion.");
+
+    const install = await runPackage(
+      ["install", "@test/double", "--registry", registry.url],
+      { cwd, fetch: registry.fetch, env },
+    );
+    expect(install.code).toBe(0);
+    expect(install.stdout).toContain("Installed 1 package: @test/double");
+
+    const manifest = readJson<{ dependencies: Record<string, string> }>(
+      join(cwd, "shortcircuit.json"),
+    );
+    expect(manifest.dependencies).toEqual({ "@test/double": "^0.1.0" });
+    const lock = readJson<{
+      packages: Record<string, { type: string; resolved: string; integrity: string }>;
+    }>(join(cwd, "shortcircuit.lock.json"));
+    expect(lock.packages["@test/double"]).toMatchObject({
+      type: "registry",
+      resolved: expect.stringContaining("packages/test-double-0.1.0/"),
+      integrity: expect.stringMatching(/^sha256-/),
+    });
+    expect(
+      existsSync(join(cwd, ".shortcircuit/packages/@test/double/manifest.json")),
+    ).toBe(true);
+
+    const compile = await runCli(["compile", "hello.lf"], {
+      cwd,
+      read: () => DOUBLE_SOURCE,
+    });
+    expect(compile.code).toBe(0);
+
+    const list = await runPackage(["list"], { cwd });
+    expect(list.code).toBe(0);
+    expect(list.stdout).toContain("registry");
+    expect(list.stdout).toContain(".shortcircuit/packages/@test/double");
+
+    const installedUpstream = await runPackage(
+      ["list", "upstream", "--registry", registry.url],
+      { cwd, fetch: registry.fetch, env },
+    );
+    expect(installedUpstream.stdout).toContain("0.1.0");
   });
 
-  it("documents package commands and flags", () => {
-    const result = run(["help"]);
-    expect(result.code).toBe(0);
-    expect(result.stdout).toContain("shortcircuit package list");
-    expect(result.stdout).toContain("shortcircuit package registry");
-    expect(result.stdout).toContain("shortcircuit package init");
-    expect(result.stdout).toContain("shortcircuit package build");
-    expect(result.stdout).toContain("shortcircuit package test");
-    expect(result.stdout).toContain("shortcircuit package check");
-    expect(result.stdout).toContain("--package <dir>");
-    expect(result.stdout).toContain("--root <dir>");
-    expect(result.stdout).toContain("--main <dir>");
-    expect(result.stdout).not.toContain("--disable-package");
-    expect(result.stdout).not.toContain("--only-packages");
-    expect(result.stdout).not.toContain("--no-default-packages");
+  it("updates within a range and supports --latest", async () => {
+    const cwd = tempDir();
+    await runCli(["init"], { cwd });
+    const registry = setupRegistry();
+    const env = { ...process.env, SHORTCIRCUIT_CACHE: join(cwd, ".cache") };
+
+    await runPackage(
+      ["install", "@test/double@0.1.0", "--registry", registry.url],
+      { cwd, fetch: registry.fetch, env },
+    );
+    let lock = readJson<{ packages: Record<string, { version: string }> }>(
+      join(cwd, "shortcircuit.lock.json"),
+    );
+    expect(lock.packages["@test/double"]!.version).toBe("0.1.0");
+
+    registry.addPackage({
+      name: "@test/double",
+      version: "0.1.1",
+      description: "Double inversion.",
+      manifest: {
+        exports: [
+          {
+            kind: "macro",
+            name: "TWICE",
+            source: "macros/twice/macro.lf",
+          },
+        ],
+      },
+      files: {
+        "macros/twice/macro.lf":
+          "MACRO TWICE(x)\n  BODY NAND(NAND(x, x), NAND(x, x))\nEND\n",
+      },
+    });
+
+    const update = await runPackage(
+      ["update", "--latest", "--registry", registry.url],
+      { cwd, fetch: registry.fetch, env },
+    );
+    expect(update.code).toBe(0);
+    lock = readJson(join(cwd, "shortcircuit.lock.json"));
+    expect(lock.packages["@test/double"]!.version).toBe("0.1.1");
+    const manifest = readJson<{ dependencies: Record<string, string> }>(
+      join(cwd, "shortcircuit.json"),
+    );
+    expect(manifest.dependencies["@test/double"]).toBe("^0.1.1");
   });
 
-  it("requires an explicit import before using package exports", () => {
-    const core = withFile(NAND_SOURCE);
-    const coreResult = run(["compile", "circuit.lf"], core.read, core.write);
-    expect(coreResult.code).toBe(0);
+  it("updates within the saved range without --latest", async () => {
+    const cwd = tempDir();
+    await runCli(["init"], { cwd });
+    const registry = setupRegistry();
+    const env = { ...process.env, SHORTCIRCUIT_CACHE: join(cwd, ".cache") };
 
-    const unimported = withFile(`CIRCUIT HalfAdder
-INPUT a
-INPUT b
-sum = XOR(a, b)
-OUTPUT sum
-END`);
-    const blocked = run(["compile", "circuit.lf"], unimported.read, unimported.write);
-    expect(blocked.code).toBe(1);
-    expect(blocked.stderr).toContain("E210");
-    expect(blocked.stderr).toContain("XOR");
+    await runPackage(
+      ["install", "@test/double@^0.1.0", "--registry", registry.url],
+      { cwd, fetch: registry.fetch, env },
+    );
+    registry.addPackage({
+      name: "@test/double",
+      version: "0.1.1",
+      description: "Double inversion.",
+      manifest: {
+        exports: [
+          {
+            kind: "macro",
+            name: "TWICE",
+            source: "macros/twice/macro.lf",
+          },
+        ],
+      },
+      files: {
+        "macros/twice/macro.lf":
+          "MACRO TWICE(x)\n  BODY NAND(NAND(x, x), NAND(x, x))\nEND\n",
+      },
+    });
 
-    const imported = withFile(SOURCE);
-    const ok = run(["compile", "circuit.lf"], imported.read, imported.write);
-    expect(ok.code).toBe(0);
+    const update = await runPackage(
+      ["update", "@test/double", "--registry", registry.url],
+      { cwd, fetch: registry.fetch, env },
+    );
+    expect(update.code).toBe(0);
+    const lock = readJson<{ packages: Record<string, { version: string }> }>(
+      join(cwd, "shortcircuit.lock.json"),
+    );
+    expect(lock.packages["@test/double"]!.version).toBe("0.1.1");
+    const manifest = readJson<{ dependencies: Record<string, string> }>(
+      join(cwd, "shortcircuit.json"),
+    );
+    expect(manifest.dependencies["@test/double"]).toBe("^0.1.0");
   });
 
-  it("reports an import for a package that is not loaded", () => {
-    const missing = withFile(`IMPORT "@missing/package"
-CIRCUIT Empty
-END`);
-    const result = run(["compile", "circuit.lf"], missing.read, missing.write);
-    expect(result.code).toBe(1);
-    expect(result.stderr).toContain("E602");
+  it("restores the manifest when --latest fails to install", async () => {
+    const cwd = tempDir();
+    await runCli(["init"], { cwd });
+    const registry = setupRegistry();
+    const env = { ...process.env, SHORTCIRCUIT_CACHE: join(cwd, ".cache") };
+
+    await runPackage(
+      ["install", "@test/double@0.1.0", "--registry", registry.url],
+      { cwd, fetch: registry.fetch, env },
+    );
+    registry.addPackage({
+      name: "@test/double",
+      version: "0.1.1",
+      description: "Broken update.",
+      manifest: {
+        dependencies: { "@test/missing": "^1.0.0" },
+        exports: [
+          {
+            kind: "macro",
+            name: "TWICE",
+            source: "macros/twice/macro.lf",
+          },
+        ],
+      },
+      files: {
+        "macros/twice/macro.lf":
+          "MACRO TWICE(x)\n  BODY NAND(NAND(x, x), NAND(x, x))\nEND\n",
+      },
+    });
+
+    const update = await runPackage(
+      ["update", "--latest", "--registry", registry.url],
+      { cwd, fetch: registry.fetch, env },
+    );
+    expect(update.code).toBe(1);
+    expect(update.stderr).toContain("@test/missing");
+
+    const manifest = readJson<{ dependencies: Record<string, string> }>(
+      join(cwd, "shortcircuit.json"),
+    );
+    expect(manifest.dependencies["@test/double"]).toBe("0.1.0");
   });
 
-  it("loads a local package directory", () => {
-    const root = tempDir();
-    writeDoublePackage(root, { docs: true, tests: true });
-    const { read, write } = withFile(LOCAL_SOURCE);
-    const result = run(["compile", "circuit.lf", "--package", root], read, write);
-    expect(result.code).toBe(0);
-    expect(result.stdout).toContain("Compiled 1 circuit");
-  });
+  it("restores the manifest when a remote package is invalid", async () => {
+    const cwd = tempDir();
+    await runCli(["init"], { cwd });
+    const registry = setupRegistry();
+    const env = { ...process.env, SHORTCIRCUIT_CACHE: join(cwd, ".cache") };
+    registry.addPackage({
+      name: "@test/broken",
+      version: "0.1.0",
+      manifest: {
+        exports: [{ kind: "macro", name: "BROKEN" }],
+      },
+    });
 
-  it("keeps bundled packages available while loading a local package", () => {
-    const root = tempDir();
-    writeDoublePackage(root);
-    const { read, write } = withFile(LOCAL_SOURCE);
-    const result = run(["compile", "circuit.lf", "--package", root], read, write);
-    expect(result.code).toBe(0);
-  });
-
-  it("runs tests with a local package", () => {
-    const root = tempDir();
-    writeDoublePackage(root);
-    const { read, write } = withFile(LOCAL_TEST_SOURCE);
-    const result = run(["test", "circuit.lf", "--package", root], read, write);
-    expect(result.code).toBe(0);
-    expect(result.stdout).toContain("PASS  LocalDouble");
-    expect(result.stdout).toContain("1 passed");
-  });
-
-  it("reports an invalid local package path", () => {
-    const { read, write } = withFile(SOURCE);
-    const result = run(
-      ["compile", "circuit.lf", "--package", join(tempDir(), "missing")],
-      read,
-      write,
+    const result = await runPackage(
+      ["install", "@test/broken", "--registry", registry.url],
+      { cwd, fetch: registry.fetch, env },
     );
     expect(result.code).toBe(1);
-    expect(result.stderr).toContain("Could not find package");
+    expect(result.stderr).toContain("needs a source");
+
+    const manifest = readJson<{ dependencies: Record<string, string> }>(
+      join(cwd, "shortcircuit.json"),
+    );
+    expect(manifest.dependencies).toEqual({});
   });
 
-  it("reports a package flag without a value at run time", () => {
-    const { read, write } = withFile(SOURCE);
-    const result = run(["compile", "circuit.lf", "--package"], read, write);
-    expect(result.code).toBe(1);
-    expect(result.stderr).toContain("needs a value");
-  });
+  it("restores an installed package from cache while offline", async () => {
+    const cwd = tempDir();
+    await runCli(["init"], { cwd });
+    const registry = setupRegistry();
+    const env = { ...process.env, SHORTCIRCUIT_CACHE: join(cwd, ".cache") };
 
-  it("lists packages without reading a source file", () => {
-    const result = run(["package", "list"], () => {
-      throw new Error("package list should not read a source file");
-    });
-    expect(result.code).toBe(0);
-    expect(result.stdout).toContain("NAME");
-    expect(result.stdout).toContain("@shortcircuit/gates");
-    expect(result.stdout).toContain("bundled");
-    expect(result.stdout).toContain("Import a package in source");
-    expect(result.stdout).not.toContain("enabled");
-  });
+    await runPackage(
+      ["install", "@test/double", "--registry", registry.url],
+      { cwd, fetch: registry.fetch, env },
+    );
+    rmSync(join(cwd, ".shortcircuit/packages"), { recursive: true, force: true });
 
-  it("lists a local package with its origin", () => {
-    const root = tempDir();
-    writeDoublePackage(root);
-    const result = run(["package", "list", "--package", root]);
-    expect(result.code).toBe(0);
-    const row = packageRow(result.stdout, "@test/double");
-    expect(row).toContain(root);
-    expect(result.stdout).toContain("4 bundled, 1 local");
-  });
-
-  it("prints package list JSON", () => {
-    const root = tempDir();
-    writeDoublePackage(root);
-    const result = run(["package", "list", "--json", "--package", root]);
-    expect(result.code).toBe(0);
-    const data = JSON.parse(result.stdout) as {
-      packages: Array<{ name: string; origin: string; exports: number }>;
-    };
+    const offline = await runPackage(
+      ["install", "--offline", "--registry", registry.url],
+      { cwd, fetch: registry.fetch, env },
+    );
+    expect(offline.code).toBe(0);
+    expect(offline.stdout).toContain("Installed 1 package");
     expect(
-      data.packages.find((pkg) => pkg.name === "@shortcircuit/arithmetic")?.origin,
-    ).toBe("bundled");
-    expect(data.packages.find((pkg) => pkg.name === "@test/double")).toMatchObject({
-      origin: root,
+      existsSync(join(cwd, ".shortcircuit/packages/@test/double/manifest.json")),
+    ).toBe(true);
+  });
+
+  it("verifies the lock and store with --frozen", async () => {
+    const cwd = tempDir();
+    await runCli(["init"], { cwd });
+    const registry = setupRegistry();
+    const env = { ...process.env, SHORTCIRCUIT_CACHE: join(cwd, ".cache") };
+
+    await runPackage(
+      ["install", "@test/double", "--registry", registry.url],
+      { cwd, fetch: registry.fetch, env },
+    );
+    const frozen = await runPackage(
+      ["install", "--frozen", "--registry", registry.url],
+      { cwd, fetch: registry.fetch, env },
+    );
+    expect(frozen.code).toBe(0);
+    expect(frozen.stdout).toContain("up to date");
+
+    rmSync(join(cwd, ".shortcircuit/packages"), { recursive: true, force: true });
+    const missing = await runPackage(
+      ["install", "--frozen", "--registry", registry.url],
+      { cwd, fetch: registry.fetch, env },
+    );
+    expect(missing.code).toBe(1);
+    expect(missing.stderr).toContain("missing from .shortcircuit/packages");
+  });
+
+  it("installs transitive dependencies and prunes them on uninstall", async () => {
+    const cwd = tempDir();
+    await runCli(["init"], { cwd });
+    const registry = setupRegistry();
+    registry.addPackage({
+      name: "@test/parent",
+      version: "0.1.0",
+      description: "Parent package.",
+      manifest: {
+        dependencies: { "@test/double": "^0.1.0" },
+        exports: [
+          {
+            kind: "macro",
+            name: "FOUR",
+            source: "macros/four/macro.lf",
+          },
+        ],
+      },
+      files: {
+        "macros/four/macro.lf": "MACRO FOUR(x)\n  BODY TWICE(TWICE(x))\nEND\n",
+      },
     });
+    const env = { ...process.env, SHORTCIRCUIT_CACHE: join(cwd, ".cache") };
+
+    const install = await runPackage(
+      ["install", "@test/parent", "--registry", registry.url],
+      { cwd, fetch: registry.fetch, env },
+    );
+    expect(install.code).toBe(0);
+    expect(install.stdout).toContain("@test/parent");
+    expect(install.stdout).toContain("@test/double");
+    let lock = readJson<{ packages: Record<string, unknown> }>(
+      join(cwd, "shortcircuit.lock.json"),
+    );
+    expect(Object.keys(lock.packages).sort()).toEqual(["@test/double", "@test/parent"]);
+
+    const uninstall = await runPackage(["uninstall", "@test/parent"], { cwd });
+    expect(uninstall.code).toBe(0);
+    lock = readJson(join(cwd, "shortcircuit.lock.json"));
+    expect(lock.packages).toEqual({});
+    expect(existsSync(join(cwd, ".shortcircuit/packages/@test/double"))).toBe(false);
+    expect(existsSync(join(cwd, ".shortcircuit/packages/@test/parent"))).toBe(false);
   });
 
-  it("rejects a file argument for package list", () => {
-    const result = run(["package", "list", "circuit.lf"]);
-    expect(result.code).toBe(1);
-    expect(result.stderr).toContain("does not take a file");
+  it("reports a dependency conflict clearly", async () => {
+    const cwd = tempDir();
+    await runCli(["init"], { cwd });
+    const registry = setupRegistry();
+    registry.addPackage({
+      name: "@test/parent",
+      version: "0.1.0",
+      manifest: {
+        dependencies: { "@test/double": "^2.0.0" },
+        exports: [
+          {
+            kind: "macro",
+            name: "FOUR",
+            source: "macros/four/macro.lf",
+          },
+        ],
+      },
+      files: {
+        "macros/four/macro.lf": "MACRO FOUR(x)\n  BODY NAND(x, x)\nEND\n",
+      },
+    });
+    const env = { ...process.env, SHORTCIRCUIT_CACHE: join(cwd, ".cache") };
+
+    const install = await runPackage(
+      ["install", "@test/parent", "--registry", registry.url],
+      { cwd, fetch: registry.fetch, env },
+    );
+    expect(install.code).toBe(1);
+    expect(install.stderr).toContain("No version of @test/double satisfies");
   });
 
-  it("rejects an unknown package subcommand", () => {
-    const result = run(["package", "install"]);
+  it("reports missing cache entries in offline mode", async () => {
+    const cwd = tempDir();
+    await runCli(["init"], { cwd });
+    const registry = setupRegistry();
+    const env = { ...process.env, SHORTCIRCUIT_CACHE: join(cwd, ".cache") };
+
+    const result = await runPackage(
+      ["install", "@test/double", "--offline", "--registry", registry.url],
+      { cwd, fetch: registry.fetch, env },
+    );
     expect(result.code).toBe(1);
-    expect(result.stderr).toContain("Unknown package command");
+    expect(result.stderr).toContain("No cached registry index");
+  });
+
+  it("rejects conflicting path and registry dependencies without --force", async () => {
+    const cwd = tempDir();
+    await runCli(["init"], { cwd });
+    writeDoublePackage(join(cwd, "packages/double"));
+    await runPackage(["link", "double"], { cwd });
+    const registry = setupRegistry();
+    const env = { ...process.env, SHORTCIRCUIT_CACHE: join(cwd, ".cache") };
+
+    const install = await runPackage(
+      ["install", "@test/double", "--registry", registry.url],
+      { cwd, fetch: registry.fetch, env },
+    );
+    expect(install.code).toBe(1);
+    expect(install.stderr).toContain("is linked from");
   });
 });

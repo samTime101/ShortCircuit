@@ -59,6 +59,11 @@ export interface CompileOptions {
    */
   packages?: import("./packages").PackageBundle | import("./packages").PackageManifest[];
   /**
+   * The host's default package snapshot. The root engine wrapper injects the
+   * web snapshot here; the CLI uses the core entry and leaves this unset.
+   */
+  defaultPackages?: import("./packages").PackageBundle;
+  /**
    * Omit the bundled package snapshot. This is a host option for compiling
    * against an explicit package bundle; it does not disable imports in source.
    */

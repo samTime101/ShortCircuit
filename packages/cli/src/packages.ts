@@ -1,11 +1,17 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
-  DEFAULT_PACKAGE_BUNDLE,
   type PackageBundle,
   type PackageExport,
   type PackageManifest,
-} from "@shortcircuit/engine";
+} from "@shortcircuit/engine/core";
+import { PACKAGE_SCHEMA } from "./project";
+import {
+  validateExportName,
+  validatePackageName,
+  validateRange,
+  validateVersion,
+} from "./packageSpec";
 
 export class PackageLoadError extends Error {
   constructor(message: string) {
@@ -96,19 +102,44 @@ function hasDeclaration(item: PackageExport, source: string): boolean {
     : new RegExp(`\\bCIRCUIT\\s+${name}\\b`).test(source);
 }
 
+function packageFilePath(root: string, path: string, label: string): string {
+  const resolved = resolve(root, path);
+  const relativePath = relative(root, resolved);
+  if (
+    relativePath === ".." ||
+    relativePath.startsWith(`..${sep}`) ||
+    isAbsolute(relativePath)
+  ) {
+    fail(`${label} path ${path} must stay inside the package directory.`);
+  }
+  return resolved;
+}
+
 function loadManifest(root: string, manifestPath: string): PackageManifest {
   const label = `Package manifest at ${manifestPath}`;
   const raw = readJson(manifestPath, label);
-  if (raw.schema !== "shortcircuit.package/v1") {
-    fail(`${label} does not use shortcircuit.package/v1.`);
+  if (raw.schema !== PACKAGE_SCHEMA) {
+    fail(`${label} does not use ${PACKAGE_SCHEMA}.`);
   }
-  const name = requireString(raw.name, `${label} name`);
-  const version = requireString(raw.version, `${label} version`);
+  const name = validatePackageName(requireString(raw.name, `${label} name`));
+  const version = validateVersion(requireString(raw.version, `${label} version`));
   if (raw.recommendedAutoImport !== undefined && typeof raw.recommendedAutoImport !== "boolean") {
     fail(`${name} recommendedAutoImport must be true or false.`);
   }
-  if (DEFAULT_PACKAGE_BUNDLE.packages.some((manifest) => manifest.name === name)) {
-    fail(`Package ${name} is already bundled. Use a unique package name.`);
+  const dependencies: Record<string, string> = {};
+  if (raw.dependencies !== undefined) {
+    if (raw.dependencies === null || typeof raw.dependencies !== "object" || Array.isArray(raw.dependencies)) {
+      fail(`${name} dependencies must be an object.`);
+    }
+    for (const [dependency, range] of Object.entries(
+      raw.dependencies as Record<string, unknown>,
+    )) {
+      const dependencyName = validatePackageName(dependency);
+      if (typeof range !== "string") {
+        fail(`${name} dependency ${dependencyName} must have a string version or path.`);
+      }
+      dependencies[dependencyName] = validateRange(range);
+    }
   }
 
   const packageJsonPath = join(root, "package.json");
@@ -134,23 +165,34 @@ function loadManifest(root: string, manifestPath: string): PackageManifest {
   const seen = new Set<string>();
   for (const [index, entry] of raw.exports.entries()) {
     const item = validateExport(entry, `${name} export ${index + 1}`);
-    const key = `${item.kind}:${item.name}`;
+    const exportName = validateExportName(item.name);
+    const key = `${item.kind}:${exportName}`;
     if (seen.has(key)) fail(`${name} exports ${key} more than once.`);
     seen.add(key);
 
-    const sourceText = readText(join(root, item.source), `${name} source ${item.source}`);
-    if (!hasDeclaration(item, sourceText)) {
-      fail(`${name} export ${item.name} is not declared in ${item.source}.`);
+    const sourceText = readText(
+      packageFilePath(root, item.source, `${name} source`),
+      `${name} source ${item.source}`,
+    );
+    if (!hasDeclaration({ ...item, name: exportName }, sourceText)) {
+      fail(`${name} export ${exportName} is not declared in ${item.source}.`);
     }
     const docsText = item.docs
-      ? readText(join(root, item.docs), `${name} docs ${item.docs}`)
+      ? readText(
+          packageFilePath(root, item.docs, `${name} docs`),
+          `${name} docs ${item.docs}`,
+        )
       : undefined;
     const testText =
       item.kind === "circuit" && item.tests
-        ? readText(join(root, item.tests), `${name} tests ${item.tests}`)
+        ? readText(
+            packageFilePath(root, item.tests, `${name} tests`),
+            `${name} tests ${item.tests}`,
+          )
         : undefined;
     exports.push({
       ...item,
+      name: exportName,
       sourceText,
       ...(docsText === undefined ? {} : { docsText }),
       ...(testText === undefined ? {} : { testText }),
@@ -160,13 +202,17 @@ function loadManifest(root: string, manifestPath: string): PackageManifest {
   let testText: string | undefined;
   if (raw.tests !== undefined) {
     const tests = requireString(raw.tests, `${name} tests`);
-    testText = readText(join(root, tests), `${name} tests ${tests}`);
+    testText = readText(
+      packageFilePath(root, tests, `${name} tests`),
+      `${name} tests ${tests}`,
+    );
   }
 
   return {
     ...(raw as unknown as PackageManifest),
     name,
     version,
+    ...(Object.keys(dependencies).length > 0 ? { dependencies } : {}),
     exports,
     ...(testText === undefined ? {} : { testText }),
   };
