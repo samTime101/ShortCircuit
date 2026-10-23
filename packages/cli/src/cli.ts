@@ -265,8 +265,7 @@ async function runPackageCommand(
       parsed.flags.yes === true
         ? false
         : (runOptions.interactive ?? Boolean(process.stdin.isTTY));
-    const kindValue = optionValue(parsed.flags, "kind");
-    const kind = kindValue === "circuit" || kindValue === "macro" ? kindValue : "macro";
+    const kind = optionValue(parsed.flags, "kind") as "macro" | "circuit" | undefined;
     return addExport({
       directory: cwd,
       exportName: optionValue(parsed.flags, "export"),

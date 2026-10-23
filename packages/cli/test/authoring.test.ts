@@ -353,4 +353,26 @@ describe("package authoring commands", () => {
     expect(result.code).toBe(1);
     expect(result.stderr).toContain("No manifest.json found");
   });
+
+  it("adds an export with interactive true when flags are provided without hanging", async () => {
+    const root = tempDir();
+    await runPackage(
+      ["init", "--name", "@shortcircuit/arithmetic", "--export", "HALFADDER", "--kind", "circuit", "--yes"],
+      root,
+    );
+
+    const result = await run(
+      ["package", "add-export", "--export", "FULLADDER", "--kind", "circuit"],
+      noRead,
+      () => undefined,
+      {
+        cwd: root,
+        interactive: true,
+      },
+    );
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain('Added circuit export "FULLADDER"');
+    expect(existsSync(join(root, "circuits/fulladder/circuit.lf"))).toBe(true);
+  });
 });
