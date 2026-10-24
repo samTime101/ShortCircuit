@@ -2075,6 +2075,7 @@ export function getStudioHtml(
 
     function handlePointerUp(event) {
       if (dragRef && !dragRef.moved) selectNode(null);
+      const hadMoved = dragRef && dragRef.moved;
       dragRef = null;
       graphStage.classList.remove("is-dragging");
       circuitGraphSvg.classList.remove("is-dragging");
@@ -2083,6 +2084,11 @@ export function getStudioHtml(
           circuitGraphSvg.releasePointerCapture(event.pointerId);
         }
       } catch (_) {}
+      if (hadMoved) {
+        if (zoomScale >= MIN_NODE_BATCH_SCALE && fullLayoutNodes.length > currentVisibleNodes.length) {
+          renderGraph();
+        }
+      }
     }
 
     circuitGraphSvg.addEventListener("pointerup", handlePointerUp);
@@ -2143,19 +2149,21 @@ export function getStudioHtml(
       const viewHeight = rect.height || 400;
       const layoutWidth = model.layout.width || 600;
       const layoutHeight = model.layout.height || 400;
-      const scale = Math.max(
-        FIT_MIN_ZOOM,
-        Math.min(
-          FIT_MAX_ZOOM,
-          (viewWidth - 64) / layoutWidth,
-          (viewHeight - 64) / layoutHeight
-        )
+      const fitScale = Math.min(
+        (viewWidth - 64) / layoutWidth,
+        (viewHeight - 64) / layoutHeight
       );
+      // For large graphs (>90 nodes, e.g. ALU8 with 1,104 nodes), fit the whole overview down to MIN_ZOOM.
+      // For smaller graphs, keep text readable by not shrinking below 0.62.
+      const isLarge = Boolean(model.layout.nodes && model.layout.nodes.length > 90);
+      const minFit = isLarge ? MIN_ZOOM : FIT_MIN_ZOOM;
+      const scale = Math.max(minFit, Math.min(FIT_MAX_ZOOM, fitScale));
       zoomScale = scale;
       panX = (viewWidth - layoutWidth * scale) / 2;
       panY = (viewHeight - layoutHeight * scale) / 2;
       applyTransform();
       lastRenderedLodScale = zoomScale;
+      renderGraph();
     }
 
     function fitGraphIfNeeded() {
