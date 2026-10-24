@@ -30,7 +30,7 @@ TEST HalfAdder
 END
 ```
 
-> **Live demo**: Open the web studio at [shortcircuit.dev](https://shortcircuit.dev) (or run locally — see [Quick Start](#quick-start)).
+> **Live demo**: Open the web studio at [shortcircuit-eight.vercel.app](https://shortcircuit-eight.vercel.app) (or run locally — see [Quick Start](#quick-start)).
 
 ---
 
