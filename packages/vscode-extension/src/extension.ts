@@ -3,28 +3,50 @@ import {
   LanguageClient,
   LanguageClientOptions,
   ServerOptions,
-  TransportKind
+  TransportKind,
 } from "vscode-languageclient/node";
 import * as path from "path";
 import {
   compile,
   Simulator,
-  generateTruthTable,
-  runPackageTests,
+  runTests,
   formatSource,
+  formatBinary,
   parsePackageMacroSource,
   parseSimulationInput,
-  formatBinary,
-  binaryToDecimal,
   type CircuitIR,
+  type CompileResult,
   type SimulationSnapshot,
 } from "@shortcircuit/engine";
-import { buildLayout, type GraphLayout } from "./graphLayout";
-import { getStudioHtml, type StudioModel, type StudioCircuitData } from "./studioHtml";
+import { buildLayout } from "./graphLayout";
+import { getStudioHtml } from "./studioHtml";
+import {
+  buildCircuitSummaries,
+  buildIrSummary,
+  buildIrText,
+  buildTestsModel,
+  buildTruthTable,
+  buildWaveform,
+  findTestAtPosition,
+  inputBitAt,
+  mapDiagnostics,
+  normalizeInputs,
+  normalizeInputValue,
+  snapshotToModel,
+  type StudioDerivedKind,
+  type StudioDiagnostic,
+  type StudioModel,
+} from "./studioModel";
 import { resolveWorkspaceContext, invalidatePackageCache } from "./packageResolver";
 
 let client: LanguageClient | undefined;
 let studioProvider: ShortCircuitStudioProvider | undefined;
+let changeTimer: NodeJS.Timeout | undefined;
+let packageRefreshTimer: NodeJS.Timeout | undefined;
+let testOutputChannel: vscode.OutputChannel | undefined;
+
+const CHANGE_DELAY_MS = 140;
+const PACKAGE_REFRESH_DELAY_MS = 250;
 
 export function activate(context: vscode.ExtensionContext): void {
   // 1. Language Server
@@ -35,12 +57,15 @@ export function activate(context: vscode.ExtensionContext): void {
       debug: {
         module: serverModule,
         transport: TransportKind.ipc,
-        options: { execArgv: ["--nolazy", "--inspect=6009"] }
-      }
+        options: { execArgv: ["--nolazy", "--inspect=6009"] },
+      },
     };
 
     const clientOptions: LanguageClientOptions = {
-      documentSelector: [{ scheme: "file", language: "logicflow" }],
+      documentSelector: [
+        { scheme: "file", language: "logicflow" },
+        { scheme: "untitled", language: "logicflow" },
+      ],
       synchronize: {
         fileEvents: [
           vscode.workspace.createFileSystemWatcher("**/*.lf"),
@@ -48,48 +73,46 @@ export function activate(context: vscode.ExtensionContext): void {
           vscode.workspace.createFileSystemWatcher("**/shortcircuit.json"),
           vscode.workspace.createFileSystemWatcher("**/shortcircuit.lock.json"),
         ],
-        configurationSection: "shortcircuit"
+        configurationSection: "shortcircuit",
       },
       outputChannelName: "Short Circuit",
       revealOutputChannelOn: 4,
-      initializationOptions: {}
+      initializationOptions: {},
     };
 
     client = new LanguageClient(
       "shortcircuit",
       "Short Circuit Language Server",
       serverOptions,
-      clientOptions
+      clientOptions,
     );
-    client.start();
-
+    void client.start();
     context.subscriptions.push({
       dispose: () => {
         if (client) return client.stop();
-      }
+        return undefined;
+      },
     });
   } catch (err) {
     console.error("Failed to start language client:", err);
   }
 
-  // 2. Studio State Manager & Sidebar Webview View Provider
+  // 2. Studio state manager and sidebar webview
   const provider = new ShortCircuitStudioProvider(context.extensionUri);
   studioProvider = provider;
   context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider(
-      "shortcircuit.studioView",
-      provider
-    )
+    vscode.window.registerWebviewViewProvider("shortcircuit.studioView", provider),
+    { dispose: () => provider.dispose() },
   );
 
-  // 3. Register Commands
+  // 3. Commands
   context.subscriptions.push(
     vscode.commands.registerCommand("shortcircuit.openStudio", () => {
-      StudioPanel.createOrShow(context.extensionUri, provider, "circuit");
+      StudioPanel.createOrShow(provider, "circuit");
     }),
 
     vscode.commands.registerCommand("shortcircuit.expandStudio", () => {
-      StudioPanel.createOrShow(context.extensionUri, provider, "circuit");
+      StudioPanel.createOrShow(provider, "circuit");
     }),
 
     vscode.commands.registerCommand("shortcircuit.refreshStudio", () => {
@@ -97,24 +120,31 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
 
     vscode.commands.registerCommand("shortcircuit.openWaveform", () => {
-      StudioPanel.createOrShow(context.extensionUri, provider, "waveform");
+      StudioPanel.createOrShow(provider, "waveform");
     }),
 
     vscode.commands.registerCommand("shortcircuit.openTruthTable", () => {
-      StudioPanel.createOrShow(context.extensionUri, provider, "truth");
+      StudioPanel.createOrShow(provider, "truth");
     }),
 
-    vscode.commands.registerCommand("shortcircuit.runTest", async () => {
-      const editor = vscode.window.activeTextEditor;
-      if (editor && editor.document.languageId === "logicflow") {
-        await runTestAtCursor(editor.document, editor.selection.active);
-      }
-    }),
+    vscode.commands.registerCommand(
+      "shortcircuit.runTest",
+      async (uri?: vscode.Uri, position?: vscode.Position) => {
+        const document = await resolveCommandDocument(uri);
+        if (!document || document.languageId !== "logicflow") return;
+        const cursor =
+          position ??
+          vscode.window.activeTextEditor?.selection.active ??
+          new vscode.Position(0, 0);
+        const testName = findTestAtPosition(document.getText(), cursor.line) ?? undefined;
+        await runFileTests(document, testName);
+      },
+    ),
 
     vscode.commands.registerCommand("shortcircuit.runAllTests", async () => {
       const editor = vscode.window.activeTextEditor;
       if (editor && editor.document.languageId === "logicflow") {
-        await runAllTests(editor.document);
+        await runFileTests(editor.document);
       }
     }),
 
@@ -122,153 +152,358 @@ export function activate(context: vscode.ExtensionContext): void {
       const editor = vscode.window.activeTextEditor;
       if (!editor || editor.document.languageId !== "logicflow") return;
       const text = editor.document.getText();
-      const formatted = formatSource(text);
+      const formatted = formatSource(text, {
+        indent:
+          editor.options.insertSpaces === false
+            ? "\t"
+            : typeof editor.options.tabSize === "number"
+              ? editor.options.tabSize
+              : 4,
+      });
       if (formatted === text) return;
       const fullRange = new vscode.Range(
         editor.document.positionAt(0),
-        editor.document.positionAt(text.length)
+        editor.document.positionAt(text.length),
       );
-      await editor.edit(editBuilder => {
+      await editor.edit((editBuilder) => {
         editBuilder.replace(fullRange, formatted);
       });
-    })
-  );
-
-  // 4. Document Formatting Provider
-  context.subscriptions.push(
-    vscode.languages.registerDocumentFormattingEditProvider("logicflow", {
-      provideDocumentFormattingEdits(document: vscode.TextDocument): vscode.TextEdit[] {
-        const text = document.getText();
-        const formatted = formatSource(text);
-        if (formatted === text) return [];
-        const fullRange = new vscode.Range(
-          document.positionAt(0),
-          document.positionAt(text.length)
-        );
-        return [vscode.TextEdit.replace(fullRange, formatted)];
-      }
-    })
+    }),
   );
 
   // 4. CodeLens provider for running tests
-  vscode.languages.registerCodeLensProvider(
-    { language: "logicflow" },
-    {
-      provideCodeLenses(document) {
-        const lenses: vscode.CodeLens[] = [];
-        const lines = document.getText().split("\n");
-        for (let i = 0; i < lines.length; i++) {
-          const match = lines[i].match(/^\s*(?i:TEST)\s+(\w+)/i);
-          if (match) {
-            const range = new vscode.Range(i, 0, i, lines[i].length);
-            lenses.push(new vscode.CodeLens(range, {
-              title: "▶ Run Test",
-              command: "shortcircuit.runTest",
-              arguments: [document.uri, new vscode.Position(i, 0)]
-            }));
+  context.subscriptions.push(
+    vscode.languages.registerCodeLensProvider(
+      { language: "logicflow" },
+      {
+        provideCodeLenses(document, token) {
+          const lenses: vscode.CodeLens[] = [];
+          const lines = document.getText().split("\n");
+          for (let index = 0; index < lines.length; index += 1) {
+            if (token.isCancellationRequested) break;
+            const match = /^\s*TEST\s+([A-Za-z_][A-Za-z0-9_]*)/i.exec(lines[index] ?? "");
+            if (!match) continue;
+            const range = new vscode.Range(index, 0, index, lines[index]!.length);
+            lenses.push(
+              new vscode.CodeLens(range, {
+                title: "▶ Run Test",
+                command: "shortcircuit.runTest",
+                arguments: [document.uri, new vscode.Position(index, 0)],
+              }),
+            );
           }
-        }
-        return lenses;
+          return lenses;
+        },
       },
-      resolveCodeLens(lens) {
-        return lens;
-      }
-    }
+    ),
   );
 
-  // 5. Watch document and editor changes for live updates
-  let debounceTimer: NodeJS.Timeout | undefined;
+  // 5. Keep package caches fresh when manifests or external package files change
+  const manifestWatcher = vscode.workspace.createFileSystemWatcher(
+    "**/{manifest.json,shortcircuit.json,shortcircuit.lock.json}",
+  );
+  const logicflowWatcher = vscode.workspace.createFileSystemWatcher("**/*.lf");
+  const onPackageFileChanged = () => schedulePackageRefresh(provider);
+  context.subscriptions.push(
+    manifestWatcher,
+    logicflowWatcher,
+    manifestWatcher.onDidChange(onPackageFileChanged),
+    manifestWatcher.onDidCreate(onPackageFileChanged),
+    manifestWatcher.onDidDelete(onPackageFileChanged),
+    logicflowWatcher.onDidChange((uri) => {
+      if (isOpenDocument(uri)) return;
+      schedulePackageRefresh(provider);
+    }),
+    logicflowWatcher.onDidCreate(onPackageFileChanged),
+    logicflowWatcher.onDidDelete(onPackageFileChanged),
+  );
+
+  // 6. Watch document and editor changes for live updates
   context.subscriptions.push(
     vscode.workspace.onDidChangeTextDocument((event) => {
-      const fileName = event.document.fileName;
-      if (fileName.endsWith("manifest.json") || fileName.endsWith("shortcircuit.json")) {
-        invalidatePackageCache();
-        const editor = vscode.window.activeTextEditor;
-        if (editor && editor.document.languageId === "logicflow") {
-          studioProvider?.updateForDocument(editor.document);
-        }
-      } else if (event.document.languageId === "logicflow") {
-        if (debounceTimer) clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(() => {
-          studioProvider?.updateForDocument(event.document);
-        }, 120);
-      }
+      if (event.document.languageId !== "logicflow") return;
+      const current = provider.getCurrentDocument();
+      const active = vscode.window.activeTextEditor?.document;
+      const isRelevant =
+        current?.uri.toString() === event.document.uri.toString() ||
+        active?.uri.toString() === event.document.uri.toString();
+      if (!isRelevant) return;
+      scheduleStudioUpdate(provider, event.document);
     }),
 
     vscode.window.onDidChangeActiveTextEditor((editor) => {
+      cancelStudioUpdate();
       if (editor && editor.document.languageId === "logicflow") {
-        studioProvider?.updateForDocument(editor.document);
+        provider.updateForDocument(editor.document);
       } else if (!editor) {
-        studioProvider?.clear();
+        const visible = visibleLogicflowDocument();
+        if (visible) provider.updateForDocument(visible);
+        else provider.clear();
       } else {
-        const visible = vscode.window.visibleTextEditors.find((e) => e.document.languageId === "logicflow");
-        if (visible) {
-          studioProvider?.updateForDocument(visible.document);
-        } else {
-          studioProvider?.clear();
-        }
+        const visible = visibleLogicflowDocument();
+        if (visible) provider.updateForDocument(visible);
+        else provider.clear();
       }
     }),
 
     vscode.workspace.onDidCloseTextDocument((closedDoc) => {
-      if (studioProvider?.getCurrentDocument()?.uri.toString() === closedDoc.uri.toString()) {
-        const remaining = vscode.window.visibleTextEditors.find((e) => e.document.languageId === "logicflow");
-        if (remaining) {
-          studioProvider.updateForDocument(remaining.document);
-        } else {
-          studioProvider.clear();
-        }
+      if (provider.getCurrentDocument()?.uri.toString() === closedDoc.uri.toString()) {
+        const remaining = visibleLogicflowDocument();
+        if (remaining) provider.updateForDocument(remaining, { force: true });
+        else provider.clear();
       }
-    })
+    }),
   );
 
   // Initial update if an editor is already open
-  if (vscode.window.activeTextEditor?.document.languageId === "logicflow") {
-    studioProvider.updateForDocument(vscode.window.activeTextEditor.document);
+  const active = vscode.window.activeTextEditor;
+  if (active && active.document.languageId === "logicflow") {
+    provider.updateForDocument(active.document);
+  } else {
+    const visible = visibleLogicflowDocument();
+    if (visible) provider.updateForDocument(visible);
   }
 }
 
 export function deactivate(): Thenable<void> | undefined {
+  cancelStudioUpdate();
+  if (packageRefreshTimer) {
+    clearTimeout(packageRefreshTimer);
+    packageRefreshTimer = undefined;
+  }
+  testOutputChannel?.dispose();
+  testOutputChannel = undefined;
+  studioProvider?.dispose();
+  studioProvider = undefined;
+  StudioPanel.currentPanel?.dispose();
   if (client) {
     return client.stop();
   }
   return undefined;
 }
 
+function visibleLogicflowDocument(): vscode.TextDocument | undefined {
+  return vscode.window.visibleTextEditors.find(
+    (editor) => editor.document.languageId === "logicflow",
+  )?.document;
+}
+
+function isOpenDocument(uri: vscode.Uri): boolean {
+  return vscode.workspace.textDocuments.some(
+    (document) => document.uri.toString() === uri.toString(),
+  );
+}
+
+function scheduleStudioUpdate(
+  provider: ShortCircuitStudioProvider,
+  document: vscode.TextDocument,
+): void {
+  cancelStudioUpdate();
+  changeTimer = setTimeout(() => {
+    changeTimer = undefined;
+    if (document.isClosed) return;
+    provider.updateForDocument(document);
+  }, CHANGE_DELAY_MS);
+}
+
+function cancelStudioUpdate(): void {
+  if (changeTimer) {
+    clearTimeout(changeTimer);
+    changeTimer = undefined;
+  }
+}
+
+function schedulePackageRefresh(provider: ShortCircuitStudioProvider): void {
+  if (packageRefreshTimer) clearTimeout(packageRefreshTimer);
+  packageRefreshTimer = setTimeout(() => {
+    packageRefreshTimer = undefined;
+    provider.refresh();
+  }, PACKAGE_REFRESH_DELAY_MS);
+}
+
+async function resolveCommandDocument(
+  uri?: vscode.Uri,
+): Promise<vscode.TextDocument | undefined> {
+  if (uri) {
+    const open = vscode.workspace.textDocuments.find(
+      (document) => document.uri.toString() === uri.toString(),
+    );
+    if (open) return open;
+    try {
+      return await vscode.workspace.openTextDocument(uri);
+    } catch {
+      return undefined;
+    }
+  }
+  return vscode.window.activeTextEditor?.document;
+}
+
+function getTestOutputChannel(): vscode.OutputChannel {
+  if (!testOutputChannel) {
+    testOutputChannel = vscode.window.createOutputChannel("Short Circuit Tests");
+  }
+  return testOutputChannel;
+}
+
+function collectOpenSources(): Map<string, string> {
+  const sources = new Map<string, string>();
+  for (const document of vscode.workspace.textDocuments) {
+    if (document.languageId === "logicflow") {
+      sources.set(path.resolve(document.fileName), document.getText());
+    }
+  }
+  return sources;
+}
+
+function compileDocument(document: vscode.TextDocument): CompileResult {
+  const source = document.getText();
+  const context = document.fileName
+    ? resolveWorkspaceContext(document.fileName, source, {
+        openSources: collectOpenSources(),
+      })
+    : null;
+  return compile(source, {
+    packages: context?.bundle,
+    implicitImports: context?.implicitImports,
+    maxDiagnostics: 200,
+  });
+}
+
+async function runFileTests(
+  document: vscode.TextDocument,
+  testName?: string,
+): Promise<void> {
+  const channel = getTestOutputChannel();
+  channel.clear();
+  channel.show(true);
+  channel.appendLine(
+    `=== Short Circuit tests for ${path.basename(document.fileName)} ===`,
+  );
+  channel.appendLine("");
+
+  try {
+    const result = compileDocument(document);
+    const errors = result.diagnostics.filter(
+      (diagnostic) => diagnostic.severity === "error",
+    );
+    if (errors.length > 0) {
+      channel.appendLine(`Compilation failed with ${errors.length} error${errors.length === 1 ? "" : "s"}:`);
+      for (const diagnostic of errors) {
+        channel.appendLine(
+          `  line ${diagnostic.line}:${diagnostic.column} [${diagnostic.code}] ${diagnostic.message}`,
+        );
+      }
+      return;
+    }
+
+    if (result.tests.length === 0) {
+      channel.appendLine("No TEST blocks were found in this file.");
+      return;
+    }
+
+    const suitesToRun = testName
+      ? result.tests.filter(
+          (suite) => suite.name.toUpperCase() === testName.toUpperCase(),
+        )
+      : result.tests;
+
+    if (testName && suitesToRun.length === 0) {
+      channel.appendLine(`No test named "${testName}" was found in this file.`);
+      channel.appendLine(
+        `Available tests: ${result.tests.map((suite) => suite.name).join(", ") || "none"}`,
+      );
+      return;
+    }
+
+    const run = runTests({ tests: suitesToRun, circuits: result.circuits });
+    const suites = run.suites;
+
+    channel.appendLine(
+      `${run.passed} passed, ${run.failed} failed${run.unsupported ? `, ${run.unsupported} unsupported` : ""} (${run.elapsedMs} ms)`,
+    );
+    channel.appendLine("");
+
+    for (const suite of suites) {
+      const status = !suite.runnable ? "UNSUPPORTED" : suite.pass ? "PASS" : "FAIL";
+      channel.appendLine(`[${status}] ${suite.name} (line ${suite.line})`);
+      if (suite.reason) channel.appendLine(`  ${suite.reason}`);
+
+      for (const testCase of suite.cases) {
+        channel.appendLine(
+          `  ${testCase.pass ? "✓" : "✗"} ${testCase.label}${testCase.step ? ` (step ${testCase.step})` : ""}`,
+        );
+        if (testCase.error) channel.appendLine(`    ${testCase.error}`);
+        for (const row of testCase.rows) {
+          if (row.kind === "input") {
+            channel.appendLine(`    INPUT ${row.name} = ${row.actual ?? "?"}`);
+          } else if (row.pass) {
+            channel.appendLine(`    EXPECT ${row.name} = ${row.expected ?? "?"}`);
+          } else {
+            channel.appendLine(
+              `    EXPECT ${row.name} = ${row.expected ?? "?"} (actual ${row.actual ?? "?"})`,
+            );
+          }
+        }
+      }
+      channel.appendLine("");
+    }
+  } catch (error) {
+    channel.appendLine(
+      `Test run failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+type StudioDerivedCache = Partial<Record<StudioDerivedKind, unknown>>;
+
 /** Manages simulation state and communication with WebviewView (sidebar) and WebviewPanel */
 export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
+  private viewDisposables: vscode.Disposable[] = [];
   private currentDocument?: vscode.TextDocument;
+  private lastCompiledKey?: string;
   private activeCircuitName?: string;
   private currentInputs: Record<string, string> = {};
   private activeSimulator?: Simulator;
   private activeCircuit?: CircuitIR;
   private lastModel?: StudioModel;
+  private derivedCache: StudioDerivedCache = {};
+  private disposed = false;
 
   constructor(private readonly extensionUri: vscode.Uri) {}
 
   public resolveWebviewView(
     webviewView: vscode.WebviewView,
     _context: vscode.WebviewViewResolveContext,
-    _token: vscode.CancellationToken
+    _token: vscode.CancellationToken,
   ): void {
+    this.disposeViewListeners();
     this.view = webviewView;
 
     webviewView.webview.options = {
       enableScripts: true,
-      localResourceRoots: [this.extensionUri]
+      localResourceRoots: [this.extensionUri],
     };
+    webviewView.webview.html = getStudioHtml(this.lastModel ?? null);
 
-    webviewView.webview.html = getStudioHtml(this.lastModel || null);
+    this.viewDisposables.push(
+      webviewView.webview.onDidReceiveMessage((message) => {
+        void this.handleMessage(message);
+      }),
+      webviewView.onDidDispose(() => {
+        if (this.view === webviewView) this.view = undefined;
+        this.disposeViewListeners();
+      }),
+    );
 
-    webviewView.webview.onDidReceiveMessage((msg) => this.handleMessage(msg));
-
-    // If we have an active document, render it immediately
     const editor = vscode.window.activeTextEditor;
     if (editor && editor.document.languageId === "logicflow") {
       this.updateForDocument(editor.document);
-    } else if (this.currentDocument) {
+    } else if (this.currentDocument && !this.currentDocument.isClosed) {
       this.updateForDocument(this.currentDocument);
+    } else {
+      const visible = visibleLogicflowDocument();
+      if (visible) this.updateForDocument(visible);
     }
   }
 
@@ -282,376 +517,393 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
 
   public clear(): void {
     this.currentDocument = undefined;
+    this.lastCompiledKey = undefined;
     this.lastModel = undefined;
     this.activeCircuit = undefined;
     this.activeSimulator = undefined;
     this.activeCircuitName = undefined;
     this.currentInputs = {};
-    if (this.view) {
-      this.view.webview.postMessage({ type: "update", payload: null });
-    }
+    this.derivedCache = {};
+    this.post({ type: "update", payload: null });
   }
 
   public refresh(): void {
     invalidatePackageCache();
     const active = vscode.window.activeTextEditor;
     if (active && active.document.languageId === "logicflow") {
-      this.updateForDocument(active.document);
+      this.updateForDocument(active.document, { force: true });
       return;
     }
-    const visible = vscode.window.visibleTextEditors.find((e) => e.document.languageId === "logicflow");
+    const current =
+      this.currentDocument && !this.currentDocument.isClosed
+        ? this.currentDocument
+        : undefined;
+    if (current) {
+      this.updateForDocument(current, { force: true });
+      return;
+    }
+    const visible = visibleLogicflowDocument();
     if (visible) {
-      this.updateForDocument(visible.document);
+      this.updateForDocument(visible, { force: true });
       return;
     }
     this.clear();
   }
 
-  public updateForDocument(document: vscode.TextDocument): void {
-    this.currentDocument = document;
+  public updateForDocument(
+    document: vscode.TextDocument,
+    options: { force?: boolean } = {},
+  ): void {
+    if (this.disposed || document.isClosed) return;
+
     const source = document.getText();
-    this.recompileAndBroadcast(source);
+    const key = `${document.uri.toString()}\0${document.version}\0${source}`;
+    if (!options.force && key === this.lastCompiledKey) return;
+
+    const documentChanged =
+      this.currentDocument?.uri.toString() !== document.uri.toString();
+    if (documentChanged) {
+      this.activeCircuitName = undefined;
+      this.currentInputs = {};
+      this.activeCircuit = undefined;
+      this.activeSimulator = undefined;
+    }
+
+    this.currentDocument = document;
+    this.lastCompiledKey = key;
+    this.compileAndBroadcast(source);
   }
 
-  public handleMessage(msg: { type: string; [key: string]: unknown }): void {
-    if (msg.type === "toggleInput") {
-      const name = msg.name as string;
-      const current = this.currentInputs[name] || "0";
-      this.currentInputs[name] = current === "1" ? "0" : "1";
-      this.simulateAndBroadcast();
-    } else if (msg.type === "setInput") {
-      const name = msg.name as string;
-      const rawValue = String(msg.value ?? "");
-      const inputDef = this.activeCircuit?.inputs.find(i => i.name === name);
-      const width = inputDef?.width ?? 1;
-      try {
-        const parsed = parseSimulationInput(rawValue, width);
-        this.currentInputs[name] = formatBinary(parsed, width);
-      } catch {
-        this.currentInputs[name] = rawValue;
-      }
-      this.simulateAndBroadcast();
-    } else if (msg.type === "flipBit") {
-      const name = msg.name as string;
-      const bitIndex = Number(msg.bitIndex);
-      const inputDef = this.activeCircuit?.inputs.find(i => i.name === name);
-      const width = inputDef?.width ?? 1;
-      let currentVal = this.currentInputs[name] ?? "0".repeat(width);
-      if (currentVal.length < width) currentVal = currentVal.padStart(width, "0");
-      const bits = currentVal.split("");
-      const arrayIndex = width - 1 - bitIndex;
-      if (arrayIndex >= 0 && arrayIndex < bits.length) {
-        bits[arrayIndex] = bits[arrayIndex] === "1" ? "0" : "1";
-        this.currentInputs[name] = bits.join("");
+  public async handleMessage(message: unknown): Promise<void> {
+    if (!message || typeof message !== "object") return;
+    const msg = message as { type?: string; [key: string]: unknown };
+
+    switch (msg.type) {
+      case "ready":
+        if (this.lastModel) {
+          this.post({ type: "update", payload: this.lastModel });
+        }
+        return;
+
+      case "toggleInput": {
+        const name = asString(msg.name);
+        const input = this.activeCircuit?.inputs.find((entry) => entry.name === name);
+        if (!input) return;
+        const current = normalizeInputValue(this.currentInputs[input.name] ?? "0", input.width);
+        const toggled = `${current.slice(0, -1)}${current.endsWith("1") ? "0" : "1"}`;
+        this.currentInputs[input.name] = toggled;
         this.simulateAndBroadcast();
+        return;
       }
-    } else if (msg.type === "resetInputs") {
-      if (this.activeCircuit) {
+
+      case "setInput": {
+        const name = asString(msg.name);
+        const input = this.activeCircuit?.inputs.find((entry) => entry.name === name);
+        if (!input) return;
+        const raw = asString(msg.value);
+        try {
+          // Normalize before storing, so invalid text never reaches the simulator.
+          this.currentInputs[input.name] = formatBinary(
+            parseSimulationInput(raw, input.width),
+            input.width,
+          );
+        } catch {
+          return;
+        }
+        this.simulateAndBroadcast();
+        return;
+      }
+
+      case "flipBit": {
+        const name = asString(msg.name);
+        const input = this.activeCircuit?.inputs.find((entry) => entry.name === name);
+        const bitIndex = Number(msg.bitIndex);
+        if (!input || !Number.isInteger(bitIndex) || bitIndex < 0 || bitIndex >= input.width) {
+          return;
+        }
+        const current = normalizeInputValue(this.currentInputs[input.name] ?? "0", input.width);
+        const bit = inputBitAt(current, input.width, bitIndex);
+        const next = bit === "1" ? "0" : "1";
+        const position = input.width - 1 - bitIndex;
+        this.currentInputs[input.name] =
+          current.slice(0, position) + next + current.slice(position + 1);
+        this.simulateAndBroadcast();
+        return;
+      }
+
+      case "resetInputs":
+        if (!this.activeCircuit) return;
         for (const input of this.activeCircuit.inputs) {
           this.currentInputs[input.name] = "0".repeat(input.width);
         }
         this.activeSimulator = new Simulator(this.activeCircuit);
         this.simulateAndBroadcast();
-      }
-    } else if (msg.type === "stepClock") {
-      const clockName = (msg.clock as string) || (this.activeCircuit?.events[0] ? this.activeCircuit.events[0].clock : undefined);
-      if (clockName && this.activeSimulator) {
+        return;
+
+      case "stepClock": {
+        if (!this.activeCircuit || !this.activeSimulator) return;
+        const clockName =
+          asString(msg.clock) ||
+          (this.activeCircuit.events[0]
+            ? this.clockNameFor(this.activeCircuit, this.activeCircuit.events[0].clock)
+            : undefined);
+        if (!clockName) return;
         try {
           this.activeSimulator.setInput(clockName, "0");
           this.activeSimulator.setInput(clockName, "1");
-          const snap = this.activeSimulator.setInput(clockName, "0");
-          this.currentInputs[clockName] = "0";
-          if (this.lastModel) {
-            this.lastModel.inputs = this.currentInputs;
-            this.lastModel.snapshot = {
-              inputs: snap.inputs,
-              outputs: snap.outputs,
-              nodes: snap.nodes,
-              runtimeError: snap.runtimeError
-            };
-            this.broadcastUpdate();
-          }
-        } catch (err) {
-          console.error("Step clock error:", err);
+          const snapshot = this.activeSimulator.setInput(clockName, "0");
+          this.currentInputs = normalizeInputs(
+            this.activeCircuit,
+            this.activeSimulator.getInputValues(),
+          );
+          this.applySnapshot(snapshot);
+        } catch (error) {
+          console.error("Step clock error:", error);
         }
+        return;
       }
-    } else if (msg.type === "selectCircuit") {
-      this.activeCircuitName = msg.name as string;
-      this.recompileAndBroadcast(this.currentDocument?.getText() || "");
-    } else if (msg.type === "expand") {
-      vscode.commands.executeCommand("shortcircuit.expandStudio");
-    } else if (msg.type === "refresh") {
-      this.refresh();
+
+      case "selectCircuit": {
+        const name = asString(msg.name);
+        if (!name || !this.lastModel?.circuits.some((circuit) => circuit.name === name)) {
+          return;
+        }
+        this.activeCircuitName = name;
+        if (this.currentDocument) {
+          this.updateForDocument(this.currentDocument, { force: true });
+        }
+        return;
+      }
+
+      case "expand":
+        await vscode.commands.executeCommand("shortcircuit.expandStudio");
+        return;
+
+      case "refresh":
+        this.refresh();
+        return;
+
+      case "requestData": {
+        const kind = msg.kind;
+        if (kind !== "truthTable" && kind !== "waveform" && kind !== "irText") {
+          return;
+        }
+        this.sendDerived(kind);
+        return;
+      }
+
+      default:
+        return;
     }
   }
 
-  private recompileAndBroadcast(source: string): void {
+  public dispose(): void {
+    this.disposed = true;
+    this.disposeViewListeners();
+  }
+
+  private disposeViewListeners(): void {
+    while (this.viewDisposables.length > 0) {
+      this.viewDisposables.pop()?.dispose();
+    }
+  }
+
+  private compileAndBroadcast(source: string): void {
+    this.derivedCache = {};
+    const filePath = this.currentDocument?.fileName || "";
+
     try {
-      const filePath = this.currentDocument?.fileName || "";
-      const isMacroFile = /^\s*MACRO\b/im.test(source) || filePath.replace(/\\/g, "/").includes("/macros/");
+      const isMacroFile =
+        /^\s*MACRO\b/im.test(source) ||
+        filePath.replace(/\\/g, "/").includes("/macros/");
+
       if (isMacroFile) {
         const fileName = filePath ? path.basename(filePath) : "package macro";
-        const { declarations, diagnostics: macroDiags } = parsePackageMacroSource(source, fileName);
-        this.lastModel = {
-          circuits: declarations.map((d) => ({
-            name: d.name,
-            inputs: d.args.map((a) => ({ name: a, width: 1 })),
+        const { declarations, diagnostics } = parsePackageMacroSource(source, fileName);
+        this.activeCircuit = undefined;
+        this.activeSimulator = undefined;
+        this.lastModel = this.emptyModel(
+          declarations.map((declaration) => ({
+            name: declaration.name,
+            stats: { nodes: 0, states: 0, events: 0, maxDepth: 0, maxWidth: 0 },
+            sequential: false,
+            inputs: declaration.args.map((argument) => ({ name: argument, width: 1 })),
             outputs: [{ name: "out", width: 1 }],
           })),
-          activeCircuit: declarations[0]?.name || "",
-          inputs: {},
-          snapshot: null,
-          layout: null,
-          truthTable: null,
-          waveform: null,
-          tests: null,
-          ir: null,
-          diagnostics: macroDiags.map((d) => ({
-            message: d.message,
-            severity: d.severity,
-            line: d.line ?? 1,
-            column: d.column ?? 1,
-          })),
-        };
-        this.broadcastUpdate();
+          declarations[0]?.name ?? "",
+          mapDiagnostics(diagnostics),
+        );
+        this.post({ type: "update", payload: this.lastModel });
         return;
       }
 
-      const wsContext = filePath ? resolveWorkspaceContext(filePath, source) : null;
+      const context = filePath
+        ? resolveWorkspaceContext(filePath, source, {
+            openSources: collectOpenSources(),
+          })
+        : null;
       const result = compile(source, {
-        packages: wsContext?.bundle,
-        implicitImports: wsContext?.implicitImports,
+        packages: context?.bundle,
+        implicitImports: context?.implicitImports,
+        maxDiagnostics: 100,
       });
+      const diagnostics = mapDiagnostics(result.diagnostics);
 
       if (result.circuits.length === 0) {
-        this.lastModel = {
-          circuits: [],
-          activeCircuit: "",
-          inputs: {},
-          snapshot: null,
-          layout: null,
-          truthTable: null,
-          waveform: null,
-          tests: null,
-          ir: null,
-          diagnostics: result.diagnostics.map(d => ({
-            message: d.message,
-            severity: d.severity,
-            line: d.line ?? 1,
-            column: d.column ?? 1
-          }))
-        };
-        this.broadcastUpdate();
+        this.activeCircuit = undefined;
+        this.activeSimulator = undefined;
+        this.lastModel = this.emptyModel([], "", diagnostics);
+        this.post({ type: "update", payload: this.lastModel });
         return;
       }
 
-      // Select active circuit
-      let circuit = result.circuits.find(c => c.name === this.activeCircuitName);
+      let circuit = result.circuits.find(
+        (candidate) => candidate.name === this.activeCircuitName,
+      );
       if (!circuit) {
-        circuit = result.circuits[0];
+        circuit = result.circuits[0]!;
         this.activeCircuitName = circuit.name;
       }
       this.activeCircuit = circuit;
 
-      // Initialize simulator
-      this.activeSimulator = new Simulator(circuit);
-
-      // Preserve existing inputs or default to 0
-      const nextInputs: Record<string, string> = {};
-      for (const input of circuit.inputs) {
-        nextInputs[input.name] = this.currentInputs[input.name] || "0";
-      }
-      this.currentInputs = nextInputs;
-
-      // Simulate
-      const simInputs: Record<string, string | number | bigint> = {};
-      for (const input of circuit.inputs) {
-        const raw = this.currentInputs[input.name] ?? "0";
-        try {
-          simInputs[input.name] = parseSimulationInput(raw, input.width);
-        } catch {
-          simInputs[input.name] = 0n;
-        }
-      }
-      const snapshot = this.activeSimulator.setInputs(simInputs);
-
-      // Generate Layout
-      const layout = buildLayout(circuit);
-
-      // Generate Truth Table
-      let truthTableData = null;
+      this.currentInputs = normalizeInputs(circuit, this.currentInputs);
+      let snapshot: SimulationSnapshot;
       try {
-        const tt = generateTruthTable(circuit);
-        truthTableData = {
-          circuit: tt.circuit,
-          inputs: tt.inputs,
-          outputs: tt.outputs,
-          rows: tt.rows,
-          truncated: tt.truncated,
-          reason: tt.reason
-        };
-      } catch {
-        truthTableData = null;
+        this.activeSimulator = new Simulator(circuit);
+        snapshot = this.activeSimulator.setInputs({ ...this.currentInputs });
+      } catch (error) {
+        this.activeSimulator = undefined;
+        throw error;
       }
 
-      // Generate Waveform Data
-      const waveformData = this.generateWaveform(circuit);
-
-      // Map tests
-      let testsData = null;
-      if (result.tests && result.tests.length > 0) {
-        let passed = 0;
-        let failed = 0;
-        const suites = result.tests.map(t => {
-          let suitePass = true;
-          const cases = t.cases.map(c => {
-            passed++;
-            return {
-              label: c.label,
-              pass: true,
-              rows: c.inputs.map(i => ({ kind: "input", name: i.name, actual: i.value }))
-            };
-          });
-          return {
-            name: t.name,
-            pass: suitePass,
-            cases
-          };
+      let layout = null;
+      try {
+        layout = buildLayout(circuit);
+      } catch (error) {
+        diagnostics.push({
+          message: `Could not build the circuit graph: ${error instanceof Error ? error.message : String(error)}`,
+          severity: "warning",
+          line: 1,
+          column: 1,
         });
-        testsData = {
-          ok: failed === 0,
-          passed,
-          failed,
-          suites
-        };
       }
-
-      const circuitSummaries: StudioCircuitData[] = result.circuits.map(c => ({
-        name: c.name,
-        stats: c.stats,
-        sequential: c.sequential,
-        inputs: c.inputs.map(i => ({ name: i.name, width: i.width })),
-        outputs: c.outputs.map(o => ({ name: o.name, width: o.width }))
-      }));
 
       this.lastModel = {
-        circuits: circuitSummaries,
+        circuits: buildCircuitSummaries(result.circuits),
         activeCircuit: circuit.name,
         inputs: this.currentInputs,
-        snapshot: {
-          inputs: snapshot.inputs,
-          outputs: snapshot.outputs,
-          nodes: snapshot.nodes,
-          runtimeError: snapshot.runtimeError
-        },
+        snapshot: snapshotToModel(snapshot),
         layout,
-        truthTable: truthTableData,
-        waveform: waveformData,
-        tests: testsData,
-        ir: circuit,
-        diagnostics: result.diagnostics.map(d => ({
-          message: d.message,
-          severity: d.severity,
-          line: d.line ?? 1,
-          column: d.column ?? 1
-        }))
+        truthTable: null,
+        waveform: null,
+        tests: buildTestsModel(result),
+        ir: buildIrSummary(circuit),
+        irText: null,
+        diagnostics,
       };
 
-      this.broadcastUpdate();
-    } catch (err) {
-      console.error("Compilation error in StudioProvider:", err);
+      this.post({ type: "update", payload: this.lastModel });
+    } catch (error) {
+      const diagnostic: StudioDiagnostic = {
+        message: `The studio could not compile this file: ${error instanceof Error ? error.message : String(error)}`,
+        severity: "error",
+        line: 1,
+        column: 1,
+      };
+      this.activeCircuit = undefined;
+      this.activeSimulator = undefined;
+      this.lastModel = this.emptyModel([], "", [diagnostic]);
+      this.post({ type: "update", payload: this.lastModel });
+      console.error("Compilation error in StudioProvider:", error);
     }
+  }
+
+  private emptyModel(
+    circuits: StudioModel["circuits"],
+    activeCircuit: string,
+    diagnostics: StudioDiagnostic[],
+  ): StudioModel {
+    return {
+      circuits,
+      activeCircuit,
+      inputs: {},
+      snapshot: null,
+      layout: null,
+      truthTable: null,
+      waveform: null,
+      tests: null,
+      ir: null,
+      irText: null,
+      diagnostics,
+    };
   }
 
   private simulateAndBroadcast(): void {
     if (!this.activeSimulator || !this.activeCircuit || !this.lastModel) return;
 
     try {
-      const simInputs: Record<string, string | number | bigint> = {};
-      for (const input of this.activeCircuit.inputs) {
-        const raw = this.currentInputs[input.name] ?? "0";
-        try {
-          simInputs[input.name] = parseSimulationInput(raw, input.width);
-        } catch {
-          simInputs[input.name] = 0n;
-        }
-      }
-      const snapshot = this.activeSimulator.setInputs(simInputs);
-
-      this.lastModel.inputs = this.currentInputs;
-      this.lastModel.snapshot = {
-        inputs: snapshot.inputs,
-        outputs: snapshot.outputs,
-        nodes: snapshot.nodes,
-        runtimeError: snapshot.runtimeError
-      };
-
-      this.broadcastUpdate();
-    } catch (err) {
-      console.error("Simulation error:", err);
+      const snapshot = this.activeSimulator.setInputs({ ...this.currentInputs });
+      this.currentInputs = normalizeInputs(
+        this.activeCircuit,
+        this.activeSimulator.getInputValues(),
+      );
+      this.applySnapshot(snapshot);
+    } catch (error) {
+      console.error("Simulation error:", error);
     }
   }
 
-  private generateWaveform(circuit: CircuitIR) {
-    const inputNames = circuit.inputs.map(i => i.name);
-    const outputNames = circuit.outputs.map(o => o.name);
-    const totalBits = circuit.inputs.reduce((acc, i) => acc + i.width, 0);
-
-    if (totalBits > 6) {
-      return {
-        timeSteps: [],
-        inputNames,
-        outputNames,
-        error: "Too many inputs for automatic full-state waveform."
-      };
-    }
-
-    try {
-      const sim = new Simulator(circuit);
-      const stepsCount = Math.min(1 << totalBits, 16);
-      const timeSteps: Array<{ inputs: Record<string, string>; outputs: Record<string, string> }> = [];
-
-      for (let i = 0; i < stepsCount; i++) {
-        const inpValues: Record<string, number> = {};
-        let bitShift = 0;
-        for (const input of circuit.inputs) {
-          const mask = (1 << input.width) - 1;
-          const val = (i >> bitShift) & mask;
-          inpValues[input.name] = val;
-          bitShift += input.width;
-        }
-
-        const snap = sim.setInputs(inpValues);
-        timeSteps.push({
-          inputs: Object.fromEntries(circuit.inputs.map(inp => [inp.name, (inpValues[inp.name] ?? 0).toString(2)])),
-          outputs: Object.fromEntries(circuit.outputs.map(out => [out.name, snap.outputs[out.name]?.binary || "0"]))
-        });
-      }
-
-      return {
-        timeSteps,
-        inputNames,
-        outputNames
-      };
-    } catch (e) {
-      return {
-        timeSteps: [],
-        inputNames,
-        outputNames,
-        error: String(e)
-      };
-    }
-  }
-
-  private broadcastUpdate(): void {
+  private applySnapshot(snapshot: SimulationSnapshot): void {
     if (!this.lastModel) return;
-    if (this.view) {
-      this.view.webview.postMessage({ type: "update", payload: this.lastModel });
-    }
-    if (StudioPanel.currentPanel) {
-      StudioPanel.currentPanel.postMessage({ type: "update", payload: this.lastModel });
-    }
+    this.lastModel.inputs = this.currentInputs;
+    this.lastModel.snapshot = snapshotToModel(snapshot);
+    this.post({
+      type: "simulation",
+      payload: {
+        inputs: this.lastModel.inputs,
+        snapshot: this.lastModel.snapshot,
+      },
+    });
   }
+
+  private sendDerived(kind: StudioDerivedKind): void {
+    if (!this.activeCircuit || !this.lastModel) return;
+    const cached = this.derivedCache[kind];
+    if (cached !== undefined) {
+      this.post({ type: "derived", kind, payload: cached });
+      return;
+    }
+
+    let payload: unknown;
+    if (kind === "truthTable") {
+      payload = buildTruthTable(this.activeCircuit);
+      this.lastModel.truthTable = payload as StudioModel["truthTable"];
+    } else if (kind === "waveform") {
+      payload = buildWaveform(this.activeCircuit);
+      this.lastModel.waveform = payload as StudioModel["waveform"];
+    } else {
+      payload = buildIrText(this.activeCircuit);
+      this.lastModel.irText = payload as string;
+    }
+
+    this.derivedCache[kind] = payload;
+    this.post({ type: "derived", kind, payload });
+  }
+
+  private clockNameFor(circuit: CircuitIR, clockNodeId: string): string | undefined {
+    const node = circuit.nodes.find((candidate) => candidate.id === clockNodeId);
+    return node?.inputName ?? clockNodeId;
+  }
+
+  private post(message: unknown): void {
+    if (this.disposed) return;
+    if (this.view) void this.view.webview.postMessage(message);
+    StudioPanel.currentPanel?.postMessage(message);
+  }
+}
+
+function asString(value: unknown): string {
+  return typeof value === "string" ? value : "";
 }
 
 /** Full-page WebviewPanel (Beside editor) */
@@ -659,43 +911,43 @@ export class StudioPanel {
   public static currentPanel: StudioPanel | undefined;
   private readonly panel: vscode.WebviewPanel;
   private disposables: vscode.Disposable[] = [];
+  private disposed = false;
 
   private constructor(
     panel: vscode.WebviewPanel,
     private readonly provider: ShortCircuitStudioProvider,
-    initialTab: string = "circuit"
+    initialTab: "circuit" | "truth" | "waveform" | "tests" | "ir",
   ) {
     this.panel = panel;
     this.panel.webview.options = {
-      enableScripts: true
+      enableScripts: true,
     };
 
-    this.panel.webview.html = getStudioHtml(provider.getModel() || null);
-    if (initialTab !== "circuit") {
-      setTimeout(() => {
-        this.panel.webview.postMessage({ type: "setTab", tab: initialTab });
-      }, 100);
-    }
+    this.panel.webview.html = getStudioHtml(provider.getModel() ?? null, {
+      initialTab,
+    });
 
     this.panel.webview.onDidReceiveMessage(
-      (msg) => provider.handleMessage(msg),
+      (message) => {
+        void provider.handleMessage(message);
+      },
       null,
-      this.disposables
+      this.disposables,
     );
 
-    this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
+    this.panel.onDidDispose(() => this.cleanup(), null, this.disposables);
   }
 
   public static createOrShow(
-    extensionUri: vscode.Uri,
     provider: ShortCircuitStudioProvider,
-    initialTab: string = "circuit"
+    initialTab: "circuit" | "truth" | "waveform" | "tests" | "ir" = "circuit",
   ): void {
     if (StudioPanel.currentPanel) {
       StudioPanel.currentPanel.panel.reveal(vscode.ViewColumn.Beside);
-      if (initialTab) {
-        StudioPanel.currentPanel.panel.webview.postMessage({ type: "setTab", tab: initialTab });
-      }
+      StudioPanel.currentPanel.panel.webview.postMessage({
+        type: "setTab",
+        tab: initialTab,
+      });
       return;
     }
 
@@ -705,68 +957,32 @@ export class StudioPanel {
       vscode.ViewColumn.Beside,
       {
         enableScripts: true,
-        retainContextWhenHidden: true
-      }
+        retainContextWhenHidden: true,
+      },
     );
 
     StudioPanel.currentPanel = new StudioPanel(panel, provider, initialTab);
   }
 
-  public postMessage(msg: unknown): void {
-    this.panel.webview.postMessage(msg);
+  public postMessage(message: unknown): void {
+    if (this.disposed) return;
+    void this.panel.webview.postMessage(message);
   }
 
   public dispose(): void {
-    StudioPanel.currentPanel = undefined;
+    if (this.disposed) return;
+    this.cleanup();
     this.panel.dispose();
-    while (this.disposables.length) {
-      const d = this.disposables.pop();
-      if (d) d.dispose();
+  }
+
+  private cleanup(): void {
+    if (this.disposed && StudioPanel.currentPanel !== this) return;
+    this.disposed = true;
+    if (StudioPanel.currentPanel === this) {
+      StudioPanel.currentPanel = undefined;
+    }
+    while (this.disposables.length > 0) {
+      this.disposables.pop()?.dispose();
     }
   }
-}
-
-async function runTestAtCursor(document: vscode.TextDocument, position: vscode.Position): Promise<void> {
-  const source = document.getText();
-  const testName = findTestAtPosition(source, position);
-  const result = runPackageTests({ disableDefaultPackages: false });
-
-  if (testName) {
-    const testResult = result.files.find(f => f.exportName === testName || f.packageName === testName);
-    if (testResult) {
-      showTestResult(testResult);
-      return;
-    }
-  }
-  await runAllTests(document);
-}
-
-async function runAllTests(document: vscode.TextDocument): Promise<void> {
-  const result = runPackageTests({ disableDefaultPackages: false });
-  const output = vscode.window.createOutputChannel("Short Circuit Tests");
-  output.clear();
-  output.appendLine(`=== Short Circuit Tests for ${path.basename(document.fileName)} ===`);
-  output.appendLine(`Total passed: ${result.passed}, failed: ${result.failed}\n`);
-
-  for (const file of result.files) {
-    output.appendLine(`[${file.ok ? "PASS" : "FAIL"}] ${file.packageName}${file.exportName ? " -> " + file.exportName : ""}`);
-  }
-  output.show(true);
-}
-
-function findTestAtPosition(source: string, position: vscode.Position): string | null {
-  const lines = source.split("\n");
-  if (position.line >= lines.length) return null;
-  const line = lines[position.line];
-  const match = line.match(/^\s*(?i:TEST)\s+(\w+)/i);
-  return match ? match[1] : null;
-}
-
-function showTestResult(testResult: { packageName: string; exportName?: string; ok: boolean }): void {
-  const output = vscode.window.createOutputChannel("Short Circuit Test Result");
-  output.clear();
-  const name = testResult.exportName ? `${testResult.packageName}/${testResult.exportName}` : testResult.packageName;
-  output.appendLine(`Test: ${name}`);
-  output.appendLine(`Status: ${testResult.ok ? "PASS" : "FAIL"}`);
-  output.show(true);
 }

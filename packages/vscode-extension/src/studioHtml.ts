@@ -1,71 +1,52 @@
 import type { GraphLayout } from "./graphLayout";
+import type {
+  StudioCircuitData,
+  StudioDiagnostic,
+  StudioHtmlOptions,
+  StudioModel,
+  StudioSnapshot,
+  StudioTestCase,
+  StudioTestRow,
+  StudioTestSuite,
+  StudioTests,
+  StudioTruthTable,
+  StudioWaveform,
+} from "./studioModel";
 
-export interface StudioCircuitData {
-  name: string;
-  stats: {
-    nodes: number;
-    states: number;
-    events: number;
-    maxDepth: number;
-    maxWidth: number;
-  };
-  sequential: boolean;
-  inputs: Array<{ name: string; width: number }>;
-  outputs: Array<{ name: string; width: number }>;
+export type {
+  StudioCircuitData,
+  StudioDiagnostic,
+  StudioHtmlOptions,
+  StudioModel,
+  StudioSnapshot,
+  StudioTestCase,
+  StudioTestRow,
+  StudioTestSuite,
+  StudioTests,
+  StudioTruthTable,
+  StudioWaveform,
+};
+
+function serializeModel(model: StudioModel | null): string {
+  return JSON.stringify(model)
+    .replace(/</g, "\\u003c")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
 }
 
-export interface StudioModel {
-  circuits: StudioCircuitData[];
-  activeCircuit: string;
-  inputs: Record<string, string>;
-  snapshot: {
-    inputs: Record<string, { width: number; binary: string; decimal?: string }>;
-    outputs: Record<string, { width: number; binary: string; decimal?: string }>;
-    nodes: Record<string, string>;
-    runtimeError?: { code: string; message: string };
-  } | null;
-  layout: GraphLayout | null;
-  truthTable: {
-    circuit: string;
-    inputs: Array<{ name: string; width: number }>;
-    outputs: Array<{ name: string; width: number }>;
-    rows: Array<{ input: Record<string, string>; output: Record<string, string> }>;
-    truncated?: boolean;
-    reason?: string;
-  } | null;
-  waveform: {
-    timeSteps: Array<{ inputs: Record<string, string>; outputs: Record<string, string> }>;
-    inputNames: string[];
-    outputNames: string[];
-    error?: string;
-  } | null;
-  tests: {
-    ok: boolean;
-    passed: number;
-    failed: number;
-    suites: Array<{
-      name: string;
-      pass: boolean;
-      cases: Array<{
-        label: string;
-        pass: boolean;
-        rows?: Array<{ kind: string; name: string; expected?: string; actual?: string }>;
-      }>;
-    }>;
-  } | null;
-  ir: unknown;
-  diagnostics: Array<{ message: string; severity: string; line: number; column: number }>;
-  isSidebar?: boolean;
-}
-
-export function getStudioHtml(initialModel: StudioModel | null): string {
-  const modelJson = JSON.stringify(initialModel || null);
+export function getStudioHtml(
+  initialModel: StudioModel | null,
+  options: StudioHtmlOptions = {},
+): string {
+  const modelJson = serializeModel(initialModel);
+  const initialTabJson = JSON.stringify(options.initialTab ?? "circuit");
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
   <title>Short Circuit Studio</title>
   <style>
     :root {
@@ -555,6 +536,13 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
       flex-wrap: wrap;
       align-items: center;
       gap: 8px;
+    }
+
+    .bus-wide-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
     }
 
     .bus-text-field {
@@ -1052,7 +1040,8 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
       pointer-events: none;
     }
 
-    .graph-node.value-low .node-value {
+    .graph-node.value-low .node-value,
+    .graph-node.value-unknown .node-value {
       fill: var(--text-faint);
     }
 
@@ -1330,6 +1319,104 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
       font-weight: bold;
     }
 
+    .badge-warn {
+      color: var(--yellow);
+      background: rgba(220, 184, 98, 0.15);
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-weight: bold;
+    }
+
+    .truth-reason {
+      margin-bottom: 12px;
+      padding: 8px 12px;
+      background: rgba(220, 184, 98, 0.08);
+      border: 1px solid rgba(220, 184, 98, 0.25);
+      border-radius: var(--radius);
+      color: var(--yellow);
+      font-size: var(--fs-xs);
+    }
+
+    .case-error {
+      color: var(--red);
+      font-family: var(--font-mono);
+      font-size: var(--fs-2xs);
+    }
+
+    .test-rows {
+      border-top: 1px solid var(--line);
+      padding: 4px 12px 8px;
+      background: rgba(0, 0, 0, 0.12);
+    }
+
+    .test-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 2px 0;
+      font-family: var(--font-mono);
+      font-size: var(--fs-2xs);
+      color: var(--text-dim);
+    }
+
+    .row-kind {
+      min-width: 46px;
+      color: var(--text-faint);
+      font-size: var(--fs-2xs);
+      letter-spacing: 0.04em;
+    }
+
+    .row-name {
+      flex: 1;
+      color: var(--text);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .row-value {
+      color: var(--accent);
+    }
+
+    .expect-row.pass .row-value {
+      color: var(--green);
+    }
+
+    .expect-row.fail .row-value {
+      color: var(--red);
+    }
+
+    .expect-row.fail .row-value.actual {
+      color: var(--red);
+      text-decoration: underline;
+      text-decoration-style: wavy;
+      text-underline-offset: 2px;
+    }
+
+    .expect-values {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .arrow {
+      color: var(--text-faint);
+    }
+
+    .row-result {
+      width: 14px;
+      text-align: center;
+      font-weight: bold;
+    }
+
+    .expect-row.pass .row-result {
+      color: var(--green);
+    }
+
+    .expect-row.fail .row-result {
+      color: var(--red);
+    }
+
     /* ---------------- IR View ---------------- */
     .ir-view {
       padding: 16px;
@@ -1413,8 +1500,8 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
     <!-- Empty / Welcome State -->
     <div id="empty-state" class="empty-state" style="display: none;">
       <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color: var(--text-faint);"><path d="M4 6h5l4 6h7M4 18h5l4-6"/><circle cx="20" cy="12" r="2"/></svg>
-      <h3>No LogicFlow file active</h3>
-      <p>Open or focus a <code>.lf</code> file in the editor to start live circuit simulation.</p>
+      <h3 id="empty-title">No LogicFlow file active</h3>
+      <p id="empty-text">Open or focus a <code>.lf</code> file in the editor to start live circuit simulation.</p>
       <button id="btn-empty-refresh" class="btn-action" style="margin-top: 14px; align-self: center;" title="Refresh Studio">
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
         Refresh Studio
@@ -1590,19 +1677,44 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
 
   <script>
     const vscode = acquireVsCodeApi();
+    const persistedState = (() => {
+      try { return vscode.getState() || {}; } catch (_) { return {}; }
+    })();
+    const initialTab = ${initialTabJson};
+    const validTabs = ["circuit", "truth", "waveform", "tests", "ir"];
     let model = ${modelJson};
-    let activeTab = "circuit";
+    let activeTab = validTabs.indexOf(persistedState.activeTab) >= 0 ? persistedState.activeTab : initialTab;
     let selectedNodeId = null;
     let hoveredNodeId = null;
 
-    // Clock Runner State
+    // Clock runner state
     let clockRunning = false;
     let clockInterval = null;
     let clockSpeed = 2;
     let selectedClock = null;
 
+    // Rendering state and lookup tables. These let a simulation tick patch
+    // values instead of rebuilding the whole DOM.
+    let activeCircuitData = null;
+    let layoutNodeById = new Map();
+    let graphNodeEls = new Map();
+    let graphEdgeEls = [];
+    let graphEdgesByNode = new Map();
+    let activeNodeEl = null;
+    let activeEdgeEls = [];
+    let inputRowEls = new Map();
+    let outputRowEls = new Map();
+    let stateRowEls = new Map();
+    let truthRowEls = new Map();
+    let activeTruthRowEl = null;
+    let requested = {};
+    let transformFrame = null;
+    const outputDisplayModes = Object.assign({}, persistedState.outputDisplayModes || {});
+
     // Elements
     const emptyState = document.getElementById("empty-state");
+    const emptyTitle = document.getElementById("empty-title");
+    const emptyText = document.getElementById("empty-text");
     const circuitPicker = document.getElementById("circuit-picker");
     const circuitNodeCount = document.getElementById("circuit-node-count");
     const truthRowCount = document.getElementById("truth-row-count");
@@ -1625,7 +1737,6 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
     const clockRunText = document.getElementById("clock-run-text");
     const clockSpeedSelect = document.getElementById("clock-speed");
     const simClockHint = document.getElementById("sim-clock-hint");
-    const graphToolbar = document.querySelector(".graph-toolbar");
     const graphCircuitName = document.getElementById("graph-circuit-name");
     const graphMeta = document.getElementById("graph-meta");
     const graphModeBadge = document.getElementById("graph-mode-badge");
@@ -1664,7 +1775,7 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
         try {
           const hex = BigInt("0b" + s).toString(16).toUpperCase();
           return "0x" + hex.padStart(width / 4, "0");
-        } catch {
+        } catch (_) {
           return s.slice(0, 6) + "…";
         }
       }
@@ -1675,73 +1786,126 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
       if (!binary) return "—";
       try {
         return BigInt("0b" + String(binary).replace(/[^01]/g, "")).toString(10);
-      } catch {
+      } catch (_) {
         return "—";
       }
     }
 
-    // Tab buttons
-    document.querySelectorAll(".tab-btn").forEach(btn => {
-      btn.addEventListener("click", () => {
-        document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
-        document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
-        btn.classList.add("active");
-        activeTab = btn.getAttribute("data-tab");
-        const target = document.getElementById("tab-" + activeTab);
-        if (target) target.classList.add("active");
+    function isHighValue(value) {
+      return typeof value === "string" && value.indexOf("1") >= 0;
+    }
+
+    function inputValue(name, width) {
+      let value = model && model.inputs ? (model.inputs[name] || "0") : "0";
+      if (width > 1) value = value.padStart(width, "0");
+      return value;
+    }
+
+    function outputValue(name, width) {
+      const signal = model && model.snapshot && model.snapshot.outputs ? model.snapshot.outputs[name] : null;
+      let value = signal ? signal.binary : "0";
+      if (width > 1) value = value.padStart(width, "0");
+      return value;
+    }
+
+    function nodeValue(node) {
+      if (!model) return undefined;
+      if (node.kind === "output") return outputValue(node.label, node.width);
+      if (node.kind === "input") return inputValue(node.label, node.width);
+      return model.snapshot && model.snapshot.nodes ? model.snapshot.nodes[node.id] : undefined;
+    }
+
+    function persistState() {
+      try {
+        vscode.setState(Object.assign({}, vscode.getState() || {}, {
+          activeTab: activeTab,
+          outputDisplayModes: outputDisplayModes
+        }));
+      } catch (_) {}
+    }
+
+    function syncTabButtons() {
+      document.querySelectorAll(".tab-btn").forEach(function (button) {
+        button.classList.toggle("active", button.getAttribute("data-tab") === activeTab);
+      });
+      document.querySelectorAll(".tab-content").forEach(function (content) {
+        content.classList.toggle("active", content.id === "tab-" + activeTab);
+      });
+    }
+
+    function setActiveTab(tab, options) {
+      if (validTabs.indexOf(tab) < 0) return;
+      activeTab = tab;
+      syncTabButtons();
+      persistState();
+      ensureTabData();
+      if (tab === "circuit") setTimeout(fitGraphIfNeeded, 40);
+      if (options && options.focusPicker) circuitPicker.focus();
+    }
+
+    document.querySelectorAll(".tab-btn").forEach(function (button) {
+      button.addEventListener("click", function () {
+        setActiveTab(button.getAttribute("data-tab"));
       });
     });
 
-    // Circuit Picker Change
-    circuitPicker.addEventListener("change", (e) => {
+    function ensureTabData() {
+      if (!model || !model.circuits || model.circuits.length === 0) return;
+      if (activeTab === "truth" && !model.truthTable) requestData("truthTable");
+      if (activeTab === "waveform" && !model.waveform) requestData("waveform");
+      if (activeTab === "ir" && (model.irText === null || model.irText === undefined)) requestData("irText");
+    }
+
+    function requestData(kind) {
+      if (requested[kind]) return;
+      requested[kind] = true;
+      vscode.postMessage({ type: "requestData", kind: kind });
+      if (kind === "truthTable") renderTruthTable();
+      if (kind === "waveform") renderWaveform();
+      if (kind === "irText") renderIr();
+    }
+
+    // Circuit picker change
+    circuitPicker.addEventListener("change", function (event) {
       stopClock();
-      vscode.postMessage({ type: "selectCircuit", name: e.target.value });
+      vscode.postMessage({ type: "selectCircuit", name: event.target.value });
     });
 
     // Reset button
-    btnReset.addEventListener("click", () => {
+    btnReset.addEventListener("click", function () {
       stopClock();
       vscode.postMessage({ type: "resetInputs" });
     });
 
     // Expand button
-    btnExpand.addEventListener("click", () => {
+    btnExpand.addEventListener("click", function () {
       vscode.postMessage({ type: "expand" });
     });
 
     // Refresh buttons
-    if (btnRefresh) {
-      btnRefresh.addEventListener("click", () => {
-        vscode.postMessage({ type: "refresh" });
-      });
-    }
-    if (btnEmptyRefresh) {
-      btnEmptyRefresh.addEventListener("click", () => {
-        vscode.postMessage({ type: "refresh" });
-      });
-    }
-
-    // Clock Step & Run
-    btnClockStep.addEventListener("click", () => {
-      if (selectedClock) {
-        vscode.postMessage({ type: "stepClock", clock: selectedClock });
-      }
+    btnRefresh.addEventListener("click", function () {
+      vscode.postMessage({ type: "refresh" });
+    });
+    btnEmptyRefresh.addEventListener("click", function () {
+      vscode.postMessage({ type: "refresh" });
     });
 
-    btnClockRun.addEventListener("click", () => {
-      if (clockRunning) {
-        stopClock();
-      } else {
-        startClock();
-      }
+    // Clock step and run
+    btnClockStep.addEventListener("click", function () {
+      if (selectedClock) vscode.postMessage({ type: "stepClock", clock: selectedClock });
     });
 
-    clockSelect.addEventListener("change", (e) => {
-      selectedClock = e.target.value;
+    btnClockRun.addEventListener("click", function () {
+      if (clockRunning) stopClock();
+      else startClock();
     });
 
-    clockSpeedSelect.addEventListener("change", (e) => {
-      clockSpeed = Number(e.target.value);
+    clockSelect.addEventListener("change", function (event) {
+      selectedClock = event.target.value;
+    });
+
+    clockSpeedSelect.addEventListener("change", function (event) {
+      clockSpeed = Number(event.target.value) || 2;
       if (clockRunning) {
         stopClock();
         startClock();
@@ -1749,17 +1913,16 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
     });
 
     function startClock() {
+      if (!selectedClock) selectedClock = clockSelect.value;
       if (!selectedClock) return;
       clockRunning = true;
       btnClockRun.classList.add("is-active");
       clockRunText.textContent = "Pause";
       clockRunIcon.innerHTML = '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>';
-      const ms = Math.max(60, Math.round(1000 / clockSpeed));
-      clockInterval = setInterval(() => {
-        if (selectedClock) {
-          vscode.postMessage({ type: "stepClock", clock: selectedClock });
-        }
-      }, ms);
+      const interval = Math.max(60, Math.round(1000 / clockSpeed));
+      clockInterval = setInterval(function () {
+        if (selectedClock) vscode.postMessage({ type: "stepClock", clock: selectedClock });
+      }, interval);
     }
 
     function stopClock() {
@@ -1773,7 +1936,7 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
       clockRunIcon.innerHTML = '<polygon points="5 3 19 12 5 21 5 3"/>';
     }
 
-    // Zoom and Pan
+    // Zoom and pan
     let panX = 40;
     let panY = 40;
     let zoomScale = 1.0;
@@ -1782,58 +1945,52 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
     let startY = 0;
     let hasMoved = false;
 
-    document.getElementById("btn-zoom-in").addEventListener("click", () => {
+    document.getElementById("btn-zoom-in").addEventListener("click", function () {
       zoomScale = Math.min(zoomScale * 1.25, 3.0);
       applyTransform();
     });
 
-    document.getElementById("btn-zoom-out").addEventListener("click", () => {
+    document.getElementById("btn-zoom-out").addEventListener("click", function () {
       zoomScale = Math.max(zoomScale / 1.25, 0.15);
       applyTransform();
     });
 
-    document.getElementById("btn-zoom-fit").addEventListener("click", () => {
-      fitGraph();
-    });
+    document.getElementById("btn-zoom-fit").addEventListener("click", fitGraph);
 
-    circuitGraphSvg.addEventListener("pointerdown", (e) => {
-      if (e.button !== 0) return;
-      if (e.target.closest("[data-graph-node]")) return;
+    circuitGraphSvg.addEventListener("pointerdown", function (event) {
+      if (event.button !== 0) return;
+      if (event.target.closest && event.target.closest("[data-graph-node]")) return;
       isDragging = true;
       hasMoved = false;
-      startX = e.clientX - panX;
-      startY = e.clientY - panY;
+      startX = event.clientX - panX;
+      startY = event.clientY - panY;
       circuitGraphSvg.classList.add("is-dragging");
-      try { circuitGraphSvg.setPointerCapture(e.pointerId); } catch (_) {}
+      try { circuitGraphSvg.setPointerCapture(event.pointerId); } catch (_) {}
     });
 
-    circuitGraphSvg.addEventListener("pointermove", (e) => {
+    circuitGraphSvg.addEventListener("pointermove", function (event) {
       if (!isDragging) return;
-      const newX = e.clientX - startX;
-      const newY = e.clientY - startY;
-      if (Math.abs(newX - panX) + Math.abs(newY - panY) > 3) {
-        hasMoved = true;
-      }
+      const newX = event.clientX - startX;
+      const newY = event.clientY - startY;
+      if (Math.abs(newX - panX) + Math.abs(newY - panY) > 3) hasMoved = true;
       panX = newX;
       panY = newY;
       applyTransform();
     });
 
-    circuitGraphSvg.addEventListener("pointerup", (e) => {
-      if (isDragging && !hasMoved) {
-        selectNode(null);
-      }
+    circuitGraphSvg.addEventListener("pointerup", function (event) {
+      if (isDragging && !hasMoved) selectNode(null);
       isDragging = false;
       circuitGraphSvg.classList.remove("is-dragging");
-      try { circuitGraphSvg.releasePointerCapture(e.pointerId); } catch (_) {}
+      try { circuitGraphSvg.releasePointerCapture(event.pointerId); } catch (_) {}
     });
 
-    circuitGraphSvg.addEventListener("wheel", (e) => {
-      e.preventDefault();
+    circuitGraphSvg.addEventListener("wheel", function (event) {
+      event.preventDefault();
       const rect = circuitGraphSvg.getBoundingClientRect();
-      const cx = e.clientX - rect.left;
-      const cy = e.clientY - rect.top;
-      const factor = e.deltaY > 0 ? 0.88 : 1.14;
+      const cx = event.clientX - rect.left;
+      const cy = event.clientY - rect.top;
+      const factor = event.deltaY > 0 ? 0.88 : 1.14;
       const nextScale = Math.max(0.12, Math.min(3.0, zoomScale * factor));
       if (nextScale === zoomScale) return;
       const ratio = nextScale / zoomScale;
@@ -1844,35 +2001,59 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
     }, { passive: false });
 
     function applyTransform() {
-      graphWorld.setAttribute("transform", "translate(" + panX + " " + panY + ") scale(" + zoomScale + ")");
+      if (transformFrame !== null) return;
+      const write = function () {
+        transformFrame = null;
+        graphWorld.setAttribute("transform", "translate(" + panX + " " + panY + ") scale(" + zoomScale + ")");
+      };
+      if (typeof requestAnimationFrame === "function") transformFrame = requestAnimationFrame(write);
+      else write();
     }
 
     function fitGraph() {
       if (!model || !model.layout) return;
       const rect = circuitGraphSvg.getBoundingClientRect();
-      const vw = rect.width || 600;
-      const vh = rect.height || 400;
-      const lw = model.layout.width || 600;
-      const lh = model.layout.height || 400;
-      const scaleX = (vw - 60) / lw;
-      const scaleY = (vh - 60) / lh;
+      const viewWidth = rect.width || 600;
+      const viewHeight = rect.height || 400;
+      const layoutWidth = model.layout.width || 600;
+      const layoutHeight = model.layout.height || 400;
+      const scaleX = (viewWidth - 60) / layoutWidth;
+      const scaleY = (viewHeight - 60) / layoutHeight;
       zoomScale = Math.min(Math.max(Math.min(scaleX, scaleY), 0.25), 1.15);
-      panX = Math.max(20, (vw - lw * zoomScale) / 2);
-      panY = Math.max(20, (vh - lh * zoomScale) / 2);
+      panX = Math.max(20, (viewWidth - layoutWidth * zoomScale) / 2);
+      panY = Math.max(20, (viewHeight - layoutHeight * zoomScale) / 2);
       applyTransform();
     }
 
+    function fitGraphIfNeeded() {
+      if (model && model.layout) fitGraph();
+    }
+
     // Node selection and inspector
-    document.getElementById("btn-close-insp").addEventListener("click", () => {
+    document.getElementById("btn-close-insp").addEventListener("click", function () {
       selectNode(null);
     });
 
-    circuitGraphSvg.addEventListener("click", (e) => {
-      const nodeEl = e.target.closest("[data-graph-node]");
-      if (nodeEl) {
-        const id = nodeEl.getAttribute("data-id");
-        selectNode(id);
-      }
+    circuitGraphSvg.addEventListener("click", function (event) {
+      const nodeEl = event.target.closest ? event.target.closest("[data-graph-node]") : null;
+      if (nodeEl) selectNode(nodeEl.getAttribute("data-id"));
+    });
+
+    graphNodesLayer.addEventListener("mouseover", function (event) {
+      const nodeEl = event.target.closest ? event.target.closest("[data-graph-node]") : null;
+      if (!nodeEl) return;
+      const id = nodeEl.getAttribute("data-id");
+      if (hoveredNodeId === id) return;
+      hoveredNodeId = id;
+      updateActiveElements();
+    });
+
+    graphNodesLayer.addEventListener("mouseout", function (event) {
+      const nodeEl = event.target.closest ? event.target.closest("[data-graph-node]") : null;
+      if (!nodeEl) return;
+      if (event.relatedTarget && nodeEl.contains(event.relatedTarget)) return;
+      hoveredNodeId = null;
+      updateActiveElements();
     });
 
     function selectNode(id) {
@@ -1883,181 +2064,237 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
         return;
       }
 
-      const node = model.layout.nodes.find(n => n.id === id);
+      const node = layoutNodeById.get(id);
       if (!node) {
         graphInspector.style.display = "none";
+        updateActiveElements();
         return;
       }
 
-      let val = undefined;
-      if (node.kind === "output") {
-        val = model.snapshot && model.snapshot.outputs && model.snapshot.outputs[node.label] ? model.snapshot.outputs[node.label].binary : undefined;
-      } else if (node.kind === "input") {
-        val = model.inputs[node.label] || (model.snapshot && model.snapshot.inputs && model.snapshot.inputs[node.label] ? model.snapshot.inputs[node.label].binary : "0");
-      } else {
-        val = model.snapshot && model.snapshot.nodes ? model.snapshot.nodes[node.id] : undefined;
-      }
-
-      document.getElementById("insp-title").textContent = node.title || (node.kind.toUpperCase() + " COMPONENT");
-      document.getElementById("insp-label").textContent = node.label;
-      document.getElementById("insp-val").textContent = compactValue(val, node.width);
-      document.getElementById("insp-bits").textContent = node.width + " bit" + (node.width === 1 ? "" : "s");
-      document.getElementById("insp-dec").textContent = decimalValue(val);
-      document.getElementById("insp-kind").textContent = node.kind === "output" ? (node.sourceId ? node.sourceId.split("/").pop() : "output") : (node.kind === "operation" ? (node.op || "operation") : node.kind);
-      document.getElementById("insp-scope").textContent = node.scope && node.scope.length ? node.scope.join(".") : "top level";
-      document.getElementById("insp-line").textContent = "line " + (node.line || 1);
-
+      updateInspector(node);
       graphInspector.style.display = "block";
       updateActiveElements();
     }
 
-    function updateActiveElements() {
-      const activeId = selectedNodeId || hoveredNodeId;
-      document.querySelectorAll(".graph-node").forEach(n => {
-        const id = n.getAttribute("data-id");
-        if (activeId && id === activeId) {
-          n.classList.add("is-active");
-        } else {
-          n.classList.remove("is-active");
-        }
-      });
+    function updateInspector(node) {
+      if (!node) return;
+      const value = nodeValue(node);
+      document.getElementById("insp-title").textContent = node.title || (node.kind.toUpperCase() + " COMPONENT");
+      document.getElementById("insp-label").textContent = node.label;
+      document.getElementById("insp-val").textContent = compactValue(value, node.width);
+      document.getElementById("insp-bits").textContent = node.width + " bit" + (node.width === 1 ? "" : "s");
+      document.getElementById("insp-dec").textContent = decimalValue(value);
+      document.getElementById("insp-kind").textContent = node.kind === "output" ? (node.sourceId ? node.sourceId.split("/").pop() : "output") : (node.kind === "operation" ? (node.op || "operation") : node.kind);
+      document.getElementById("insp-scope").textContent = node.scope && node.scope.length ? node.scope.join(".") : "top level";
+      document.getElementById("insp-line").textContent = "line " + (node.line || 1);
+    }
 
-      document.querySelectorAll(".graph-edge").forEach(e => {
-        const from = e.getAttribute("data-from");
-        const to = e.getAttribute("data-to");
-        if (activeId && (from === activeId || to === activeId)) {
-          e.classList.add("is-active");
-        } else {
-          e.classList.remove("is-active");
-        }
-      });
+    function updateActiveElements() {
+      if (activeNodeEl) activeNodeEl.classList.remove("is-active");
+      activeNodeEl = null;
+      for (let index = 0; index < activeEdgeEls.length; index += 1) {
+        activeEdgeEls[index].classList.remove("is-active");
+      }
+      activeEdgeEls = [];
+
+      const activeId = selectedNodeId || hoveredNodeId;
+      if (!activeId) return;
+
+      const nodeEl = graphNodeEls.get(activeId);
+      if (nodeEl) {
+        nodeEl.classList.add("is-active");
+        activeNodeEl = nodeEl;
+      }
+
+      const edges = graphEdgesByNode.get(activeId) || [];
+      for (let index = 0; index < edges.length; index += 1) {
+        edges[index].classList.add("is-active");
+        activeEdgeEls.push(edges[index]);
+      }
     }
 
     function render(newModel) {
-      const prevActiveCircuit = model ? model.activeCircuit : null;
+      const previousCircuit = model ? model.activeCircuit : null;
       model = newModel;
-      if (!model || !model.circuits || model.circuits.length === 0) {
-        emptyState.style.display = "flex";
-        document.querySelectorAll(".tab-content").forEach(c => c.style.display = "none");
-        circuitPicker.innerHTML = "";
-        circuitPicker.style.display = "none";
+      requested = {};
+
+      if (!model) {
+        showEmpty("No LogicFlow file active", "Open or focus a .lf file in the editor to start live circuit simulation.");
+        resetViews();
         return;
       }
-      circuitPicker.style.display = "";
-      emptyState.style.display = "none";
-      document.querySelectorAll(".tab-content").forEach(c => c.style.display = "");
-      const currentTabEl = document.getElementById("tab-" + activeTab);
-      if (currentTabEl) currentTabEl.classList.add("active");
 
-      // Diagnostics banner
-      if (model.diagnostics && model.diagnostics.length > 0) {
-        const error = model.diagnostics.find(d => d.severity === "error") || model.diagnostics[0];
-        diagBanner.style.display = "flex";
-        diagText.textContent = "Line " + error.line + ": " + error.message;
-      } else {
-        diagBanner.style.display = "none";
+      renderDiagnostics();
+
+      if (!model.circuits || model.circuits.length === 0) {
+        const hasError = (model.diagnostics || []).some(function (diagnostic) { return diagnostic.severity === "error"; });
+        showEmpty(
+          hasError ? "Could not compile this file" : "No circuits in this file",
+          hasError ? "Fix the highlighted error to resume live simulation." : "Add a CIRCUIT block to start simulating."
+        );
+        resetViews();
+        return;
       }
 
-      // Populate circuit picker
-      circuitPicker.innerHTML = "";
-      model.circuits.forEach(c => {
-        const opt = document.createElement("option");
-        opt.value = c.name;
-        opt.textContent = "Circuit " + c.name;
-        if (c.name === model.activeCircuit) opt.selected = true;
-        circuitPicker.appendChild(opt);
-      });
+      emptyState.style.display = "none";
+      document.querySelectorAll(".tab-content").forEach(function (content) { content.style.display = ""; });
+      syncTabButtons();
 
-      const activeCircuit = model.circuits.find(c => c.name === model.activeCircuit) || model.circuits[0];
+      syncCircuitPicker();
+
+      const activeCircuit = model.circuits.find(function (circuit) { return circuit.name === model.activeCircuit; }) || model.circuits[0];
       if (!activeCircuit) return;
+      activeCircuitData = activeCircuit;
 
       circuitNodeCount.textContent = activeCircuit.stats.nodes;
       graphNodesCount.textContent = activeCircuit.stats.nodes + " nodes";
       graphLayersCount.textContent = (model.layout ? model.layout.depth : 0) + " layers";
-
-      // Toolbar info
       graphCircuitName.textContent = activeCircuit.name;
       graphMeta.textContent = activeCircuit.stats.nodes + " nodes • " + activeCircuit.stats.maxDepth + " deep • " + (activeCircuit.stats.maxWidth || 1) + "b max width";
       graphModeBadge.textContent = activeCircuit.sequential ? "Sequential" : "Combinational";
-      if (activeCircuit.sequential) {
-        graphModeBadge.classList.add("sequential");
-      } else {
-        graphModeBadge.classList.remove("sequential");
-      }
+      graphModeBadge.classList.toggle("sequential", activeCircuit.sequential);
+      graphWarning.style.display = activeCircuit.stats.nodes > 90 ? "block" : "none";
 
-      // Large graph warning
-      if (activeCircuit.stats.nodes > 90) {
-        graphWarning.style.display = "block";
-      } else {
-        graphWarning.style.display = "none";
-      }
+      renderClockControls(activeCircuit);
+      if (previousCircuit !== activeCircuit.name) stopClock();
 
-      // Clocks & Clock Runner
-      const clockNames = [];
-      if (model.ir && Array.isArray(model.ir.events)) {
-        model.ir.events.forEach(e => {
-          if (e && e.clock) {
-            const foundNode = model.ir.nodes && model.ir.nodes.find(n => n.id === e.clock);
-            const clkName = foundNode && foundNode.inputName ? foundNode.inputName : e.clock;
-            if (!clockNames.includes(clkName)) clockNames.push(clkName);
-          }
-        });
-      }
-
-      if (clockNames.length > 0) {
-        dockControlsRow.style.display = "flex";
-        simClockHint.style.display = "inline-flex";
-
-        const currentChoice = clockSelect.value;
-        clockSelect.innerHTML = "";
-        clockNames.forEach(c => {
-          const opt = document.createElement("option");
-          opt.value = c;
-          opt.textContent = c;
-          clockSelect.appendChild(opt);
-        });
-
-        if (currentChoice && clockNames.includes(currentChoice)) {
-          clockSelect.value = currentChoice;
-          selectedClock = currentChoice;
-        } else {
-          selectedClock = clockNames[0];
-          clockSelect.value = selectedClock;
-        }
-      } else {
-        dockControlsRow.style.display = "none";
-        simClockHint.style.display = "none";
-        stopClock();
-      }
-
-      // Render Inputs
-      renderInputs(activeCircuit, clockNames);
-
-      // Render Outputs
+      renderInputs(activeCircuit);
       renderOutputs(activeCircuit);
-
-      // Render Graph
       renderGraph();
-
-      // Render Truth Table
       renderTruthTable();
-
-      // Render Waveform
       renderWaveform();
-
-      // Render Tests
       renderTests();
+      renderIr();
 
-      // Render IR
-      irPre.textContent = JSON.stringify(model.ir || activeCircuit, null, 2);
+      ensureTabData();
 
-      // Auto-fit if circuit changed
-      if (prevActiveCircuit !== activeCircuit.name) {
+      if (previousCircuit !== activeCircuit.name) {
         setTimeout(fitGraph, 40);
       }
     }
 
-    const outputDisplayModes = {};
+    function showEmpty(title, text) {
+      emptyTitle.textContent = title;
+      emptyText.textContent = text;
+      emptyState.style.display = "flex";
+      circuitPicker.style.display = "none";
+      document.querySelectorAll(".tab-content").forEach(function (content) {
+        content.classList.remove("active");
+        content.style.display = "none";
+      });
+    }
+
+    function renderDiagnostics() {
+      const diagnostics = model && model.diagnostics ? model.diagnostics : [];
+      if (diagnostics.length === 0) {
+        diagBanner.style.display = "none";
+        diagText.textContent = "";
+        diagText.title = "";
+        return;
+      }
+      const first = diagnostics.find(function (diagnostic) { return diagnostic.severity === "error"; }) || diagnostics[0];
+      diagBanner.style.display = "flex";
+      diagText.textContent = "Line " + first.line + ": " + first.message;
+      diagText.title = diagnostics.map(function (diagnostic) {
+        return "Line " + diagnostic.line + ": " + diagnostic.message;
+      }).join("\n");
+    }
+
+    function resetViews() {
+      requested = {};
+      stopClock();
+      selectNode(null);
+      activeCircuitData = null;
+      layoutNodeById = new Map();
+      graphNodeEls = new Map();
+      graphEdgesByNode = new Map();
+      graphEdgeEls = [];
+      inputRowEls = new Map();
+      outputRowEls = new Map();
+      stateRowEls = new Map();
+      truthRowEls = new Map();
+      activeTruthRowEl = null;
+      inputsList.innerHTML = "";
+      outputsList.innerHTML = "";
+      graphEdgesLayer.innerHTML = "";
+      graphWidthsLayer.innerHTML = "";
+      graphNodesLayer.innerHTML = "";
+      truthTableView.innerHTML = "";
+      waveformChart.innerHTML = "";
+      testsList.innerHTML = "";
+      testsSummary.innerHTML = "";
+      irPre.textContent = "";
+      circuitPicker.innerHTML = "";
+      circuitNodeCount.textContent = "0";
+      truthRowCount.textContent = "0";
+      testsCount.textContent = "0";
+      inputCountBadge.textContent = "0";
+      outputCountBadge.textContent = "0";
+      graphNodesCount.textContent = "0 nodes";
+      graphLayersCount.textContent = "0 layers";
+      graphCircuitName.textContent = "—";
+      graphMeta.textContent = "—";
+      graphWarning.style.display = "none";
+      diagBanner.style.display = "none";
+    }
+
+    function syncCircuitPicker() {
+      const names = model.circuits.map(function (circuit) { return circuit.name; });
+      const existing = Array.prototype.map.call(circuitPicker.options, function (option) { return option.value; });
+      const same = existing.length === names.length && existing.every(function (name, index) { return name === names[index]; });
+      if (!same) {
+        circuitPicker.innerHTML = "";
+        model.circuits.forEach(function (circuit) {
+          const option = document.createElement("option");
+          option.value = circuit.name;
+          option.textContent = "Circuit " + circuit.name;
+          circuitPicker.appendChild(option);
+        });
+      }
+      circuitPicker.style.display = "";
+      circuitPicker.value = model.activeCircuit;
+    }
+
+    function renderClockControls(activeCircuit) {
+      const clockNames = [];
+      const events = model.ir && Array.isArray(model.ir.events) ? model.ir.events : [];
+      events.forEach(function (event) {
+        if (!event) return;
+        const name = event.clockName || event.clock;
+        if (name && clockNames.indexOf(name) < 0) clockNames.push(name);
+      });
+
+      if (clockNames.length === 0) {
+        dockControlsRow.style.display = "none";
+        simClockHint.style.display = "none";
+        stopClock();
+        selectedClock = null;
+        return;
+      }
+
+      dockControlsRow.style.display = "flex";
+      simClockHint.style.display = "inline-flex";
+
+      const existing = Array.prototype.map.call(clockSelect.options, function (option) { return option.value; });
+      const same = existing.length === clockNames.length && existing.every(function (name, index) { return name === clockNames[index]; });
+      if (!same) {
+        clockSelect.innerHTML = "";
+        clockNames.forEach(function (name) {
+          const option = document.createElement("option");
+          option.value = name;
+          option.textContent = name;
+          clockSelect.appendChild(option);
+        });
+      }
+
+      if (selectedClock && clockNames.indexOf(selectedClock) >= 0) {
+        clockSelect.value = selectedClock;
+      } else {
+        selectedClock = clockNames[0];
+        clockSelect.value = selectedClock;
+      }
+      clockSpeed = Number(clockSpeedSelect.value) || clockSpeed || 2;
+    }
 
     const SEGMENTS = {
       "0": [true, true, true, true, true, true, false],
@@ -2090,17 +2327,18 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
 
     function renderSevenSegment(binary) {
       const hexChar = (parseInt(binary.slice(-4) || "0", 2) || 0).toString(16).toUpperCase();
-      const segs = SEGMENTS[hexChar] || SEGMENTS["0"];
+      const segments = SEGMENTS[hexChar] || SEGMENTS["0"];
       let paths = "";
-      for (let i = 0; i < 7; i++) {
-        const on = segs[i];
-        paths += '<path d="' + SEGMENT_SHAPES[i] + '" fill="' + (on ? '#6c9eff' : 'rgba(255,255,255,0.06)') + '" ' + (on ? 'filter="drop-shadow(0 0 2px #6c9eff)"' : '') + '/>';
+      for (let index = 0; index < 7; index += 1) {
+        const on = segments[index];
+        paths += '<path d="' + SEGMENT_SHAPES[index] + '" fill="' + (on ? '#6c9eff' : 'rgba(255,255,255,0.06)') + '" ' + (on ? 'filter="drop-shadow(0 0 2px #6c9eff)"' : '') + '/>';
       }
       return '<svg class="seven-seg-svg" viewBox="0 0 28 36" width="20" height="26">' + paths + '</svg><span class="decimal-value bus-decimal">#' + hexChar + '</span>';
     }
 
-    function renderInputs(circuit, clockNames = []) {
+    function renderInputs(circuit) {
       inputsList.innerHTML = "";
+      inputRowEls = new Map();
       inputCountBadge.textContent = circuit.inputs.length;
 
       if (circuit.inputs.length === 0) {
@@ -2108,181 +2346,236 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
         return;
       }
 
-      circuit.inputs.forEach(inp => {
-        let val = model.inputs[inp.name] || "0";
-        if (inp.width > 1 && val.length < inp.width) {
-          val = val.padStart(inp.width, "0");
-        }
-        const isHigh = val === "1" || parseInt(val, 2) > 0;
-        const isClock = clockNames.includes(inp.name);
+      const clockNames = [];
+      if (model.ir && Array.isArray(model.ir.events)) {
+        model.ir.events.forEach(function (event) {
+          const name = event.clockName || event.clock;
+          if (name && clockNames.indexOf(name) < 0) clockNames.push(name);
+        });
+      }
+
+      circuit.inputs.forEach(function (input) {
+        const value = inputValue(input.name, input.width);
+        const isHigh = isHighValue(value);
+        const isClock = clockNames.indexOf(input.name) >= 0;
 
         const row = document.createElement("div");
-        row.className = "io-control " + (inp.width === 1 ? "bit-control" : "bus-control") + (isClock ? " is-clock" : "");
+        row.className = "io-control " + (input.width === 1 ? "bit-control" : "bus-control") + (isClock ? " is-clock" : "");
+        row.setAttribute("data-input-name", input.name);
 
         const labelRow = document.createElement("div");
         labelRow.className = "io-label-row";
-        labelRow.innerHTML = 
+        labelRow.innerHTML =
           '<span class="io-label">' +
             (isClock ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>' : '') +
-            escapeHtml(inp.name) +
+            escapeHtml(input.name) +
           '</span>' +
-          '<span class="io-width">' + inp.width + 'b</span>';
+          '<span class="io-width">' + input.width + 'b</span>';
 
-        if (inp.width === 1) {
+        const item = { row: row, width: input.width };
+
+        if (input.width === 1) {
           row.appendChild(labelRow);
-
-          const sw = document.createElement("button");
-          sw.className = "bit-switch" + (isHigh ? " is-on" : "");
-          sw.setAttribute("aria-label", "Toggle " + inp.name);
-          sw.setAttribute("aria-pressed", isHigh ? "true" : "false");
-          sw.innerHTML = 
-            '<span class="bit-switch-track"><span class="bit-switch-thumb"></span></span>' +
-            '<span class="bit-switch-value">' + (isHigh ? "1" : "0") + '</span>';
-
-          sw.addEventListener("click", () => {
-            vscode.postMessage({ type: "toggleInput", name: inp.name });
+          const switcher = document.createElement("button");
+          switcher.className = "bit-switch" + (isHigh ? " is-on" : "");
+          switcher.setAttribute("aria-label", "Toggle " + input.name);
+          switcher.setAttribute("aria-pressed", isHigh ? "true" : "false");
+          switcher.innerHTML = '<span class="bit-switch-track"><span class="bit-switch-thumb"></span></span><span class="bit-switch-value">' + (isHigh ? "1" : "0") + '</span>';
+          switcher.addEventListener("click", function () {
+            vscode.postMessage({ type: "toggleInput", name: input.name });
           });
-          row.appendChild(sw);
-        } else if (inp.width > 16) {
+          row.appendChild(switcher);
+          item.switcher = switcher;
+          item.switchValue = switcher.querySelector(".bit-switch-value");
+        } else if (input.width > 16) {
           row.appendChild(labelRow);
-
           const wideRow = document.createElement("div");
           wideRow.className = "bus-wide-row";
-
           const textField = document.createElement("div");
           textField.className = "bus-text-field";
-
-          const inpBox = document.createElement("input");
-          inpBox.className = "bus-text-input";
-          inpBox.value = val;
-          inpBox.spellcheck = false;
-          inpBox.title = "Type binary (e.g. 100000), hex (0x20), or decimal";
-
-          const commitChange = () => {
-            vscode.postMessage({ type: "setInput", name: inp.name, value: inpBox.value });
+          const textInput = document.createElement("input");
+          textInput.className = "bus-text-input";
+          textInput.value = value;
+          textInput.spellcheck = false;
+          textInput.title = "Type binary (e.g. 100000), hex (0x20), or decimal";
+          const commit = function () {
+            vscode.postMessage({ type: "setInput", name: input.name, value: textInput.value });
           };
-          inpBox.addEventListener("change", commitChange);
-          inpBox.addEventListener("keydown", (e) => {
-            if (e.key === "Enter") {
-              commitChange();
-              inpBox.blur();
+          textInput.addEventListener("change", commit);
+          textInput.addEventListener("keydown", function (event) {
+            if (event.key === "Enter") {
+              commit();
+              textInput.blur();
             }
           });
-          textField.appendChild(inpBox);
+          textField.appendChild(textInput);
           wideRow.appendChild(textField);
-
-          const decVal = decimalValue(val);
-          const decBadge = document.createElement("span");
-          decBadge.className = "decimal-value bus-decimal";
-          decBadge.textContent = "#" + decVal;
-          decBadge.title = inp.name + " is " + decVal + " in decimal";
-          wideRow.appendChild(decBadge);
+          const decimal = document.createElement("span");
+          decimal.className = "decimal-value bus-decimal";
+          decimal.textContent = "#" + decimalValue(value);
+          decimal.title = input.name + " is " + decimalValue(value) + " in decimal";
+          wideRow.appendChild(decimal);
           row.appendChild(wideRow);
+          item.textInput = textInput;
+          item.decimal = decimal;
         } else {
           row.appendChild(labelRow);
-
           const cellsRow = document.createElement("div");
           cellsRow.className = "bus-cells-row";
-
           const bitCells = document.createElement("div");
           bitCells.className = "bit-cells";
-          bitCells.setAttribute("aria-label", inp.name + " bits");
+          bitCells.setAttribute("aria-label", input.name + " bits");
+          item.cells = [];
 
-          for (let i = 0; i < inp.width; i++) {
-            const bit = val[i] || "0";
-            const bitIdx = inp.width - 1 - i;
+          for (let index = 0; index < input.width; index += 1) {
+            const bit = value[index] || "0";
+            const bitIndex = input.width - 1 - index;
             const cell = document.createElement("button");
             cell.className = "bit-cell" + (bit === "1" ? " is-on" : "");
             cell.textContent = bit;
-            cell.title = inp.name + "[" + bitIdx + "] = " + bit + ". Click to flip.";
-            cell.addEventListener("click", () => {
-              vscode.postMessage({ type: "flipBit", name: inp.name, bitIndex: bitIdx });
+            cell.title = input.name + "[" + bitIndex + "] = " + bit + ". Click to flip.";
+            cell.addEventListener("click", function () {
+              vscode.postMessage({ type: "flipBit", name: input.name, bitIndex: bitIndex });
             });
             bitCells.appendChild(cell);
+            item.cells.push({ element: cell, bitIndex: bitIndex });
           }
           cellsRow.appendChild(bitCells);
-
-          const decVal = decimalValue(val);
-          const decBadge = document.createElement("span");
-          decBadge.className = "decimal-value bus-decimal";
-          decBadge.textContent = "#" + decVal;
-          decBadge.title = inp.name + " is " + decVal + " in decimal";
-          cellsRow.appendChild(decBadge);
-
+          const decimal = document.createElement("span");
+          decimal.className = "decimal-value bus-decimal";
+          decimal.textContent = "#" + decimalValue(value);
+          decimal.title = input.name + " is " + decimalValue(value) + " in decimal";
+          cellsRow.appendChild(decimal);
           row.appendChild(cellsRow);
+          item.decimal = decimal;
         }
 
         inputsList.appendChild(row);
+        inputRowEls.set(input.name, item);
+      });
+    }
+
+    function updateInputValues() {
+      if (!activeCircuitData) return;
+      const clockNames = [];
+      if (model.ir && Array.isArray(model.ir.events)) {
+        model.ir.events.forEach(function (event) {
+          const name = event.clockName || event.clock;
+          if (name && clockNames.indexOf(name) < 0) clockNames.push(name);
+        });
+      }
+
+      activeCircuitData.inputs.forEach(function (input) {
+        const item = inputRowEls.get(input.name);
+        if (!item) return;
+        const value = inputValue(input.name, input.width);
+        const isHigh = isHighValue(value);
+        if (item.switcher) {
+          item.switcher.classList.toggle("is-on", isHigh);
+          item.switcher.setAttribute("aria-pressed", isHigh ? "true" : "false");
+          if (item.switchValue) item.switchValue.textContent = isHigh ? "1" : "0";
+        }
+        if (item.cells) {
+          for (let index = 0; index < item.cells.length; index += 1) {
+            const cell = item.cells[index];
+            const bit = value[index] || "0";
+            cell.element.textContent = bit;
+            cell.element.classList.toggle("is-on", bit === "1");
+            cell.element.title = input.name + "[" + cell.bitIndex + "] = " + bit + ". Click to flip.";
+          }
+        }
+        if (item.textInput && document.activeElement !== item.textInput) {
+          item.textInput.value = value;
+        }
+        if (item.decimal) {
+          const decimal = decimalValue(value);
+          item.decimal.textContent = "#" + decimal;
+          item.decimal.title = input.name + " is " + decimal + " in decimal";
+        }
       });
     }
 
     function renderOutputs(circuit) {
       outputsList.innerHTML = "";
+      outputRowEls = new Map();
+      stateRowEls = new Map();
       outputCountBadge.textContent = circuit.outputs.length;
 
       if (circuit.outputs.length === 0) {
         outputsList.innerHTML = '<div class="io-empty">No outputs are exposed.</div>';
       } else {
-        circuit.outputs.forEach(out => {
-          const snap = model.snapshot && model.snapshot.outputs ? model.snapshot.outputs[out.name] : null;
-          let val = snap ? snap.binary : "0";
-          if (out.width > 1 && val.length < out.width) {
-            val = val.padStart(out.width, "0");
-          }
-          const isHigh = val === "1" || (parseInt(val, 2) || 0) > 0;
-          const decVal = snap && snap.decimal !== undefined ? snap.decimal : decimalValue(val);
-
+        circuit.outputs.forEach(function (output) {
+          const value = outputValue(output.name, output.width);
+          const high = isHighValue(value);
           const row = document.createElement("div");
           row.className = "monitor-row";
+          row.setAttribute("data-output-name", output.name);
 
-          const labelDiv = document.createElement("div");
-          labelDiv.className = "monitor-label";
-          labelDiv.innerHTML = 
-            '<span class="monitor-led ' + (isHigh ? "hot" : "") + '"></span>' +
-            '<span>' + escapeHtml(out.name) + '</span>' +
-            '<span class="io-width">' + out.width + 'b</span>';
-          row.appendChild(labelDiv);
+          const label = document.createElement("div");
+          label.className = "monitor-label";
+          label.innerHTML = '<span class="monitor-led ' + (high ? "hot" : "") + '"></span><span>' + escapeHtml(output.name) + '</span><span class="io-width">' + output.width + 'b</span>';
+          row.appendChild(label);
 
-          const valDiv = document.createElement("div");
-          valDiv.className = "monitor-value";
+          const valueRow = document.createElement("div");
+          valueRow.className = "monitor-value";
+          const item = {
+            row: row,
+            width: output.width,
+            led: label.querySelector(".monitor-led"),
+            valueRow: valueRow
+          };
 
-          if (out.width === 1) {
+          if (output.width === 1) {
             const pill = document.createElement("span");
-            pill.className = "output-pill" + (isHigh ? " high" : "");
-            pill.textContent = isHigh ? "1" : "0";
-            pill.title = out.name + " is " + (isHigh ? "HIGH (1)" : "LOW (0)");
-            valDiv.appendChild(pill);
+            pill.className = "output-pill" + (high ? " high" : "");
+            pill.textContent = high ? "1" : "0";
+            pill.title = output.name + " is " + (high ? "HIGH (1)" : "LOW (0)");
+            valueRow.appendChild(pill);
+            item.pill = pill;
           } else {
-            const mode = outputDisplayModes[out.name] || "number";
+            const requestedMode = outputDisplayModes[output.name] || "number";
+            const mode = ["number", "led", "seven", "bar"].indexOf(requestedMode) >= 0 ? requestedMode : "number";
+            outputDisplayModes[output.name] = mode;
+            item.mode = mode;
 
             if (mode === "number") {
-              const numSpan = document.createElement("span");
-              numSpan.className = "display-number";
-              numSpan.innerHTML = '<span class="binary-value">' + val + '</span><span class="decimal-value">#' + decVal + '</span>';
-              valDiv.appendChild(numSpan);
+              const numberSpan = document.createElement("span");
+              numberSpan.className = "display-number";
+              const binary = document.createElement("span");
+              binary.className = "binary-value";
+              const decimal = document.createElement("span");
+              decimal.className = "decimal-value";
+              numberSpan.appendChild(binary);
+              numberSpan.appendChild(decimal);
+              valueRow.appendChild(numberSpan);
+              item.binary = binary;
+              item.decimal = decimal;
             } else if (mode === "led") {
               const leds = document.createElement("span");
               leds.className = "display-leds";
-              for (let i = 0; i < val.length; i++) {
+              item.leds = [];
+              for (let index = 0; index < output.width; index += 1) {
                 const led = document.createElement("span");
-                led.className = "led-dot" + (val[i] === "1" ? " on" : "");
                 leds.appendChild(led);
+                item.leds.push(led);
               }
-              valDiv.appendChild(leds);
+              valueRow.appendChild(leds);
             } else if (mode === "seven") {
-              const s7 = document.createElement("span");
-              s7.innerHTML = renderSevenSegment(val);
-              valDiv.appendChild(s7);
-            } else if (mode === "bar") {
-              const max = (1n << BigInt(out.width)) - 1n;
-              const cur = BigInt(decVal || 0);
-              const pct = max > 0n ? Math.min(100, Math.round(Number((cur * 100n) / max))) : 0;
-              const barDiv = document.createElement("span");
-              barDiv.style.display = "inline-flex";
-              barDiv.style.alignItems = "center";
-              barDiv.style.gap = "6px";
-              barDiv.innerHTML = '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%"></div></div><span class="decimal-value">#' + decVal + '</span>';
-              valDiv.appendChild(barDiv);
+              const seven = document.createElement("span");
+              valueRow.appendChild(seven);
+              item.seven = seven;
+            } else {
+              const barWrap = document.createElement("span");
+              barWrap.style.display = "inline-flex";
+              barWrap.style.alignItems = "center";
+              barWrap.style.gap = "6px";
+              barWrap.innerHTML = '<div class="bar-track"><div class="bar-fill"></div></div>';
+              const decimal = document.createElement("span");
+              decimal.className = "decimal-value";
+              barWrap.appendChild(decimal);
+              valueRow.appendChild(barWrap);
+              item.barFill = barWrap.querySelector(".bar-fill");
+              item.barDecimal = decimal;
             }
 
             const modeSelect = document.createElement("select");
@@ -2292,71 +2585,125 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
               { id: "led", label: "LEDs" },
               { id: "seven", label: "7-segment" },
               { id: "bar", label: "Bar" }
-            ].forEach(opt => {
+            ].forEach(function (optionData) {
               const option = document.createElement("option");
-              option.value = opt.id;
-              option.textContent = opt.label;
-              if (opt.id === mode) option.selected = true;
+              option.value = optionData.id;
+              option.textContent = optionData.label;
+              if (optionData.id === mode) option.selected = true;
               modeSelect.appendChild(option);
             });
-            modeSelect.addEventListener("change", (e) => {
-              outputDisplayModes[out.name] = e.target.value;
+            modeSelect.addEventListener("change", function (event) {
+              outputDisplayModes[output.name] = event.target.value;
+              persistState();
               renderOutputs(circuit);
             });
-            valDiv.appendChild(modeSelect);
+            valueRow.appendChild(modeSelect);
           }
 
-          row.appendChild(valDiv);
+          row.appendChild(valueRow);
           outputsList.appendChild(row);
+          outputRowEls.set(output.name, item);
         });
       }
 
-      // Stored States (if sequential circuit)
       if (model.ir && Array.isArray(model.ir.states) && model.ir.states.length > 0) {
         const stateBlock = document.createElement("div");
         stateBlock.className = "state-block";
         stateBlock.innerHTML = '<div class="state-title">Stored state</div>';
-
-        model.ir.states.forEach(st => {
-          const val = (model.snapshot && model.snapshot.nodes ? model.snapshot.nodes[st.node] : undefined) || "0".repeat(st.width);
-          const decVal = decimalValue(val);
-          const sRow = document.createElement("div");
-          sRow.className = "monitor-row";
-          sRow.innerHTML = 
+        model.ir.states.forEach(function (state) {
+          const row = document.createElement("div");
+          row.className = "monitor-row";
+          row.setAttribute("data-state-name", state.name);
+          row.innerHTML =
             '<div class="monitor-label">' +
               '<span class="state-glyph">S</span>' +
-              '<span>' + escapeHtml(st.name) + '</span>' +
-              '<span class="io-width">' + st.width + 'b</span>' +
+              '<span>' + escapeHtml(state.name) + '</span>' +
+              '<span class="io-width">' + state.width + 'b</span>' +
             '</div>' +
             '<div class="monitor-value">' +
               '<span class="display-number">' +
-                '<span class="binary-value">' + val + '</span>' +
-                (st.width > 1 ? '<span class="decimal-value">#' + decVal + '</span>' : '') +
+                '<span class="binary-value"></span>' +
+                (state.width > 1 ? '<span class="decimal-value"></span>' : '') +
               '</span>' +
             '</div>';
-          stateBlock.appendChild(sRow);
+          stateBlock.appendChild(row);
+          stateRowEls.set(state.name, {
+            row: row,
+            width: state.width,
+            node: state.node,
+            binary: row.querySelector(".binary-value"),
+            decimal: row.querySelector(".decimal-value")
+          });
         });
         outputsList.appendChild(stateBlock);
       }
+
+      updateOutputValues();
+    }
+
+    function updateOutputValues() {
+      if (!activeCircuitData) return;
+      activeCircuitData.outputs.forEach(function (output) {
+        const item = outputRowEls.get(output.name);
+        if (!item) return;
+        const value = outputValue(output.name, output.width);
+        const high = isHighValue(value);
+        const decimal = decimalValue(value);
+        if (item.led) item.led.classList.toggle("hot", high);
+        if (item.pill) {
+          item.pill.classList.toggle("high", high);
+          item.pill.textContent = high ? "1" : "0";
+          item.pill.title = output.name + " is " + (high ? "HIGH (1)" : "LOW (0)");
+        }
+        if (item.binary) item.binary.textContent = value;
+        if (item.decimal) item.decimal.textContent = "#" + decimal;
+        if (item.leds) {
+          for (let index = 0; index < item.leds.length; index += 1) {
+            item.leds[index].className = "led-dot" + (value[index] === "1" ? " on" : "");
+          }
+        }
+        if (item.seven) item.seven.innerHTML = renderSevenSegment(value);
+        if (item.barFill) {
+          const max = (1n << BigInt(output.width)) - 1n;
+          const current = BigInt(decimal === "—" ? 0 : decimal);
+          const percent = max > 0n ? Math.min(100, Math.round(Number((current * 100n) / max))) : 0;
+          item.barFill.style.width = percent + "%";
+          if (item.barDecimal) item.barDecimal.textContent = "#" + decimal;
+        }
+      });
+
+      stateRowEls.forEach(function (item) {
+        const raw = model.snapshot && model.snapshot.nodes ? model.snapshot.nodes[item.node] : undefined;
+        let value = raw || "0".repeat(item.width);
+        if (value.length < item.width) value = value.padStart(item.width, "0");
+        if (item.binary) item.binary.textContent = value;
+        if (item.decimal) item.decimal.textContent = "#" + decimalValue(value);
+      });
     }
 
     function renderGraph() {
-      if (!model.layout) return;
-      const layout = model.layout;
+      if (!model.layout) {
+        graphEdgesLayer.innerHTML = "";
+        graphWidthsLayer.innerHTML = "";
+        graphNodesLayer.innerHTML = "";
+        graphNodeEls = new Map();
+        graphEdgesByNode = new Map();
+        graphEdgeEls = [];
+        layoutNodeById = new Map();
+        return;
+      }
 
-      // 1. Render edges
+      const layout = model.layout;
       let edgesHtml = "";
       let widthsHtml = "";
 
-      layout.edges.forEach(edge => {
-        const fromVal = (model.snapshot && model.snapshot.nodes ? model.snapshot.nodes[edge.from] : undefined) || (model.inputs[edge.from] || "0");
-        const isHigh = fromVal === "1" || parseInt(fromVal, 2) > 0;
+      layout.edges.forEach(function (edge) {
+        const fromValue = nodeValueById(edge.from);
+        const isHigh = isHighValue(fromValue);
         const tone = isHigh ? "high" : "low";
-
         edgesHtml += '<g class="graph-edge ' + tone + '" data-from="' + escapeHtml(edge.from) + '" data-to="' + escapeHtml(edge.to) + '">' +
           '<path d="' + edge.path + '" vector-effect="non-scaling-stroke"></path>' +
         '</g>';
-
         if (edge.width > 1) {
           widthsHtml += '<g class="edge-width" transform="translate(' + edge.labelX + ' ' + edge.labelY + ')">' +
             '<rect x="-10" y="-8" width="20" height="13" rx="4"></rect>' +
@@ -2367,177 +2714,298 @@ export function getStudioHtml(initialModel: StudioModel | null): string {
       graphEdgesLayer.innerHTML = edgesHtml;
       graphWidthsLayer.innerHTML = widthsHtml;
 
-      // 2. Render SVG Nodes (Exact Web UI Layout & Typography)
       let nodesHtml = "";
-
-      layout.nodes.forEach(node => {
-        let val = undefined;
-        if (node.kind === "output") {
-          val = model.snapshot && model.snapshot.outputs && model.snapshot.outputs[node.label] ? model.snapshot.outputs[node.label].binary : undefined;
-        } else if (node.kind === "input") {
-          val = model.inputs[node.label] || (model.snapshot && model.snapshot.inputs && model.snapshot.inputs[node.label] ? model.snapshot.inputs[node.label].binary : "0");
-        } else {
-          val = model.snapshot && model.snapshot.nodes ? model.snapshot.nodes[node.id] : undefined;
-        }
-
-        const isHigh = val && (val === "1" || val.includes("1"));
-        const valState = val === undefined ? "unknown" : (isHigh ? "high" : "low");
-        const isConst = node.kind === "constant";
-        const rx = isConst ? 9 : 11;
+      layoutNodeById = new Map();
+      layout.nodes.forEach(function (node) {
+        layoutNodeById.set(node.id, node);
+        const value = nodeValue(node);
+        const isHigh = isHighValue(value);
+        const valueState = value === undefined ? "unknown" : (isHigh ? "high" : "low");
+        const isConstant = node.kind === "constant";
+        const rx = isConstant ? 9 : 11;
         const labelX = node.kind === "operation" ? 45 : 13;
-        const compactVal = compactValue(val, node.width);
+        const compact = compactValue(value, node.width);
 
-        nodesHtml += 
-          '<g data-graph-node data-id="' + escapeHtml(node.id) + '" class="graph-node kind-' + node.kind + ' value-' + valState + '" transform="translate(' + node.x + ' ' + node.y + ')" tabindex="0" role="button" aria-label="' + escapeHtml(node.label) + '">' +
+        nodesHtml +=
+          '<g data-graph-node data-id="' + escapeHtml(node.id) + '" class="graph-node kind-' + node.kind + ' value-' + valueState + '" transform="translate(' + node.x + ' ' + node.y + ')" tabindex="0" role="button" aria-label="' + escapeHtml(node.label) + '">' +
             '<rect class="node-card" x="0" y="0" width="' + node.w + '" height="' + node.h + '" rx="' + rx + '"></rect>' +
             '<rect class="node-accent" x="0" y="12" width="3" height="' + (node.h - 24) + '" rx="2"></rect>' +
             (node.kind === "operation" ? '<text class="node-op-glyph" x="13" y="21">' + escapeHtml(node.opGlyph) + '</text>' : '') +
             '<text class="node-label" x="' + labelX + '" y="22">' + escapeHtml(node.displayLabel) + '</text>' +
             '<text class="node-sub" x="13" y="' + (node.h - 12) + '">' + escapeHtml(node.subLabel) + '</text>' +
-            '<text class="node-value" x="' + (node.w - 11) + '" y="22" text-anchor="end">' + escapeHtml(compactVal) + '</text>' +
+            '<text class="node-value" x="' + (node.w - 11) + '" y="22" text-anchor="end">' + escapeHtml(compact) + '</text>' +
             (node.width > 1 ? '<text class="node-width" x="' + (node.w - 11) + '" y="' + (node.h - 12) + '" text-anchor="end">' + node.width + 'b</text>' : '') +
           '</g>';
       });
       graphNodesLayer.innerHTML = nodesHtml;
 
-      // Update hover events
-      document.querySelectorAll(".graph-node").forEach(nodeEl => {
-        const id = nodeEl.getAttribute("data-id");
-        nodeEl.addEventListener("mouseenter", () => {
-          hoveredNodeId = id;
-          updateActiveElements();
-        });
-        nodeEl.addEventListener("mouseleave", () => {
-          hoveredNodeId = null;
-          updateActiveElements();
-        });
+      graphNodeEls = new Map();
+      graphNodesLayer.querySelectorAll("[data-graph-node]").forEach(function (element) {
+        graphNodeEls.set(element.getAttribute("data-id"), element);
       });
 
+      graphEdgesByNode = new Map();
+      graphEdgeEls = [];
+      graphEdgesLayer.querySelectorAll(".graph-edge").forEach(function (element) {
+        const from = element.getAttribute("data-from");
+        const to = element.getAttribute("data-to");
+        graphEdgeEls.push({ element: element, from: from, to: to });
+        addEdgeToNode(from, element);
+        addEdgeToNode(to, element);
+      });
+
+      updateGraphValues();
       updateActiveElements();
     }
 
+    function addEdgeToNode(id, element) {
+      if (!id) return;
+      const list = graphEdgesByNode.get(id);
+      if (list) list.push(element);
+      else graphEdgesByNode.set(id, [element]);
+    }
+
+    function nodeValueById(id) {
+      if (!model || !model.snapshot) return undefined;
+      const dynamic = model.snapshot.nodes ? model.snapshot.nodes[id] : undefined;
+      if (dynamic !== undefined) return dynamic;
+      return model.inputs ? model.inputs[id] : undefined;
+    }
+
+    function updateGraphValues() {
+      if (!model || !model.layout) return;
+      model.layout.nodes.forEach(function (node) {
+        const element = graphNodeEls.get(node.id);
+        if (!element) return;
+        const value = nodeValue(node);
+        const isHigh = isHighValue(value);
+        element.classList.remove("value-high", "value-low", "value-unknown");
+        element.classList.add(value === undefined ? "value-unknown" : (isHigh ? "value-high" : "value-low"));
+        const valueLabel = element.querySelector(".node-value");
+        if (valueLabel) valueLabel.textContent = compactValue(value, node.width);
+      });
+
+      graphEdgeEls.forEach(function (edge) {
+        const fromValue = nodeValueById(edge.from);
+        const isHigh = isHighValue(fromValue);
+        edge.element.classList.remove("high", "low");
+        edge.element.classList.add(isHigh ? "high" : "low");
+      });
+    }
+
     function renderTruthTable() {
-      if (!model.truthTable || !model.truthTable.rows) {
-        truthTableView.innerHTML = '<div class="empty-state">No truth table available for sequential circuits.</div>';
+      if (!model) return;
+      if (!model.truthTable) {
         truthRowCount.textContent = "0";
+        truthTableView.innerHTML = '<div class="empty-state">' + (requested.truthTable ? "Computing truth table…" : "Open the Truth table tab to compute it.") + '</div>';
         return;
       }
-      const tt = model.truthTable;
-      truthRowCount.textContent = tt.rows.length;
 
-      let html = '<table class="truth-table"><thead><tr>';
-      tt.inputs.forEach(i => html += '<th>' + escapeHtml(i.name) + '</th>');
-      tt.outputs.forEach(o => html += '<th>' + escapeHtml(o.name) + '</th>');
+      const table = model.truthTable;
+      truthRowCount.textContent = table.rows ? table.rows.length : 0;
+      truthRowEls = new Map();
+      activeTruthRowEl = null;
+
+      let html = "";
+      if (table.reason) {
+        html += '<div class="truth-reason">' + escapeHtml(table.reason) + '</div>';
+      }
+
+      if (!table.rows || table.rows.length === 0) {
+        html += '<div class="empty-state">No rows to display.</div>';
+        truthTableView.innerHTML = html;
+        return;
+      }
+
+      html += '<table class="truth-table"><thead><tr>';
+      table.inputs.forEach(function (input) { html += '<th>' + escapeHtml(input.name) + '</th>'; });
+      table.outputs.forEach(function (output) { html += '<th>' + escapeHtml(output.name) + '</th>'; });
       html += '</tr></thead><tbody>';
 
-      tt.rows.forEach(row => {
-        let isMatch = true;
-        tt.inputs.forEach(i => {
-          if (row.input[i.name] !== (model.inputs[i.name] || "0")) isMatch = false;
-        });
-
-        html += '<tr class="' + (isMatch ? "active-row" : "") + '">';
-        tt.inputs.forEach(i => html += '<td>' + escapeHtml(row.input[i.name]) + '</td>');
-        tt.outputs.forEach(o => html += '<td>' + escapeHtml(row.output[o.name]) + '</td>');
+      table.rows.forEach(function (row) {
+        html += '<tr>';
+        table.inputs.forEach(function (input) { html += '<td>' + escapeHtml(row.input[input.name]) + '</td>'; });
+        table.outputs.forEach(function (output) { html += '<td>' + escapeHtml(row.output[output.name]) + '</td>'; });
         html += '</tr>';
       });
 
       html += '</tbody></table>';
       truthTableView.innerHTML = html;
+
+      const rowElements = truthTableView.querySelectorAll("tbody tr");
+      table.rows.forEach(function (row, index) {
+        const key = table.inputs.map(function (input) { return row.input[input.name] || "0"; }).join("|");
+        truthRowEls.set(key, rowElements[index]);
+      });
+
+      updateTruthSelection();
+    }
+
+    function updateTruthSelection() {
+      if (!model || !model.truthTable || !model.truthTable.rows) return;
+      const table = model.truthTable;
+      const key = table.inputs.map(function (input) { return inputValue(input.name, input.width); }).join("|");
+      const next = truthRowEls.get(key) || null;
+      if (next === activeTruthRowEl) return;
+      if (activeTruthRowEl) activeTruthRowEl.classList.remove("active-row");
+      activeTruthRowEl = next;
+      if (activeTruthRowEl) activeTruthRowEl.classList.add("active-row");
     }
 
     function renderWaveform() {
-      if (!model.waveform || !model.waveform.timeSteps || model.waveform.timeSteps.length === 0) {
+      if (!model) return;
+      if (!model.waveform) {
+        waveformChart.innerHTML = '<div class="empty-state">' + (requested.waveform ? "Computing waveform preview…" : "Open the Waveform tab to compute the preview.") + '</div>';
+        return;
+      }
+
+      const waveform = model.waveform;
+      if (waveform.error) {
+        waveformChart.innerHTML = '<div class="empty-state">' + escapeHtml(waveform.error) + '</div>';
+        return;
+      }
+      if (!waveform.timeSteps || waveform.timeSteps.length === 0) {
         waveformChart.innerHTML = '<div class="empty-state">No waveform data available.</div>';
         return;
       }
-      const wf = model.waveform;
-      let html = '<div style="font-size: 11px; color: var(--text-faint); margin-bottom: 12px;">' + wf.timeSteps.length + ' simulated steps</div>';
 
-      const allSignals = [
-        ...wf.inputNames.map(n => ({ name: n, isInput: true })),
-        ...wf.outputNames.map(n => ({ name: n, isInput: false }))
-      ];
+      let html = '<div style="font-size: 11px; color: var(--text-faint); margin-bottom: 12px;">' + waveform.timeSteps.length + ' simulated steps</div>';
+      const signals = waveform.inputNames.map(function (name) { return { name: name, isInput: true }; })
+        .concat(waveform.outputNames.map(function (name) { return { name: name, isInput: false }; }));
 
-      allSignals.forEach(sig => {
-        html += 
-          '<div class="wave-row">' +
-            '<div class="wave-label">' + escapeHtml(sig.name) + ' <span class="tab-badge">' + (sig.isInput ? "in" : "out") + '</span></div>' +
-            '<div class="wave-canvas-wrap">' +
-              '<svg class="wave-svg" viewBox="0 0 ' + (wf.timeSteps.length * 30) + ' 24" preserveAspectRatio="none">';
+      signals.forEach(function (signal) {
+        html += '<div class="wave-row">' +
+          '<div class="wave-label">' + escapeHtml(signal.name) + ' <span class="tab-badge">' + (signal.isInput ? "in" : "out") + '</span></div>' +
+          '<div class="wave-canvas-wrap">' +
+            '<svg class="wave-svg" viewBox="0 0 ' + (waveform.timeSteps.length * 30) + ' 24" preserveAspectRatio="none">';
 
         let path = "";
-        wf.timeSteps.forEach((step, idx) => {
-          const val = sig.isInput ? step.inputs[sig.name] : step.outputs[sig.name];
-          const isHigh = val === "1" || parseInt(val, 2) > 0;
-          const y = isHigh ? 3 : 21;
-          const x = idx * 30;
-          if (idx === 0) {
-            path += 'M ' + x + ' ' + y + ' L ' + (x + 30) + ' ' + y;
-          } else {
-            path += ' L ' + x + ' ' + y + ' L ' + (x + 30) + ' ' + y;
-          }
+        waveform.timeSteps.forEach(function (step, index) {
+          const value = signal.isInput ? step.inputs[signal.name] : step.outputs[signal.name];
+          const high = isHighValue(value);
+          const y = high ? 3 : 21;
+          const x = index * 30;
+          if (index === 0) path += "M " + x + " " + y + " L " + (x + 30) + " " + y;
+          else path += " L " + x + " " + y + " L " + (x + 30) + " " + y;
         });
 
-        html += 
-                '<path d="' + path + '" fill="none" stroke="var(--accent)" stroke-width="2" />' +
-              '</svg>' +
-            '</div>' +
-          '</div>';
+        html += '<path d="' + path + '" fill="none" stroke="var(--accent)" stroke-width="2" /></svg></div></div>';
       });
 
       waveformChart.innerHTML = html;
     }
 
     function renderTests() {
+      if (!model) return;
       if (!model.tests || !model.tests.suites) {
         testsList.innerHTML = '<div class="empty-state">No tests found in source.</div>';
         testsCount.textContent = "0";
         testsSummary.innerHTML = "";
         return;
       }
-      const t = model.tests;
-      testsCount.textContent = t.passed + t.failed;
-      testsSummary.innerHTML = 
-        '<span><strong>Status:</strong> ' + (t.ok ? '<span class="badge-pass">ALL TESTS PASSED</span>' : '<span class="badge-fail">TESTS FAILED</span>') + '</span>' +
-        '<span>Passed: <strong>' + t.passed + '</strong></span>' +
-        '<span>Failed: <strong>' + t.failed + '</strong></span>';
+
+      const tests = model.tests;
+      testsCount.textContent = tests.passed + tests.failed + (tests.unsupported || 0);
+      const failed = tests.failed > 0;
+      const unsupported = (tests.unsupported || 0) > 0;
+      const allPassed = !failed && !unsupported;
+      const statusClass = allPassed ? "badge-pass" : failed ? "badge-fail" : "badge-warn";
+      const statusText = allPassed ? "ALL TESTS PASSED" : failed ? "TESTS FAILED" : "SOME TESTS UNSUPPORTED";
+
+      testsSummary.innerHTML =
+        '<span><strong>Status:</strong> <span class="' + statusClass + '">' + statusText + '</span></span>' +
+        '<span>Passed: <strong>' + tests.passed + '</strong></span>' +
+        '<span>Failed: <strong>' + tests.failed + '</strong></span>' +
+        (unsupported ? '<span>Unsupported: <strong>' + tests.unsupported + '</strong></span>' : "");
 
       let html = "";
-      t.suites.forEach(suite => {
-        html += 
-          '<div class="test-suite-card">' +
-            '<div class="suite-header">' +
-              '<span>' + escapeHtml(suite.name) + '</span>' +
-              '<span class="' + (suite.pass ? "badge-pass" : "badge-fail") + '">' + (suite.pass ? "PASS" : "FAIL") + '</span>' +
-            '</div>';
-        suite.cases.forEach(c => {
-          html += 
-            '<div class="case-item">' +
-              '<span>' + escapeHtml(c.label) + '</span>' +
-              '<span class="' + (c.pass ? "badge-pass" : "badge-fail") + '">' + (c.pass ? "PASS" : "FAIL") + '</span>' +
-            '</div>';
+      tests.suites.forEach(function (suite) {
+        const suiteClass = !suite.runnable ? "badge-warn" : suite.pass ? "badge-pass" : "badge-fail";
+        const suiteText = !suite.runnable ? "UNSUPPORTED" : suite.pass ? "PASS" : "FAIL";
+        html += '<div class="test-suite-card">' +
+          '<div class="suite-header"><span>' + escapeHtml(suite.name) + '</span><span class="' + suiteClass + '">' + suiteText + '</span></div>';
+        if (suite.reason) html += '<div class="case-item">' + escapeHtml(suite.reason) + '</div>';
+
+        suite.cases.forEach(function (testCase) {
+          html += '<div class="case-item"><span>' + escapeHtml(testCase.label) +
+            (testCase.error ? '<br><span class="case-error">' + escapeHtml(testCase.error) + '</span>' : '') +
+            '</span><span class="' + (testCase.pass ? "badge-pass" : "badge-fail") + '">' + (testCase.pass ? "PASS" : "FAIL") + '</span></div>';
+
+          if (testCase.rows && testCase.rows.length > 0) {
+            html += '<div class="test-rows">';
+            testCase.rows.forEach(function (row) {
+              if (row.kind === "input") {
+                html += '<div class="test-row input-row"><span class="row-kind">' + (row.step ? "STEP " + row.step : "INPUT") + '</span><span class="row-name">' + escapeHtml(row.name) + '</span><span class="row-value">' + escapeHtml(row.actual) + '</span></div>';
+              } else {
+                html += '<div class="test-row expect-row ' + (row.pass ? "pass" : "fail") + '"><span class="row-kind">' + (row.step ? "STEP " + row.step : "EXPECT") + '</span><span class="row-name">' + escapeHtml(row.name) + '</span><span class="expect-values"><span class="row-value">' + escapeHtml(row.expected) + '</span>' + (!row.pass ? '<span class="arrow">→</span><span class="row-value actual">' + escapeHtml(row.actual) + '</span>' : '') + '</span><span class="row-result">' + (row.pass ? "✓" : "✗") + '</span></div>';
+              }
+            });
+            html += '</div>';
+          }
         });
         html += '</div>';
       });
       testsList.innerHTML = html;
     }
 
-    // Message listener from extension host
-    window.addEventListener("message", (event) => {
-      const msg = event.data;
-      if (msg.type === "update") {
-        render(msg.payload);
-      } else if (msg.type === "setTab") {
-        const btn = document.querySelector('.tab-btn[data-tab="' + msg.tab + '"]');
-        if (btn) btn.click();
+    function renderIr() {
+      if (!model || !model.ir) {
+        irPre.textContent = "No IR available.";
+        return;
       }
+      if (model.irText !== null && model.irText !== undefined) {
+        irPre.textContent = model.irText;
+      } else {
+        irPre.textContent = requested.irText ? "Loading lowered IR…" : "Open the IR tab to load the lowered IR.";
+      }
+    }
+
+    function applySimulation(payload) {
+      if (!model || !payload) return;
+      model.inputs = payload.inputs || model.inputs;
+      model.snapshot = payload.snapshot || model.snapshot;
+      updateInputValues();
+      updateOutputValues();
+      updateGraphValues();
+      updateTruthSelection();
+      if (selectedNodeId) {
+        const node = layoutNodeById.get(selectedNodeId);
+        if (node) updateInspector(node);
+      }
+    }
+
+    function applyDerived(kind, payload) {
+      if (!model) return;
+      requested[kind] = true;
+      if (kind === "truthTable") {
+        model.truthTable = payload;
+        renderTruthTable();
+      } else if (kind === "waveform") {
+        model.waveform = payload;
+        renderWaveform();
+      } else if (kind === "irText") {
+        model.irText = payload;
+        renderIr();
+      }
+    }
+
+    // Message listener from extension host
+    window.addEventListener("message", function (event) {
+      const message = event.data || {};
+      if (message.type === "update") render(message.payload || null);
+      else if (message.type === "simulation") applySimulation(message.payload);
+      else if (message.type === "derived") applyDerived(message.kind, message.payload);
+      else if (message.type === "setTab") setActiveTab(message.tab);
     });
 
+    syncTabButtons();
     if (model) {
       render(model);
       setTimeout(fitGraph, 50);
+    } else {
+      render(null);
     }
+    try { vscode.postMessage({ type: "ready" }); } catch (_) {}
   </script>
 </body>
 </html>`;
