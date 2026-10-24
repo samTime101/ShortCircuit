@@ -1079,10 +1079,20 @@ export function getStudioHtml(
       filter: drop-shadow(0 0 4px rgba(155, 140, 232, 0.6));
     }
 
+    .graph-edge.unknown path {
+      stroke: rgba(110, 128, 168, 0.25);
+      stroke-width: 1.2px;
+    }
+
     .edge-width rect {
       fill: var(--panel-2);
       stroke: var(--line-strong);
       stroke-width: 1;
+    }
+
+    .edge-width.is-muted rect,
+    .edge-width.is-muted text {
+      opacity: 0.35;
     }
 
     .edge-width text {
@@ -1092,6 +1102,17 @@ export function getStudioHtml(
       dominant-baseline: central;
       pointer-events: none;
     }
+
+    /* Batched nodes (extreme zoom out) */
+    .graph-node-batch {
+      fill: var(--line-strong);
+      opacity: 0.6;
+    }
+    .graph-node-batch.kind-input { fill: var(--accent); opacity: 0.7; }
+    .graph-node-batch.kind-operation { fill: var(--violet); opacity: 0.7; }
+    .graph-node-batch.kind-constant { fill: var(--line-strong); opacity: 0.5; }
+    .graph-node-batch.kind-state { fill: var(--orange); opacity: 0.7; }
+    .graph-node-batch.kind-output { fill: var(--green); opacity: 0.7; }
 
     /* Graph Inspector */
     .graph-inspector {
@@ -1936,7 +1957,36 @@ export function getStudioHtml(
       clockRunIcon.innerHTML = '<polygon points="5 3 19 12 5 21 5 3"/>';
     }
 
-    // Zoom and pan
+    // ---- Zoom / Pan / View constants (match web CircuitGraph.tsx) ----
+    const MIN_ZOOM = 0.01;
+    const MAX_ZOOM = 2.6;
+    const FIT_MIN_ZOOM = 0.62;  // Never fit below this — wide graphs are panned, not shrunk
+    const FIT_MAX_ZOOM = 1.05;
+    const ZOOM_BUTTON_FACTOR_IN = 1.18;
+    const ZOOM_BUTTON_FACTOR_OUT = 0.85;
+    const WHEEL_SENSITIVITY = 0.0012;  // exponential: exp(-deltaY * sensitivity)
+
+    // Level-of-detail thresholds (match web)
+    const MIN_DETAIL_SCALE = 0.5;      // Below: nodes collapse to colored blocks
+    const MIN_CURVE_SCALE = 0.7;       // Below: straight lines instead of curves
+    const MIN_ACCENT_SCALE = 0.2;      // Below: no kind accent bar
+    const MIN_NODE_BATCH_SCALE = 0.12; // Below: batch nodes by kind into single paths
+    const MIN_BADGE_SCALE = 0.16;      // Below: no width badges on edges
+    const VIEW_OVERSCAN = 180;         // Extra world-space margin for culling
+    const MAX_WIDTH_BADGES = 160;      // Max width badges to render
+
+    // LOD thresholds array for checking crossings
+    const LOD_THRESHOLDS = [MIN_DETAIL_SCALE, MIN_CURVE_SCALE, MIN_ACCENT_SCALE, MIN_NODE_BATCH_SCALE, MIN_BADGE_SCALE];
+
+    function crossesLodThreshold(a, b) {
+      for (let index = 0; index < LOD_THRESHOLDS.length; index += 1) {
+        const t = LOD_THRESHOLDS[index];
+        if ((a < t && b >= t) || (a >= t && b < t)) return true;
+      }
+      return false;
+    }
+
+    // ---- View state ----
     let panX = 40;
     let panY = 40;
     let zoomScale = 1.0;
@@ -1945,17 +1995,29 @@ export function getStudioHtml(
     let startY = 0;
     let hasMoved = false;
 
+    // Cached layout for culling/LOD
+    let fullLayoutNodes = [];
+    let fullLayoutEdges = [];
+    let layoutNeighbors = new Map();
+
     document.getElementById("btn-zoom-in").addEventListener("click", function () {
-      zoomScale = Math.min(zoomScale * 1.25, 3.0);
+      const prevScale = zoomScale;
+      zoomScale = Math.min(zoomScale * ZOOM_BUTTON_FACTOR_IN, MAX_ZOOM);
       applyTransform();
+      if (crossesLodThreshold(prevScale, zoomScale)) renderGraph();
     });
 
     document.getElementById("btn-zoom-out").addEventListener("click", function () {
-      zoomScale = Math.max(zoomScale / 1.25, 0.15);
+      const prevScale = zoomScale;
+      zoomScale = Math.max(zoomScale * ZOOM_BUTTON_FACTOR_OUT, MIN_ZOOM);
       applyTransform();
+      if (crossesLodThreshold(prevScale, zoomScale)) renderGraph();
     });
 
-    document.getElementById("btn-zoom-fit").addEventListener("click", fitGraph);
+    document.getElementById("btn-zoom-fit").addEventListener("click", function () {
+      fitGraph();
+      renderGraph();
+    });
 
     circuitGraphSvg.addEventListener("pointerdown", function (event) {
       if (event.button !== 0) return;
@@ -1972,10 +2034,10 @@ export function getStudioHtml(
       if (!isDragging) return;
       const newX = event.clientX - startX;
       const newY = event.clientY - startY;
-      if (Math.abs(newX - panX) + Math.abs(newY - panY) > 3) hasMoved = true;
+      if (Math.abs(newX - panX) + Math.abs(newY - panY) > 2) hasMoved = true;  // Match web: 2px threshold
       panX = newX;
       panY = newY;
-      applyTransform();
+      scheduleTransform();  // Coalesce via rAF like web
     });
 
     circuitGraphSvg.addEventListener("pointerup", function (event) {
@@ -1990,24 +2052,59 @@ export function getStudioHtml(
       const rect = circuitGraphSvg.getBoundingClientRect();
       const cx = event.clientX - rect.left;
       const cy = event.clientY - rect.top;
-      const factor = event.deltaY > 0 ? 0.88 : 1.14;
-      const nextScale = Math.max(0.12, Math.min(3.0, zoomScale * factor));
-      if (nextScale === zoomScale) return;
-      const ratio = nextScale / zoomScale;
+      const currentScale = zoomScale;
+      // Exponential zoom matching web: factor = exp(-deltaY * sensitivity)
+      const factor = Math.exp(-event.deltaY * WHEEL_SENSITIVITY);
+      const nextScale = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, currentScale * factor));
+      if (nextScale === currentScale) return;
+      const ratio = nextScale / currentScale;
       panX = cx - (cx - panX) * ratio;
       panY = cy - (cy - panY) * ratio;
       zoomScale = nextScale;
-      applyTransform();
+      scheduleTransform();
+      // Re-render for LOD changes (detail level, curve vs straight, batching)
+      renderGraph();
     }, { passive: false });
 
-    function applyTransform() {
+    let transformFrame = null;
+    function scheduleTransform() {
       if (transformFrame !== null) return;
-      const write = function () {
+      transformFrame = requestAnimationFrame(function () {
         transformFrame = null;
         graphWorld.setAttribute("transform", "translate(" + panX + " " + panY + ") scale(" + zoomScale + ")");
-      };
-      if (typeof requestAnimationFrame === "function") transformFrame = requestAnimationFrame(write);
-      else write();
+      });
+    }
+
+    function applyTransform() {
+      // Immediate apply (used by zoom buttons + fit)
+      if (transformFrame !== null) {
+        cancelAnimationFrame(transformFrame);
+        transformFrame = null;
+      }
+      graphWorld.setAttribute("transform", "translate(" + panX + " " + panY + ") scale(" + zoomScale + ")");
+    }
+
+    // Viewport culling (port of web's cullLayout)
+    function cullLayout() {
+      if (!model || !model.layout) return { nodes: [], edges: [] };
+      const rect = circuitGraphSvg.getBoundingClientRect();
+      const viewWidth = rect.width || 600;
+      const viewHeight = rect.height || 400;
+      if (viewWidth <= 0 || viewHeight <= 0 || zoomScale <= 0) return { nodes: [], edges: [] };
+
+      const overscan = Math.min(VIEW_OVERSCAN / zoomScale, 480);
+      const minX = -panX / zoomScale - overscan;
+      const maxX = (viewWidth - panX) / zoomScale + overscan;
+      const minY = -panY / zoomScale - overscan;
+      const maxY = (viewHeight - panY) / zoomScale + overscan;
+
+      const nodes = fullLayoutNodes.filter(function (node) {
+        return node.x + node.w >= minX && node.x <= maxX && node.y + node.h >= minY && node.y <= maxY;
+      });
+      const edges = fullLayoutEdges.filter(function (edge) {
+        return edge.maxX >= minX && edge.minX <= maxX && edge.maxY >= minY && edge.minY <= maxY;
+      });
+      return { nodes: nodes, edges: edges };
     }
 
     function fitGraph() {
@@ -2017,11 +2114,12 @@ export function getStudioHtml(
       const viewHeight = rect.height || 400;
       const layoutWidth = model.layout.width || 600;
       const layoutHeight = model.layout.height || 400;
-      const scaleX = (viewWidth - 60) / layoutWidth;
+      const scaleX = (viewWidth - 60) / layoutWidth;  // EDGE_PADDING = 32 * 2 = 64 ≈ 60
       const scaleY = (viewHeight - 60) / layoutHeight;
-      zoomScale = Math.min(Math.max(Math.min(scaleX, scaleY), 0.25), 1.15);
-      panX = Math.max(20, (viewWidth - layoutWidth * zoomScale) / 2);
-      panY = Math.max(20, (viewHeight - layoutHeight * zoomScale) / 2);
+      // Match web: never zoom out past where labels stop being readable
+      zoomScale = Math.max(FIT_MIN_ZOOM, Math.min(FIT_MAX_ZOOM, Math.min(scaleX, scaleY)));
+      panX = (viewWidth - layoutWidth * zoomScale) / 2;
+      panY = (viewHeight - layoutHeight * zoomScale) / 2;
       applyTransform();
     }
 
@@ -2115,8 +2213,16 @@ export function getStudioHtml(
 
     function render(newModel) {
       const previousCircuit = model ? model.activeCircuit : null;
+      const circuitChanged = previousCircuit !== (newModel ? newModel.activeCircuit : null);
       model = newModel;
       requested = {};
+
+      if (circuitChanged) {
+        // Reset cached layout for new circuit
+        fullLayoutNodes = [];
+        fullLayoutEdges = [];
+        layoutNeighbors = new Map();
+      }
 
       if (!model) {
         showEmpty("No LogicFlow file active", "Open or focus a .lf file in the editor to start live circuit simulation.");
@@ -2209,6 +2315,9 @@ export function getStudioHtml(
       graphNodeEls = new Map();
       graphEdgesByNode = new Map();
       graphEdgeEls = [];
+      fullLayoutNodes = [];
+      fullLayoutEdges = [];
+      layoutNeighbors = new Map();
       inputRowEls = new Map();
       outputRowEls = new Map();
       stateRowEls = new Map();
@@ -2690,55 +2799,147 @@ export function getStudioHtml(
         graphEdgesByNode = new Map();
         graphEdgeEls = [];
         layoutNodeById = new Map();
+        fullLayoutNodes = [];
+        fullLayoutEdges = [];
+        layoutNeighbors = new Map();
         return;
       }
 
       const layout = model.layout;
-      let edgesHtml = "";
-      let widthsHtml = "";
 
-      layout.edges.forEach(function (edge) {
+      // Cache full layout for culling/LOD on subsequent ticks
+      if (fullLayoutNodes.length === 0) {
+        fullLayoutNodes = layout.nodes;
+        fullLayoutEdges = layout.edges;
+        layoutNeighbors = layout.neighbors || new Map();
+      }
+
+      // Viewport culling
+      const culled = cullLayout();
+      const visibleNodes = culled.nodes;
+      const visibleEdges = culled.edges;
+
+      // LOD thresholds
+      const detailed = zoomScale >= MIN_DETAIL_SCALE;
+      const curved = zoomScale >= MIN_CURVE_SCALE;
+      const showAccent = zoomScale >= MIN_ACCENT_SCALE;
+      const batchedNodes = zoomScale < MIN_NODE_BATCH_SCALE;
+      const showBadges = zoomScale >= MIN_BADGE_SCALE;
+
+      // Active node for highlighting
+      const activeNodeId = selectedNodeId || hoveredNodeId;
+      const activeNeighbors = activeNodeId ? (layoutNeighbors.get(activeNodeId) || new Set()) : new Set();
+
+      // ---- Build edge batches by tone (high/low/unknown) ----
+      const edgeBatches = new Map(); // tone -> path string
+      const edgeBatchMeta = new Map(); // tone -> { fromIds: Set, toIds: Set }
+      visibleEdges.forEach(function (edge) {
         const fromValue = nodeValueById(edge.from);
-        const isHigh = isHighValue(fromValue);
-        const tone = isHigh ? "high" : "low";
-        edgesHtml += '<g class="graph-edge ' + tone + '" data-from="' + escapeHtml(edge.from) + '" data-to="' + escapeHtml(edge.to) + '">' +
-          '<path d="' + edge.path + '" vector-effect="non-scaling-stroke"></path>' +
+        const tone = fromValue === undefined ? "unknown" : isHighValue(fromValue) ? "high" : "low";
+        const path = curved ? edge.path : edge.straightPath;
+        const existing = edgeBatches.get(tone) || "";
+        edgeBatches.set(tone, existing ? existing + " " + path : path);
+        // Track which nodes this batch connects for active highlighting
+        let meta = edgeBatchMeta.get(tone);
+        if (!meta) {
+          meta = { fromIds: new Set(), toIds: new Set() };
+          edgeBatchMeta.set(tone, meta);
+        }
+        meta.fromIds.add(edge.from);
+        meta.toIds.add(edge.to);
+      });
+
+      let edgesHtml = "";
+      edgeBatches.forEach(function (d, tone) {
+        edgesHtml += '<g class="graph-edge ' + tone + '">' +
+          '<path d="' + d + '" vector-effect="non-scaling-stroke" shape-rendering="' + (batchedNodes ? "optimizeSpeed" : "auto") + '"></path>' +
         '</g>';
-        if (edge.width > 1) {
-          widthsHtml += '<g class="edge-width" transform="translate(' + edge.labelX + ' ' + edge.labelY + ')">' +
-            '<rect x="-10" y="-8" width="20" height="13" rx="4"></rect>' +
-            '<text x="0" y="0" text-anchor="middle">' + edge.width + 'b</text>' +
+      });
+
+      // Active node's edges (highlighted separately)
+      let activeEdgePath = "";
+      if (activeNodeId) {
+        visibleEdges.forEach(function (edge) {
+          if (edge.from !== activeNodeId && edge.to !== activeNodeId) return;
+          const segment = curved ? edge.path : edge.straightPath;
+          activeEdgePath = activeEdgePath ? activeEdgePath + " " + segment : segment;
+        });
+        if (activeEdgePath) {
+          edgesHtml += '<g class="graph-edge is-active">' +
+            '<path d="' + activeEdgePath + '" vector-effect="non-scaling-stroke" shape-rendering="' + (batchedNodes ? "optimizeSpeed" : "auto") + '"></path>' +
           '</g>';
         }
-      });
+      }
       graphEdgesLayer.innerHTML = edgesHtml;
+
+      // ---- Width badges (only when zoomed in enough) ----
+      let widthsHtml = "";
+      if (showBadges) {
+        const badgeEdges = visibleEdges.filter(function (edge) { return edge.width > 1; });
+        if (badgeEdges.length <= MAX_WIDTH_BADGES) {
+          badgeEdges.forEach(function (edge) {
+            const active = activeNodeId === edge.from || activeNodeId === edge.to;
+            const muted = activeNodeId !== null && !active;
+            widthsHtml += '<g class="edge-width ' + (active ? "is-active" : "") + (muted ? " is-muted" : "") + '" transform="translate(' + edge.labelX + ' ' + edge.labelY + ')">' +
+              '<rect x="-10" y="-8" width="20" height="13" rx="4"></rect>' +
+              '<text x="0" y="2" text-anchor="middle">' + edge.width + 'b</text>' +
+            '</g>';
+          });
+        }
+      }
       graphWidthsLayer.innerHTML = widthsHtml;
 
+      // ---- Nodes ----
       let nodesHtml = "";
       layoutNodeById = new Map();
-      layout.nodes.forEach(function (node) {
-        layoutNodeById.set(node.id, node);
-        const value = nodeValue(node);
-        const isHigh = isHighValue(value);
-        const valueState = value === undefined ? "unknown" : (isHigh ? "high" : "low");
-        const isConstant = node.kind === "constant";
-        const rx = isConstant ? 9 : 11;
-        const labelX = node.kind === "operation" ? 45 : 13;
-        const compact = compactValue(value, node.width);
 
-        nodesHtml +=
-          '<g data-graph-node data-id="' + escapeHtml(node.id) + '" class="graph-node kind-' + node.kind + ' value-' + valueState + '" transform="translate(' + node.x + ' ' + node.y + ')" tabindex="0" role="button" aria-label="' + escapeHtml(node.label) + '">' +
-            '<rect class="node-card" x="0" y="0" width="' + node.w + '" height="' + node.h + '" rx="' + rx + '"></rect>' +
-            '<rect class="node-accent" x="0" y="12" width="3" height="' + (node.h - 24) + '" rx="2"></rect>' +
-            (node.kind === "operation" ? '<text class="node-op-glyph" x="13" y="21">' + escapeHtml(node.opGlyph) + '</text>' : '') +
-            '<text class="node-label" x="' + labelX + '" y="22">' + escapeHtml(node.displayLabel) + '</text>' +
-            '<text class="node-sub" x="13" y="' + (node.h - 12) + '">' + escapeHtml(node.subLabel) + '</text>' +
-            '<text class="node-value" x="' + (node.w - 11) + '" y="22" text-anchor="end">' + escapeHtml(compact) + '</text>' +
-            (node.width > 1 ? '<text class="node-width" x="' + (node.w - 11) + '" y="' + (node.h - 12) + '" text-anchor="end">' + node.width + 'b</text>' : '') +
+      if (batchedNodes) {
+        // Batch nodes by kind into single paths (extreme zoom out)
+        const nodeBatches = new Map(); // kind -> path string
+        visibleNodes.forEach(function (node) {
+          const rect = "M" + node.x + " " + node.y + "h" + node.w + "v" + node.h + "h" + (-node.w) + "Z";
+          const existing = nodeBatches.get(node.kind) || "";
+          nodeBatches.set(node.kind, existing ? existing + " " + rect : rect);
+          layoutNodeById.set(node.id, node);
+        });
+        nodeBatches.forEach(function (d, kind) {
+          nodesHtml += '<g class="graph-node-batch kind-' + kind + '" shape-rendering="crispEdges">' +
+            '<path d="' + d + '"></path>' +
           '</g>';
-      });
+        });
+      } else {
+        // Individual nodes with full detail
+        visibleNodes.forEach(function (node) {
+          layoutNodeById.set(node.id, node);
+          const value = nodeValue(node);
+          const isHigh = isHighValue(value);
+          const valueState = value === undefined ? "unknown" : (isHigh ? "high" : "low");
+          const isConstant = node.kind === "constant";
+          const rx = isConstant ? 9 : 11;
+          const labelX = node.kind === "operation" ? 45 : 13;
+          const compact = compactValue(value, node.width);
+          const isActive = node.id === activeNodeId;
+          const isConnected = activeNodeId !== null && activeNeighbors.has(node.id);
+
+          let classes = "graph-node kind-" + node.kind + " value-" + valueState;
+          if (isActive) classes += " is-active";
+          if (isConnected) classes += " is-connected";
+
+          nodesHtml +=
+            '<g data-graph-node data-id="' + escapeHtml(node.id) + '" class="' + classes + '" transform="translate(' + node.x + ' ' + node.y + ')" tabindex="0" role="button" aria-label="' + escapeHtml(node.label) + '">' +
+              '<rect class="node-card" x="0" y="0" width="' + node.w + '" height="' + node.h + '" rx="' + rx + '"></rect>' +
+              (showAccent ? '<rect class="node-accent" x="0" y="12" width="3" height="' + (node.h - 24) + '" rx="2"></rect>' : '') +
+              (detailed && node.kind === "operation" ? '<text class="node-op-glyph" x="13" y="21">' + escapeHtml(node.opGlyph) + '</text>' : '') +
+              (detailed ? '<text class="node-label" x="' + labelX + '" y="22">' + escapeHtml(node.displayLabel) + '</text>' : '') +
+              (detailed ? '<text class="node-sub" x="13" y="' + (node.h - 12) + '">' + escapeHtml(node.subLabel) + '</text>' : '') +
+              (detailed ? '<text class="node-value" x="' + (node.w - 11) + '" y="22" text-anchor="end">' + escapeHtml(compact) + '</text>' : '') +
+              (detailed && node.width > 1 ? '<text class="node-width" x="' + (node.w - 11) + '" y="' + (node.h - 12) + '" text-anchor="end">' + node.width + 'b</text>' : '') +
+            '</g>';
+        });
+      }
       graphNodesLayer.innerHTML = nodesHtml;
 
+      // Rebuild element maps for hit-testing and value updates
       graphNodeEls = new Map();
       graphNodesLayer.querySelectorAll("[data-graph-node]").forEach(function (element) {
         graphNodeEls.set(element.getAttribute("data-id"), element);
@@ -2749,9 +2950,11 @@ export function getStudioHtml(
       graphEdgesLayer.querySelectorAll(".graph-edge").forEach(function (element) {
         const from = element.getAttribute("data-from");
         const to = element.getAttribute("data-to");
-        graphEdgeEls.push({ element: element, from: from, to: to });
-        addEdgeToNode(from, element);
-        addEdgeToNode(to, element);
+        if (from || to) {
+          graphEdgeEls.push({ element: element, from: from, to: to });
+          if (from) addEdgeToNode(from, element);
+          if (to) addEdgeToNode(to, element);
+        }
       });
 
       updateGraphValues();
@@ -2774,6 +2977,8 @@ export function getStudioHtml(
 
     function updateGraphValues() {
       if (!model || !model.layout) return;
+
+      // Update node values
       model.layout.nodes.forEach(function (node) {
         const element = graphNodeEls.get(node.id);
         if (!element) return;
@@ -2785,12 +2990,21 @@ export function getStudioHtml(
         if (valueLabel) valueLabel.textContent = compactValue(value, node.width);
       });
 
-      graphEdgeEls.forEach(function (edge) {
-        const fromValue = nodeValueById(edge.from);
-        const isHigh = isHighValue(fromValue);
-        edge.element.classList.remove("high", "low");
-        edge.element.classList.add(isHigh ? "high" : "low");
+      // Update edge batches by tone
+      graphEdgesLayer.querySelectorAll(".graph-edge").forEach(function (edgeGroup) {
+        if (edgeGroup.classList.contains("is-active")) return; // Skip active highlight
+        const toneClass = edgeGroup.classList.contains("high") ? "high" : (edgeGroup.classList.contains("low") ? "low" : "unknown");
+        // Determine current tone from first edge in batch (all edges in batch share tone)
+        // We need to find a representative edge to get the value
+        const fromAttr = edgeGroup.querySelector("path") ? null : null; // Batched edges don't have from/to attrs
+        // Instead, re-evaluate by checking any visible edge's from value
+        // For simplicity, we skip batch tone update here — it's handled on full renderGraph()
+        // which is called on zoom/LOD changes. For simulation ticks, values don't change tone often.
       });
+
+      // Note: Edge batch tones are updated on full renderGraph() call (zoom/pan/LOD change).
+      // For simulation ticks, we only update node values for performance.
+      // If precise edge tone updates on every tick are needed, call renderGraph() instead.
     }
 
     function renderTruthTable() {
@@ -2966,7 +3180,8 @@ export function getStudioHtml(
       model.snapshot = payload.snapshot || model.snapshot;
       updateInputValues();
       updateOutputValues();
-      updateGraphValues();
+      // Full re-render for correct edge tone batches (matches web behavior)
+      renderGraph();
       updateTruthSelection();
       if (selectedNodeId) {
         const node = layoutNodeById.get(selectedNodeId);
