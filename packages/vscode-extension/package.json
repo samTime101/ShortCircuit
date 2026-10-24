@@ -2,7 +2,7 @@
   "name": "shortcircuit",
   "displayName": "Short Circuit",
   "description": "LogicFlow language support for Short Circuit: interactive simulator studio, syntax highlighting, diagnostics, completions, hovers, waveform/truth-table previews, and test runner.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "samTime101",
   "engines": {
     "vscode": "^1.85.0"
@@ -168,18 +168,6 @@
       }
     ],
     "menus": {
-      "view/title": [
-        {
-          "when": "view == shortcircuit.studioView",
-          "command": "shortcircuit.refreshStudio",
-          "group": "navigation@1"
-        },
-        {
-          "when": "view == shortcircuit.studioView",
-          "command": "shortcircuit.expandStudio",
-          "group": "navigation@2"
-        }
-      ],
       "editor/title": [
         {
           "when": "editorLangId == logicflow",

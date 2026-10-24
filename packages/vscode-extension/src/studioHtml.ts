@@ -40,7 +40,7 @@ export function getStudioHtml(
 ): string {
   const modelJson = serializeModel(initialModel);
   const initialTabJson = JSON.stringify(options.initialTab ?? "circuit");
-  const version = options.version ?? "0.1.1";
+  const version = options.version ?? "0.1.2";
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -254,9 +254,10 @@ export function getStudioHtml(
       display: flex;
       flex-direction: column;
       background: var(--panel);
-      border-bottom: 1px solid var(--line);
-      max-height: 52%;
-      overflow-y: auto;
+      height: var(--sim-dock-height, 220px);
+      min-height: 90px;
+      max-height: 80%;
+      overflow: hidden;
       flex-shrink: 0;
     }
 
@@ -395,15 +396,108 @@ export function getStudioHtml(
 
     .sim-columns {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-      gap: 14px;
+      flex: 1;
+      grid-template-columns: minmax(0, var(--sim-split, 50%)) 10px minmax(0, 1fr);
+      min-height: 0;
+      overflow: hidden;
       padding: 10px 12px;
+      gap: 0;
     }
 
     .sim-group {
       display: flex;
       flex-direction: column;
       min-width: 0;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 0 4px;
+    }
+
+    /* ---------------- Pane Resizers (Exact Web Port) ---------------- */
+    .pane-resizer {
+      position: relative;
+      flex: none;
+      touch-action: none;
+      user-select: none;
+      background: var(--panel);
+      transition: background 120ms ease;
+      z-index: 6;
+    }
+
+    .pane-resizer.vertical {
+      width: 10px;
+      cursor: col-resize;
+    }
+
+    .pane-resizer.horizontal {
+      height: 10px;
+      cursor: row-resize;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .pane-resizer.vertical::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 50%;
+      width: 1px;
+      background: var(--line);
+      transform: translateX(-50%);
+    }
+
+    .pane-resizer.vertical::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 3px;
+      height: 34px;
+      border-radius: 2px;
+      background: var(--line-strong);
+      transform: translate(-50%, -50%);
+    }
+
+    .pane-resizer.horizontal::before {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 38px;
+      height: 3px;
+      border-radius: 2px;
+      background: var(--line-strong);
+      transform: translate(-50%, -50%);
+    }
+
+    .pane-resizer:hover,
+    .pane-resizer:active {
+      background: var(--panel-2);
+    }
+
+    .pane-resizer:hover::before,
+    .pane-resizer:hover::after,
+    .pane-resizer:focus-visible::before,
+    .pane-resizer:focus-visible::after {
+      background: var(--accent);
+    }
+
+    .pane-resizer:focus-visible {
+      outline: 1px solid var(--accent);
+      outline-offset: -2px;
+      border-radius: 0;
+    }
+
+    body.is-resizing-rows,
+    body.is-resizing-rows * {
+      cursor: row-resize !important;
+      user-select: none !important;
+    }
+
+    body.is-resizing-columns,
+    body.is-resizing-columns * {
+      cursor: col-resize !important;
+      user-select: none !important;
     }
 
     .sim-group-title {
@@ -1070,20 +1164,18 @@ export function getStudioHtml(
     .graph-edge path {
       fill: none;
       stroke: var(--line-strong);
-      stroke-width: 1.4px;
+      stroke-width: 1.2px;
       stroke-linecap: round;
       stroke-linejoin: round;
-      transition: stroke 0.15s, stroke-width 0.15s;
     }
 
     .graph-edge.high path {
-      stroke: var(--accent);
-      stroke-width: 2px;
-      filter: drop-shadow(0 0 3px rgba(108, 158, 255, 0.45));
+      stroke: rgba(108, 158, 255, 0.55);
+      stroke-width: 1.3px;
     }
 
     .graph-edge.low path {
-      stroke: rgba(110, 128, 168, 0.3);
+      stroke: rgba(110, 128, 168, 0.32);
       stroke-width: 1.2px;
     }
 
@@ -1594,6 +1686,7 @@ export function getStudioHtml(
             </div>
             <div id="inputs-list" class="io-list"></div>
           </div>
+          <div id="col-resizer" class="pane-resizer vertical" role="separator" tabindex="0" aria-label="Resize input and output columns" title="Resize input and output columns. Drag or double click to reset."></div>
           <div class="sim-group outputs-group">
             <div class="sim-group-title">
               <span>Outputs</span>
@@ -1603,6 +1696,9 @@ export function getStudioHtml(
           </div>
         </div>
       </div>
+
+      <!-- Dock Resizer (Horizontal) -->
+      <div id="dock-resizer" class="pane-resizer horizontal" role="separator" tabindex="0" aria-label="Resize simulation panel and graph" title="Resize simulation panel and graph. Drag or double click to reset."></div>
 
       <!-- Evaluation Graph Toolbar (Matches Web UI) -->
       <div class="graph-toolbar">
@@ -1732,6 +1828,7 @@ export function getStudioHtml(
     // Rendering state and lookup tables. These let a simulation tick patch
     // values instead of rebuilding the whole DOM.
     let activeCircuitData = null;
+    let fullNodesById = new Map();
     let layoutNodeById = new Map();
     let graphNodeEls = new Map();
     let graphEdgeEls = [];
@@ -1745,6 +1842,10 @@ export function getStudioHtml(
     let activeTruthRowEl = null;
     let requested = {};
     const outputDisplayModes = Object.assign({}, persistedState.outputDisplayModes || {});
+    let dockHeight = Number(persistedState.dockHeight) || 220;
+    let simSplit = Number(persistedState.simSplit) || 50;
+    document.documentElement.style.setProperty("--sim-dock-height", dockHeight + "px");
+    document.documentElement.style.setProperty("--sim-split", simSplit + "%");
 
     // Elements
     const emptyState = document.getElementById("empty-state");
@@ -1854,7 +1955,9 @@ export function getStudioHtml(
       try {
         vscode.setState(Object.assign({}, vscode.getState() || {}, {
           activeTab: activeTab,
-          outputDisplayModes: outputDisplayModes
+          outputDisplayModes: outputDisplayModes,
+          dockHeight: dockHeight,
+          simSplit: simSplit
         }));
       } catch (_) {}
     }
@@ -1963,6 +2066,124 @@ export function getStudioHtml(
       clockRunText.textContent = "Run";
       clockRunIcon.innerHTML = '<polygon points="5 3 19 12 5 21 5 3"/>';
       vscode.postMessage({ type: "stopClock" });
+    }
+
+    // ---- Pane Resizers (Simulator Dock height & Column split) ----
+    const dockResizer = document.getElementById("dock-resizer");
+    const colResizer = document.getElementById("col-resizer");
+    const simDock = document.querySelector(".sim-dock");
+    const simColumns = document.querySelector(".sim-columns");
+    const tabCircuit = document.getElementById("tab-circuit");
+
+    let dockDrag = null;
+    let colDrag = null;
+
+    if (dockResizer && simDock && tabCircuit) {
+      dockResizer.addEventListener("pointerdown", function (event) {
+        if (event.button !== 0) return;
+        dockDrag = {
+          startY: event.clientY,
+          startHeight: simDock.getBoundingClientRect().height,
+        };
+        document.body.classList.add("is-resizing-rows");
+        try { dockResizer.setPointerCapture(event.pointerId); } catch (_) {}
+      });
+
+      dockResizer.addEventListener("pointermove", function (event) {
+        if (!dockDrag) return;
+        const dy = event.clientY - dockDrag.startY;
+        const totalHeight = tabCircuit.clientHeight || 600;
+        const minH = 80;
+        const maxH = Math.max(minH, totalHeight - 120);
+        const nextH = Math.max(minH, Math.min(maxH, dockDrag.startHeight + dy));
+        dockHeight = Math.round(nextH);
+        document.documentElement.style.setProperty("--sim-dock-height", dockHeight + "px");
+      });
+
+      function stopDockDrag(event) {
+        if (!dockDrag) return;
+        dockDrag = null;
+        document.body.classList.remove("is-resizing-rows");
+        try {
+          if (dockResizer.hasPointerCapture && dockResizer.hasPointerCapture(event.pointerId)) {
+            dockResizer.releasePointerCapture(event.pointerId);
+          }
+        } catch (_) {}
+        persistState();
+      }
+
+      dockResizer.addEventListener("pointerup", stopDockDrag);
+      dockResizer.addEventListener("pointercancel", stopDockDrag);
+      dockResizer.addEventListener("dblclick", function () {
+        dockHeight = 220;
+        document.documentElement.style.setProperty("--sim-dock-height", "220px");
+        persistState();
+      });
+      dockResizer.addEventListener("keydown", function (event) {
+        if (event.key === "ArrowUp") {
+          dockHeight = Math.max(80, dockHeight - 16);
+          document.documentElement.style.setProperty("--sim-dock-height", dockHeight + "px");
+          persistState();
+        } else if (event.key === "ArrowDown") {
+          dockHeight = Math.min((tabCircuit.clientHeight || 600) - 120, dockHeight + 16);
+          document.documentElement.style.setProperty("--sim-dock-height", dockHeight + "px");
+          persistState();
+        }
+      });
+    }
+
+    if (colResizer && simColumns) {
+      colResizer.addEventListener("pointerdown", function (event) {
+        if (event.button !== 0) return;
+        const rect = simColumns.getBoundingClientRect();
+        colDrag = {
+          startX: event.clientX,
+          containerWidth: rect.width || 400,
+          startPercent: simSplit,
+        };
+        document.body.classList.add("is-resizing-columns");
+        try { colResizer.setPointerCapture(event.pointerId); } catch (_) {}
+      });
+
+      colResizer.addEventListener("pointermove", function (event) {
+        if (!colDrag) return;
+        const dx = event.clientX - colDrag.startX;
+        const deltaPercent = (dx / (colDrag.containerWidth || 400)) * 100;
+        const nextPercent = Math.max(18, Math.min(82, colDrag.startPercent + deltaPercent));
+        simSplit = Math.round(nextPercent);
+        document.documentElement.style.setProperty("--sim-split", simSplit + "%");
+      });
+
+      function stopColDrag(event) {
+        if (!colDrag) return;
+        colDrag = null;
+        document.body.classList.remove("is-resizing-columns");
+        try {
+          if (colResizer.hasPointerCapture && colResizer.hasPointerCapture(event.pointerId)) {
+            colResizer.releasePointerCapture(event.pointerId);
+          }
+        } catch (_) {}
+        persistState();
+      }
+
+      colResizer.addEventListener("pointerup", stopColDrag);
+      colResizer.addEventListener("pointercancel", stopColDrag);
+      colResizer.addEventListener("dblclick", function () {
+        simSplit = 50;
+        document.documentElement.style.setProperty("--sim-split", "50%");
+        persistState();
+      });
+      colResizer.addEventListener("keydown", function (event) {
+        if (event.key === "ArrowLeft") {
+          simSplit = Math.max(18, simSplit - 4);
+          document.documentElement.style.setProperty("--sim-split", simSplit + "%");
+          persistState();
+        } else if (event.key === "ArrowRight") {
+          simSplit = Math.min(82, simSplit + 4);
+          document.documentElement.style.setProperty("--sim-split", simSplit + "%");
+          persistState();
+        }
+      });
     }
 
     // ---- Zoom / Pan / View constants (match web CircuitGraph.tsx) ----
@@ -2301,6 +2522,7 @@ export function getStudioHtml(
         // Reset cached layout for new circuit
         fullLayoutNodes = [];
         fullLayoutEdges = [];
+        fullNodesById = new Map();
         layoutNeighbors = new Map();
       }
 
@@ -2397,6 +2619,7 @@ export function getStudioHtml(
       graphEdgeEls = [];
       fullLayoutNodes = [];
       fullLayoutEdges = [];
+      fullNodesById = new Map();
       layoutNeighbors = new Map();
       lastCullPanX = 40;
       lastCullPanY = 40;
@@ -2882,6 +3105,7 @@ export function getStudioHtml(
         layoutNodeById = new Map();
         fullLayoutNodes = [];
         fullLayoutEdges = [];
+        fullNodesById = new Map();
         layoutNeighbors = new Map();
         currentVisibleNodes = [];
         currentVisibleEdges = [];
@@ -2894,6 +3118,8 @@ export function getStudioHtml(
       if (fullLayoutNodes.length === 0) {
         fullLayoutNodes = layout.nodes || [];
         fullLayoutEdges = layout.edges || [];
+        fullNodesById = new Map();
+        fullLayoutNodes.forEach(function (n) { fullNodesById.set(n.id, n); });
         layoutNeighbors = new Map();
         if (layout.neighbors) {
           Object.keys(layout.neighbors).forEach(function (key) {
@@ -3025,6 +3251,8 @@ export function getStudioHtml(
 
     function nodeValueById(id) {
       if (!model || !model.snapshot) return undefined;
+      const node = fullNodesById.get(id) || layoutNodeById.get(id);
+      if (node) return nodeValue(node);
       const dynamic = model.snapshot.nodes ? model.snapshot.nodes[id] : undefined;
       if (dynamic !== undefined) return dynamic;
       return model.inputs ? model.inputs[id] : undefined;
@@ -3034,29 +3262,29 @@ export function getStudioHtml(
       if (!model || !model.layout) return;
 
       const batchedNodes = zoomScale < MIN_NODE_BATCH_SCALE;
-      if (batchedNodes) return; // Nodes in batched mode are plain blocks
-
-      // Update node values and classes in-place
-      const nodes = currentVisibleNodes.length > 0 ? currentVisibleNodes : (model.layout.nodes || []);
-      for (let i = 0; i < nodes.length; i += 1) {
-        const node = nodes[i];
-        const element = graphNodeEls.get(node.id);
-        if (!element) continue;
-        const value = nodeValue(node);
-        const isHigh = isHighValue(value);
-        const toneClass = value === undefined ? "value-unknown" : (isHigh ? "value-high" : "value-low");
-        if (!element.classList.contains(toneClass)) {
-          element.classList.remove("value-high", "value-low", "value-unknown");
-          element.classList.add(toneClass);
-        }
-        const valueLabel = element.querySelector(".node-value");
-        if (valueLabel) {
-          const compact = compactValue(value, node.width);
-          if (valueLabel.textContent !== compact) valueLabel.textContent = compact;
+      if (!batchedNodes) {
+        // Update node values and classes in-place
+        const nodes = currentVisibleNodes.length > 0 ? currentVisibleNodes : (model.layout.nodes || []);
+        for (let i = 0; i < nodes.length; i += 1) {
+          const node = nodes[i];
+          const element = graphNodeEls.get(node.id);
+          if (!element) continue;
+          const value = nodeValue(node);
+          const isHigh = isHighValue(value);
+          const toneClass = value === undefined ? "value-unknown" : (isHigh ? "value-high" : "value-low");
+          if (!element.classList.contains(toneClass)) {
+            element.classList.remove("value-high", "value-low", "value-unknown");
+            element.classList.add(toneClass);
+          }
+          const valueLabel = element.querySelector(".node-value");
+          if (valueLabel) {
+            const compact = compactValue(value, node.width);
+            if (valueLabel.textContent !== compact) valueLabel.textContent = compact;
+          }
         }
       }
 
-      // Fast update edge batch paths in-place
+      // Fast update edge batch paths in-place — ALWAYS runs, even at extreme zoom out
       const edges = currentVisibleEdges.length > 0 ? currentVisibleEdges : (model.layout.edges || []);
       const curved = zoomScale >= MIN_CURVE_SCALE;
       const edgeBatches = new Map();

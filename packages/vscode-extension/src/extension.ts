@@ -98,7 +98,7 @@ export function activate(context: vscode.ExtensionContext): void {
   }
 
   // 2. Studio state manager and sidebar webview
-  const extensionVersion = (context.extension?.packageJSON?.version as string) || "0.1.1";
+  const extensionVersion = (context.extension?.packageJSON?.version as string) || "0.1.2";
   const provider = new ShortCircuitStudioProvider(context.extensionUri, extensionVersion);
   studioProvider = provider;
   context.subscriptions.push(
@@ -479,7 +479,7 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
 
   constructor(
     private readonly extensionUri: vscode.Uri,
-    private readonly extensionVersion: string = "0.1.1",
+    private readonly extensionVersion: string = "0.1.2",
   ) {}
 
   public getVersion(): string {
