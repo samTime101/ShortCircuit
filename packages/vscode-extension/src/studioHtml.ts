@@ -854,6 +854,7 @@ export function getStudioHtml(
       cursor: grab;
     }
 
+    .graph-stage.is-dragging,
     .circuit-graph.is-dragging {
       cursor: grabbing;
     }
@@ -1103,16 +1104,16 @@ export function getStudioHtml(
       pointer-events: none;
     }
 
-    /* Batched nodes (extreme zoom out) */
-    .graph-node-batch {
-      fill: var(--line-strong);
-      opacity: 0.6;
+    /* Batched nodes (extreme zoom out) - Match Web CircuitGraph */
+    .graph-node-batch path {
+      fill: var(--text-faint);
+      stroke: none;
     }
-    .graph-node-batch.kind-input { fill: var(--accent); opacity: 0.7; }
-    .graph-node-batch.kind-operation { fill: var(--violet); opacity: 0.7; }
-    .graph-node-batch.kind-constant { fill: var(--line-strong); opacity: 0.5; }
-    .graph-node-batch.kind-state { fill: var(--orange); opacity: 0.7; }
-    .graph-node-batch.kind-output { fill: var(--green); opacity: 0.7; }
+    .graph-node-batch.kind-input path { fill: var(--accent); }
+    .graph-node-batch.kind-operation path { fill: var(--violet); }
+    .graph-node-batch.kind-constant path { fill: var(--text-faint); }
+    .graph-node-batch.kind-state path { fill: var(--orange); }
+    .graph-node-batch.kind-output path { fill: var(--text-dim); }
 
     /* Graph Inspector */
     .graph-inspector {
@@ -1923,14 +1924,14 @@ export function getStudioHtml(
 
     clockSelect.addEventListener("change", function (event) {
       selectedClock = event.target.value;
+      if (clockRunning) {
+        startClock();
+      }
     });
 
     clockSpeedSelect.addEventListener("change", function (event) {
       clockSpeed = Number(event.target.value) || 2;
-      if (clockRunning) {
-        stopClock();
-        startClock();
-      }
+      vscode.postMessage({ type: "setClockSpeed", speed: clockSpeed });
     });
 
     function startClock() {
@@ -1940,21 +1941,15 @@ export function getStudioHtml(
       btnClockRun.classList.add("is-active");
       clockRunText.textContent = "Pause";
       clockRunIcon.innerHTML = '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>';
-      const interval = Math.max(60, Math.round(1000 / clockSpeed));
-      clockInterval = setInterval(function () {
-        if (selectedClock) vscode.postMessage({ type: "stepClock", clock: selectedClock });
-      }, interval);
+      vscode.postMessage({ type: "startClock", clock: selectedClock, speed: clockSpeed });
     }
 
     function stopClock() {
       clockRunning = false;
-      if (clockInterval) {
-        clearInterval(clockInterval);
-        clockInterval = null;
-      }
       btnClockRun.classList.remove("is-active");
       clockRunText.textContent = "Run";
       clockRunIcon.innerHTML = '<polygon points="5 3 19 12 5 21 5 3"/>';
+      vscode.postMessage({ type: "stopClock" });
     }
 
     // ---- Zoom / Pan / View constants (match web CircuitGraph.tsx) ----
@@ -1966,12 +1961,12 @@ export function getStudioHtml(
     const ZOOM_BUTTON_FACTOR_OUT = 0.85;
     const WHEEL_SENSITIVITY = 0.0012;  // exponential: exp(-deltaY * sensitivity)
 
-    // Level-of-detail thresholds (match web)
+    // Level-of-detail thresholds (exact match with web CircuitGraph.tsx)
     const MIN_DETAIL_SCALE = 0.5;      // Below: nodes collapse to colored blocks
     const MIN_CURVE_SCALE = 0.7;       // Below: straight lines instead of curves
     const MIN_ACCENT_SCALE = 0.2;      // Below: no kind accent bar
     const MIN_NODE_BATCH_SCALE = 0.12; // Below: batch nodes by kind into single paths
-    const MIN_BADGE_SCALE = 0.16;      // Below: no width badges on edges
+    const MIN_BADGE_SCALE = 0.7;       // Below: no width badges on edges (matches web CircuitGraph line 31!)
     const VIEW_OVERSCAN = 180;         // Extra world-space margin for culling
     const MAX_WIDTH_BADGES = 160;      // Max width badges to render
 
@@ -1979,6 +1974,7 @@ export function getStudioHtml(
     const LOD_THRESHOLDS = [MIN_DETAIL_SCALE, MIN_CURVE_SCALE, MIN_ACCENT_SCALE, MIN_NODE_BATCH_SCALE, MIN_BADGE_SCALE];
 
     function crossesLodThreshold(a, b) {
+      if (a === b) return false;
       for (let index = 0; index < LOD_THRESHOLDS.length; index += 1) {
         const t = LOD_THRESHOLDS[index];
         if ((a < t && b >= t) || (a >= t && b < t)) return true;
@@ -1990,28 +1986,61 @@ export function getStudioHtml(
     let panX = 40;
     let panY = 40;
     let zoomScale = 1.0;
-    let isDragging = false;
-    let startX = 0;
-    let startY = 0;
-    let hasMoved = false;
+    let dragRef = null;
+    let transformFrame = null;
+    let lastRenderedLodScale = 1.0;
 
     // Cached layout for culling/LOD
     let fullLayoutNodes = [];
     let fullLayoutEdges = [];
     let layoutNeighbors = new Map();
+    let currentVisibleNodes = [];
+    let currentVisibleEdges = [];
+
+    function scheduleTransform() {
+      if (transformFrame !== null) return;
+      transformFrame = requestAnimationFrame(function () {
+        transformFrame = null;
+        graphWorld.setAttribute("transform", "translate(" + panX + " " + panY + ") scale(" + zoomScale + ")");
+        if (crossesLodThreshold(lastRenderedLodScale, zoomScale)) {
+          lastRenderedLodScale = zoomScale;
+          renderGraph();
+        }
+      });
+    }
+
+    function applyTransform() {
+      if (transformFrame !== null) {
+        cancelAnimationFrame(transformFrame);
+        transformFrame = null;
+      }
+      graphWorld.setAttribute("transform", "translate(" + panX + " " + panY + ") scale(" + zoomScale + ")");
+    }
+
+    function zoomBy(factor) {
+      const rect = graphStage.getBoundingClientRect();
+      const currentScale = zoomScale;
+      const nextScale = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, currentScale * factor));
+      if (nextScale === currentScale) return;
+      const ratio = nextScale / currentScale;
+      const cx = (rect.width || 600) / 2;
+      const cy = (rect.height || 400) / 2;
+      panX = cx - (cx - panX) * ratio;
+      panY = cy - (cy - panY) * ratio;
+      zoomScale = nextScale;
+      applyTransform();
+      if (crossesLodThreshold(lastRenderedLodScale, zoomScale)) {
+        lastRenderedLodScale = zoomScale;
+        renderGraph();
+      }
+    }
 
     document.getElementById("btn-zoom-in").addEventListener("click", function () {
-      const prevScale = zoomScale;
-      zoomScale = Math.min(zoomScale * ZOOM_BUTTON_FACTOR_IN, MAX_ZOOM);
-      applyTransform();
-      if (crossesLodThreshold(prevScale, zoomScale)) renderGraph();
+      zoomBy(ZOOM_BUTTON_FACTOR_IN);
     });
 
     document.getElementById("btn-zoom-out").addEventListener("click", function () {
-      const prevScale = zoomScale;
-      zoomScale = Math.max(zoomScale * ZOOM_BUTTON_FACTOR_OUT, MIN_ZOOM);
-      applyTransform();
-      if (crossesLodThreshold(prevScale, zoomScale)) renderGraph();
+      zoomBy(ZOOM_BUTTON_FACTOR_OUT);
     });
 
     document.getElementById("btn-zoom-fit").addEventListener("click", function () {
@@ -2022,34 +2051,46 @@ export function getStudioHtml(
     circuitGraphSvg.addEventListener("pointerdown", function (event) {
       if (event.button !== 0) return;
       if (event.target.closest && event.target.closest("[data-graph-node]")) return;
-      isDragging = true;
-      hasMoved = false;
-      startX = event.clientX - panX;
-      startY = event.clientY - panY;
+      dragRef = {
+        x: event.clientX,
+        y: event.clientY,
+        panX: panX,
+        panY: panY,
+        moved: false,
+      };
+      graphStage.classList.add("is-dragging");
       circuitGraphSvg.classList.add("is-dragging");
       try { circuitGraphSvg.setPointerCapture(event.pointerId); } catch (_) {}
     });
 
     circuitGraphSvg.addEventListener("pointermove", function (event) {
-      if (!isDragging) return;
-      const newX = event.clientX - startX;
-      const newY = event.clientY - startY;
-      if (Math.abs(newX - panX) + Math.abs(newY - panY) > 2) hasMoved = true;  // Match web: 2px threshold
-      panX = newX;
-      panY = newY;
-      scheduleTransform();  // Coalesce via rAF like web
+      if (!dragRef) return;
+      const dx = event.clientX - dragRef.x;
+      const dy = event.clientY - dragRef.y;
+      if (Math.abs(dx) + Math.abs(dy) > 2) dragRef.moved = true;
+      panX = dragRef.panX + dx;
+      panY = dragRef.panY + dy;
+      scheduleTransform();
     });
 
-    circuitGraphSvg.addEventListener("pointerup", function (event) {
-      if (isDragging && !hasMoved) selectNode(null);
-      isDragging = false;
+    function handlePointerUp(event) {
+      if (dragRef && !dragRef.moved) selectNode(null);
+      dragRef = null;
+      graphStage.classList.remove("is-dragging");
       circuitGraphSvg.classList.remove("is-dragging");
-      try { circuitGraphSvg.releasePointerCapture(event.pointerId); } catch (_) {}
-    });
+      try {
+        if (circuitGraphSvg.hasPointerCapture && circuitGraphSvg.hasPointerCapture(event.pointerId)) {
+          circuitGraphSvg.releasePointerCapture(event.pointerId);
+        }
+      } catch (_) {}
+    }
 
-    circuitGraphSvg.addEventListener("wheel", function (event) {
+    circuitGraphSvg.addEventListener("pointerup", handlePointerUp);
+    circuitGraphSvg.addEventListener("pointercancel", handlePointerUp);
+
+    graphStage.addEventListener("wheel", function (event) {
       event.preventDefault();
-      const rect = circuitGraphSvg.getBoundingClientRect();
+      const rect = graphStage.getBoundingClientRect();
       const cx = event.clientX - rect.left;
       const cy = event.clientY - rect.top;
       const currentScale = zoomScale;
@@ -2062,32 +2103,12 @@ export function getStudioHtml(
       panY = cy - (cy - panY) * ratio;
       zoomScale = nextScale;
       scheduleTransform();
-      // Re-render for LOD changes (detail level, curve vs straight, batching)
-      renderGraph();
     }, { passive: false });
-
-    let transformFrame = null;
-    function scheduleTransform() {
-      if (transformFrame !== null) return;
-      transformFrame = requestAnimationFrame(function () {
-        transformFrame = null;
-        graphWorld.setAttribute("transform", "translate(" + panX + " " + panY + ") scale(" + zoomScale + ")");
-      });
-    }
-
-    function applyTransform() {
-      // Immediate apply (used by zoom buttons + fit)
-      if (transformFrame !== null) {
-        cancelAnimationFrame(transformFrame);
-        transformFrame = null;
-      }
-      graphWorld.setAttribute("transform", "translate(" + panX + " " + panY + ") scale(" + zoomScale + ")");
-    }
 
     // Viewport culling (port of web's cullLayout)
     function cullLayout() {
       if (!model || !model.layout) return { nodes: [], edges: [] };
-      const rect = circuitGraphSvg.getBoundingClientRect();
+      const rect = graphStage.getBoundingClientRect();
       const viewWidth = rect.width || 600;
       const viewHeight = rect.height || 400;
       if (viewWidth <= 0 || viewHeight <= 0 || zoomScale <= 0) return { nodes: [], edges: [] };
@@ -2102,25 +2123,39 @@ export function getStudioHtml(
         return node.x + node.w >= minX && node.x <= maxX && node.y + node.h >= minY && node.y <= maxY;
       });
       const edges = fullLayoutEdges.filter(function (edge) {
-        return edge.maxX >= minX && edge.minX <= maxX && edge.maxY >= minY && edge.minY <= maxY;
+        return (edge.maxX === undefined || edge.maxX >= minX) &&
+               (edge.minX === undefined || edge.minX <= maxX) &&
+               (edge.maxY === undefined || edge.maxY >= minY) &&
+               (edge.minY === undefined || edge.minY <= maxY);
       });
+
+      if (nodes.length === fullLayoutNodes.length && edges.length === fullLayoutEdges.length) {
+        return { nodes: fullLayoutNodes, edges: fullLayoutEdges };
+      }
+
       return { nodes: nodes, edges: edges };
     }
 
     function fitGraph() {
       if (!model || !model.layout) return;
-      const rect = circuitGraphSvg.getBoundingClientRect();
+      const rect = graphStage.getBoundingClientRect();
       const viewWidth = rect.width || 600;
       const viewHeight = rect.height || 400;
       const layoutWidth = model.layout.width || 600;
       const layoutHeight = model.layout.height || 400;
-      const scaleX = (viewWidth - 60) / layoutWidth;  // EDGE_PADDING = 32 * 2 = 64 ≈ 60
-      const scaleY = (viewHeight - 60) / layoutHeight;
-      // Match web: never zoom out past where labels stop being readable
-      zoomScale = Math.max(FIT_MIN_ZOOM, Math.min(FIT_MAX_ZOOM, Math.min(scaleX, scaleY)));
-      panX = (viewWidth - layoutWidth * zoomScale) / 2;
-      panY = (viewHeight - layoutHeight * zoomScale) / 2;
+      const scale = Math.max(
+        FIT_MIN_ZOOM,
+        Math.min(
+          FIT_MAX_ZOOM,
+          (viewWidth - 64) / layoutWidth,
+          (viewHeight - 64) / layoutHeight
+        )
+      );
+      zoomScale = scale;
+      panX = (viewWidth - layoutWidth * scale) / 2;
+      panY = (viewHeight - layoutHeight * scale) / 2;
       applyTransform();
+      lastRenderedLodScale = zoomScale;
     }
 
     function fitGraphIfNeeded() {
@@ -2190,13 +2225,13 @@ export function getStudioHtml(
     function updateActiveElements() {
       if (activeNodeEl) activeNodeEl.classList.remove("is-active");
       activeNodeEl = null;
-      for (let index = 0; index < activeEdgeEls.length; index += 1) {
-        activeEdgeEls[index].classList.remove("is-active");
-      }
-      activeEdgeEls = [];
 
       const activeId = selectedNodeId || hoveredNodeId;
-      if (!activeId) return;
+      if (!activeId) {
+        const pathActive = document.getElementById("edge-path-active");
+        if (pathActive) pathActive.setAttribute("d", "");
+        return;
+      }
 
       const nodeEl = graphNodeEls.get(activeId);
       if (nodeEl) {
@@ -2204,11 +2239,17 @@ export function getStudioHtml(
         activeNodeEl = nodeEl;
       }
 
-      const edges = graphEdgesByNode.get(activeId) || [];
-      for (let index = 0; index < edges.length; index += 1) {
-        edges[index].classList.add("is-active");
-        activeEdgeEls.push(edges[index]);
+      const curved = zoomScale >= MIN_CURVE_SCALE;
+      const edges = currentVisibleEdges.length > 0 ? currentVisibleEdges : (fullLayoutEdges || []);
+      let activeEdgePath = "";
+      for (let i = 0; i < edges.length; i += 1) {
+        const edge = edges[i];
+        if (edge.from !== activeId && edge.to !== activeId) continue;
+        const segment = curved ? edge.path : edge.straightPath;
+        activeEdgePath = activeEdgePath ? activeEdgePath + " " + segment : segment;
       }
+      const pathActive = document.getElementById("edge-path-active");
+      if (pathActive) pathActive.setAttribute("d", activeEdgePath);
     }
 
     function render(newModel) {
@@ -2791,17 +2832,17 @@ export function getStudioHtml(
     }
 
     function renderGraph() {
-      if (!model.layout) {
+      if (!model || !model.layout) {
         graphEdgesLayer.innerHTML = "";
         graphWidthsLayer.innerHTML = "";
         graphNodesLayer.innerHTML = "";
         graphNodeEls = new Map();
-        graphEdgesByNode = new Map();
-        graphEdgeEls = [];
         layoutNodeById = new Map();
         fullLayoutNodes = [];
         fullLayoutEdges = [];
         layoutNeighbors = new Map();
+        currentVisibleNodes = [];
+        currentVisibleEdges = [];
         return;
       }
 
@@ -2809,15 +2850,22 @@ export function getStudioHtml(
 
       // Cache full layout for culling/LOD on subsequent ticks
       if (fullLayoutNodes.length === 0) {
-        fullLayoutNodes = layout.nodes;
-        fullLayoutEdges = layout.edges;
-        layoutNeighbors = layout.neighbors || new Map();
+        fullLayoutNodes = layout.nodes || [];
+        fullLayoutEdges = layout.edges || [];
+        layoutNeighbors = new Map();
+        if (layout.neighbors) {
+          Object.keys(layout.neighbors).forEach(function (key) {
+            layoutNeighbors.set(key, new Set(layout.neighbors[key]));
+          });
+        }
       }
 
       // Viewport culling
       const culled = cullLayout();
       const visibleNodes = culled.nodes;
       const visibleEdges = culled.edges;
+      currentVisibleNodes = visibleNodes;
+      currentVisibleEdges = visibleEdges;
 
       // LOD thresholds
       const detailed = zoomScale >= MIN_DETAIL_SCALE;
@@ -2831,29 +2879,13 @@ export function getStudioHtml(
       const activeNeighbors = activeNodeId ? (layoutNeighbors.get(activeNodeId) || new Set()) : new Set();
 
       // ---- Build edge batches by tone (high/low/unknown) ----
-      const edgeBatches = new Map(); // tone -> path string
-      const edgeBatchMeta = new Map(); // tone -> { fromIds: Set, toIds: Set }
+      const edgeBatches = new Map();
       visibleEdges.forEach(function (edge) {
         const fromValue = nodeValueById(edge.from);
         const tone = fromValue === undefined ? "unknown" : isHighValue(fromValue) ? "high" : "low";
         const path = curved ? edge.path : edge.straightPath;
         const existing = edgeBatches.get(tone) || "";
         edgeBatches.set(tone, existing ? existing + " " + path : path);
-        // Track which nodes this batch connects for active highlighting
-        let meta = edgeBatchMeta.get(tone);
-        if (!meta) {
-          meta = { fromIds: new Set(), toIds: new Set() };
-          edgeBatchMeta.set(tone, meta);
-        }
-        meta.fromIds.add(edge.from);
-        meta.toIds.add(edge.to);
-      });
-
-      let edgesHtml = "";
-      edgeBatches.forEach(function (d, tone) {
-        edgesHtml += '<g class="graph-edge ' + tone + '">' +
-          '<path d="' + d + '" vector-effect="non-scaling-stroke" shape-rendering="' + (batchedNodes ? "optimizeSpeed" : "auto") + '"></path>' +
-        '</g>';
       });
 
       // Active node's edges (highlighted separately)
@@ -2864,12 +2896,13 @@ export function getStudioHtml(
           const segment = curved ? edge.path : edge.straightPath;
           activeEdgePath = activeEdgePath ? activeEdgePath + " " + segment : segment;
         });
-        if (activeEdgePath) {
-          edgesHtml += '<g class="graph-edge is-active">' +
-            '<path d="' + activeEdgePath + '" vector-effect="non-scaling-stroke" shape-rendering="' + (batchedNodes ? "optimizeSpeed" : "auto") + '"></path>' +
-          '</g>';
-        }
       }
+
+      let edgesHtml =
+        '<g class="graph-edge high"><path id="edge-path-high" d="' + (edgeBatches.get("high") || "") + '" vector-effect="non-scaling-stroke" shape-rendering="' + (batchedNodes ? "optimizeSpeed" : "auto") + '"></path></g>' +
+        '<g class="graph-edge low"><path id="edge-path-low" d="' + (edgeBatches.get("low") || "") + '" vector-effect="non-scaling-stroke" shape-rendering="' + (batchedNodes ? "optimizeSpeed" : "auto") + '"></path></g>' +
+        '<g class="graph-edge unknown"><path id="edge-path-unknown" d="' + (edgeBatches.get("unknown") || "") + '" vector-effect="non-scaling-stroke" shape-rendering="' + (batchedNodes ? "optimizeSpeed" : "auto") + '"></path></g>' +
+        '<g class="graph-edge is-active"><path id="edge-path-active" d="' + activeEdgePath + '" vector-effect="non-scaling-stroke" shape-rendering="' + (batchedNodes ? "optimizeSpeed" : "auto") + '"></path></g>';
       graphEdgesLayer.innerHTML = edgesHtml;
 
       // ---- Width badges (only when zoomed in enough) ----
@@ -2895,7 +2928,7 @@ export function getStudioHtml(
 
       if (batchedNodes) {
         // Batch nodes by kind into single paths (extreme zoom out)
-        const nodeBatches = new Map(); // kind -> path string
+        const nodeBatches = new Map();
         visibleNodes.forEach(function (node) {
           const rect = "M" + node.x + " " + node.y + "h" + node.w + "v" + node.h + "h" + (-node.w) + "Z";
           const existing = nodeBatches.get(node.kind) || "";
@@ -2939,33 +2972,13 @@ export function getStudioHtml(
       }
       graphNodesLayer.innerHTML = nodesHtml;
 
-      // Rebuild element maps for hit-testing and value updates
+      // Rebuild element maps for fast in-place value updates
       graphNodeEls = new Map();
       graphNodesLayer.querySelectorAll("[data-graph-node]").forEach(function (element) {
         graphNodeEls.set(element.getAttribute("data-id"), element);
       });
 
-      graphEdgesByNode = new Map();
-      graphEdgeEls = [];
-      graphEdgesLayer.querySelectorAll(".graph-edge").forEach(function (element) {
-        const from = element.getAttribute("data-from");
-        const to = element.getAttribute("data-to");
-        if (from || to) {
-          graphEdgeEls.push({ element: element, from: from, to: to });
-          if (from) addEdgeToNode(from, element);
-          if (to) addEdgeToNode(to, element);
-        }
-      });
-
-      updateGraphValues();
-      updateActiveElements();
-    }
-
-    function addEdgeToNode(id, element) {
-      if (!id) return;
-      const list = graphEdgesByNode.get(id);
-      if (list) list.push(element);
-      else graphEdgesByNode.set(id, [element]);
+      lastRenderedLodScale = zoomScale;
     }
 
     function nodeValueById(id) {
@@ -2978,33 +2991,48 @@ export function getStudioHtml(
     function updateGraphValues() {
       if (!model || !model.layout) return;
 
-      // Update node values
-      model.layout.nodes.forEach(function (node) {
+      const batchedNodes = zoomScale < MIN_NODE_BATCH_SCALE;
+      if (batchedNodes) return; // Nodes in batched mode are plain blocks
+
+      // Update node values and classes in-place
+      const nodes = currentVisibleNodes.length > 0 ? currentVisibleNodes : (model.layout.nodes || []);
+      for (let i = 0; i < nodes.length; i += 1) {
+        const node = nodes[i];
         const element = graphNodeEls.get(node.id);
-        if (!element) return;
+        if (!element) continue;
         const value = nodeValue(node);
         const isHigh = isHighValue(value);
-        element.classList.remove("value-high", "value-low", "value-unknown");
-        element.classList.add(value === undefined ? "value-unknown" : (isHigh ? "value-high" : "value-low"));
+        const toneClass = value === undefined ? "value-unknown" : (isHigh ? "value-high" : "value-low");
+        if (!element.classList.contains(toneClass)) {
+          element.classList.remove("value-high", "value-low", "value-unknown");
+          element.classList.add(toneClass);
+        }
         const valueLabel = element.querySelector(".node-value");
-        if (valueLabel) valueLabel.textContent = compactValue(value, node.width);
-      });
+        if (valueLabel) {
+          const compact = compactValue(value, node.width);
+          if (valueLabel.textContent !== compact) valueLabel.textContent = compact;
+        }
+      }
 
-      // Update edge batches by tone
-      graphEdgesLayer.querySelectorAll(".graph-edge").forEach(function (edgeGroup) {
-        if (edgeGroup.classList.contains("is-active")) return; // Skip active highlight
-        const toneClass = edgeGroup.classList.contains("high") ? "high" : (edgeGroup.classList.contains("low") ? "low" : "unknown");
-        // Determine current tone from first edge in batch (all edges in batch share tone)
-        // We need to find a representative edge to get the value
-        const fromAttr = edgeGroup.querySelector("path") ? null : null; // Batched edges don't have from/to attrs
-        // Instead, re-evaluate by checking any visible edge's from value
-        // For simplicity, we skip batch tone update here — it's handled on full renderGraph()
-        // which is called on zoom/LOD changes. For simulation ticks, values don't change tone often.
-      });
+      // Fast update edge batch paths in-place
+      const edges = currentVisibleEdges.length > 0 ? currentVisibleEdges : (model.layout.edges || []);
+      const curved = zoomScale >= MIN_CURVE_SCALE;
+      const edgeBatches = new Map();
+      for (let i = 0; i < edges.length; i += 1) {
+        const edge = edges[i];
+        const fromValue = nodeValueById(edge.from);
+        const tone = fromValue === undefined ? "unknown" : isHighValue(fromValue) ? "high" : "low";
+        const path = curved ? edge.path : edge.straightPath;
+        const existing = edgeBatches.get(tone) || "";
+        edgeBatches.set(tone, existing ? existing + " " + path : path);
+      }
 
-      // Note: Edge batch tones are updated on full renderGraph() call (zoom/pan/LOD change).
-      // For simulation ticks, we only update node values for performance.
-      // If precise edge tone updates on every tick are needed, call renderGraph() instead.
+      const pathHigh = document.getElementById("edge-path-high");
+      const pathLow = document.getElementById("edge-path-low");
+      const pathUnknown = document.getElementById("edge-path-unknown");
+      if (pathHigh) pathHigh.setAttribute("d", edgeBatches.get("high") || "");
+      if (pathLow) pathLow.setAttribute("d", edgeBatches.get("low") || "");
+      if (pathUnknown) pathUnknown.setAttribute("d", edgeBatches.get("unknown") || "");
     }
 
     function renderTruthTable() {
@@ -3180,8 +3208,7 @@ export function getStudioHtml(
       model.snapshot = payload.snapshot || model.snapshot;
       updateInputValues();
       updateOutputValues();
-      // Full re-render for correct edge tone batches (matches web behavior)
-      renderGraph();
+      updateGraphValues();
       updateTruthSelection();
       if (selectedNodeId) {
         const node = layoutNodeById.get(selectedNodeId);

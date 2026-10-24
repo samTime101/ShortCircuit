@@ -469,6 +469,9 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
   private lastModel?: StudioModel;
   private derivedCache: StudioDerivedCache = {};
   private disposed = false;
+  private clockTimer?: NodeJS.Timeout;
+  private runningClockName?: string;
+  private clockSpeed = 2;
 
   constructor(private readonly extensionUri: vscode.Uri) {}
 
@@ -516,6 +519,7 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
   }
 
   public clear(): void {
+    this.stopClockRunner();
     this.currentDocument = undefined;
     this.lastCompiledKey = undefined;
     this.lastModel = undefined;
@@ -563,6 +567,7 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
     const documentChanged =
       this.currentDocument?.uri.toString() !== document.uri.toString();
     if (documentChanged) {
+      this.stopClockRunner();
       this.activeCircuitName = undefined;
       this.currentInputs = {};
       this.activeCircuit = undefined;
@@ -632,6 +637,7 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
       }
 
       case "resetInputs":
+        this.stopClockRunner();
         if (!this.activeCircuit) return;
         for (const input of this.activeCircuit.inputs) {
           this.currentInputs[input.name] = "0".repeat(input.width);
@@ -648,22 +654,37 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
             ? this.clockNameFor(this.activeCircuit, this.activeCircuit.events[0].clock)
             : undefined);
         if (!clockName) return;
-        try {
-          this.activeSimulator.setInput(clockName, "0");
-          this.activeSimulator.setInput(clockName, "1");
-          const snapshot = this.activeSimulator.setInput(clockName, "0");
-          this.currentInputs = normalizeInputs(
-            this.activeCircuit,
-            this.activeSimulator.getInputValues(),
-          );
-          this.applySnapshot(snapshot);
-        } catch (error) {
-          console.error("Step clock error:", error);
+        this.stepClock(clockName);
+        return;
+      }
+
+      case "startClock": {
+        if (!this.activeCircuit || !this.activeSimulator) return;
+        const clockName =
+          asString(msg.clock) ||
+          (this.activeCircuit.events[0]
+            ? this.clockNameFor(this.activeCircuit, this.activeCircuit.events[0].clock)
+            : undefined);
+        const speed = typeof msg.speed === "number" ? msg.speed : 2;
+        if (clockName) {
+          this.startClockRunner(clockName, speed);
         }
         return;
       }
 
+      case "stopClock": {
+        this.stopClockRunner();
+        return;
+      }
+
+      case "setClockSpeed": {
+        const speed = typeof msg.speed === "number" ? msg.speed : 2;
+        this.setClockSpeed(speed);
+        return;
+      }
+
       case "selectCircuit": {
+        this.stopClockRunner();
         const name = asString(msg.name);
         if (!name || !this.lastModel?.circuits.some((circuit) => circuit.name === name)) {
           return;
@@ -680,6 +701,7 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
         return;
 
       case "refresh":
+        this.stopClockRunner();
         this.refresh();
         return;
 
@@ -698,8 +720,54 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
   }
 
   public dispose(): void {
+    this.stopClockRunner();
     this.disposed = true;
     this.disposeViewListeners();
+  }
+
+  private stepClock(clockName: string): void {
+    if (!this.activeCircuit || !this.activeSimulator) return;
+    try {
+      this.activeSimulator.setInput(clockName, "0");
+      this.activeSimulator.setInput(clockName, "1");
+      const snapshot = this.activeSimulator.setInput(clockName, "0");
+      this.currentInputs = normalizeInputs(
+        this.activeCircuit,
+        this.activeSimulator.getInputValues(),
+      );
+      this.applySnapshot(snapshot);
+    } catch (error) {
+      console.error("Step clock error:", error);
+    }
+  }
+
+  private startClockRunner(clockName: string, speed: number): void {
+    this.stopClockRunner();
+    this.runningClockName = clockName;
+    this.clockSpeed = Math.max(1, Math.min(20, speed));
+    const interval = Math.max(50, Math.round(1000 / this.clockSpeed));
+    this.clockTimer = setInterval(() => {
+      if (!this.activeCircuit || !this.activeSimulator || !this.runningClockName) {
+        this.stopClockRunner();
+        return;
+      }
+      this.stepClock(this.runningClockName);
+    }, interval);
+  }
+
+  private stopClockRunner(): void {
+    if (this.clockTimer) {
+      clearInterval(this.clockTimer);
+      this.clockTimer = undefined;
+    }
+    this.runningClockName = undefined;
+  }
+
+  private setClockSpeed(speed: number): void {
+    this.clockSpeed = Math.max(1, Math.min(20, speed));
+    if (this.clockTimer && this.runningClockName) {
+      this.startClockRunner(this.runningClockName, this.clockSpeed);
+    }
   }
 
   private disposeViewListeners(): void {
@@ -718,6 +786,7 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
         filePath.replace(/\\/g, "/").includes("/macros/");
 
       if (isMacroFile) {
+        this.stopClockRunner();
         const fileName = filePath ? path.basename(filePath) : "package macro";
         const { declarations, diagnostics } = parsePackageMacroSource(source, fileName);
         this.activeCircuit = undefined;
@@ -750,6 +819,7 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
       const diagnostics = mapDiagnostics(result.diagnostics);
 
       if (result.circuits.length === 0) {
+        this.stopClockRunner();
         this.activeCircuit = undefined;
         this.activeSimulator = undefined;
         this.lastModel = this.emptyModel([], "", diagnostics);
@@ -804,6 +874,7 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
 
       this.post({ type: "update", payload: this.lastModel });
     } catch (error) {
+      this.stopClockRunner();
       const diagnostic: StudioDiagnostic = {
         message: `The studio could not compile this file: ${error instanceof Error ? error.message : String(error)}`,
         severity: "error",

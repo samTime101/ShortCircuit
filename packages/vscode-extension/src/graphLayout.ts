@@ -38,11 +38,16 @@ export interface GraphEdge {
   straightPath: string;
   labelX: number;
   labelY: number;
+  minX?: number;
+  maxX?: number;
+  minY?: number;
+  maxY?: number;
 }
 
 export interface GraphLayout {
   nodes: GraphNode[];
   edges: GraphEdge[];
+  neighbors?: Record<string, string[]>;
   depth: number;
   width: number;
   height: number;
@@ -299,6 +304,7 @@ export function buildLayout(circuit: CircuitIR): GraphLayout {
   });
 
   const nodeById = new Map(all.map((node) => [node.id, node]));
+  const neighbors = new Map<string, string[]>();
   for (const edge of edges) {
     const from = nodeById.get(edge.from);
     const to = nodeById.get(edge.to);
@@ -312,11 +318,37 @@ export function buildLayout(circuit: CircuitIR): GraphLayout {
     edge.straightPath = `M ${x1} ${y1} L ${x2} ${y2}`;
     edge.labelX = (x1 + x2) / 2;
     edge.labelY = (y1 + y2) / 2 - 6;
+
+    const reach = Math.max(x2 - x1, 40);
+    edge.minX = Math.min(x1, x2) - reach;
+    edge.maxX = Math.max(x1, x2) + reach;
+    edge.minY = Math.min(y1, y2) - 40;
+    edge.maxY = Math.max(y1, y2) + 40;
+
+    let fromList = neighbors.get(edge.from);
+    if (!fromList) {
+      fromList = [];
+      neighbors.set(edge.from, fromList);
+    }
+    fromList.push(edge.to);
+
+    let toList = neighbors.get(edge.to);
+    if (!toList) {
+      toList = [];
+      neighbors.set(edge.to, toList);
+    }
+    toList.push(edge.from);
+  }
+
+  const neighborsObj: Record<string, string[]> = {};
+  for (const [key, val] of neighbors.entries()) {
+    neighborsObj[key] = val;
   }
 
   return {
     nodes: all,
     edges,
+    neighbors: neighborsObj,
     depth: rankCount,
     width,
     height,

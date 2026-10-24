@@ -176,11 +176,21 @@ end`;
     expect(outS).toBeDefined();
     expect(outC).toBeDefined();
 
-    // Edges have curved paths
+    // Edges have curved paths and bounding boxes for viewport culling
     for (const edge of layout.edges) {
       expect(edge.path).toContain("M ");
       expect(edge.path).toContain("C ");
+      expect(typeof edge.minX).toBe("number");
+      expect(typeof edge.maxX).toBe("number");
+      expect(typeof edge.minY).toBe("number");
+      expect(typeof edge.maxY).toBe("number");
+      expect(edge.maxX).toBeGreaterThanOrEqual(edge.minX!);
+      expect(edge.maxY).toBeGreaterThanOrEqual(edge.minY!);
     }
+
+    // Neighbors map is populated for fast active connectivity highlighting
+    expect(layout.neighbors).toBeDefined();
+    expect(Object.keys(layout.neighbors!).length).toBeGreaterThan(0);
   });
 });
 
