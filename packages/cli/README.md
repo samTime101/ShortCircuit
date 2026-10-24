@@ -1,158 +1,185 @@
 # @shortcircuitcli/cli
 
-The command line compiler, simulator, tester, formatter, and exporter for the
-Short Circuit LogicFlow language.
+[![npm version](https://img.shields.io/npm/v/@shortcircuitcli/cli.svg)](https://www.npmjs.com/package/@shortcircuitcli/cli)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/samTime101/ShortCircuit/blob/main/LICENSE)
+[![Node.js Version](https://img.shields.io/badge/node-%3E%3D22.19-brightgreen.svg)](https://nodejs.org/)
 
-## Requirements
+> **Command-line compiler, simulator, tester, formatter, and exporter for the Short Circuit LogicFlow language.**
 
-Node.js 22.19 or newer.
+## Overview
+
+The CLI bundles the framework-free `@shortcircuit/engine` — a standalone TypeScript compiler and simulator with zero browser dependencies. It reads `.lf` (LogicFlow) source files and can:
+
+- **Compile** to portable IR (`shortcircuit.ir/v1`)
+- **Simulate** combinational and sequential circuits
+- **Test** in-source test cases and generate truth tables
+- **Format** source canonically
+- **Export** Verilog modules and testbenches
+- **Manage packages** (install, link, author, publish)
+
+---
 
 ## Install
 
 ```bash
+# Global install (recommended)
 npm install -g @shortcircuitcli/cli
-```
 
-To update an existing global install:
-
-```bash
+# Update to latest
 npm install -g @shortcircuitcli/cli@latest
-```
-
-or:
-
-```bash
+# or
 npm update -g @shortcircuitcli/cli
 ```
 
-The explicit `@latest` install is the most reliable.
+**Requires Node.js 22.19+**
 
-## Create a project
+---
 
-```bash
-shortcircuit init
-shortcircuit init my-project --registry https://example.com/registry.json
-cd my-project
-shortcircuit compile src/main.lf
-shortcircuit test src/main.lf
-```
-
-`init` creates `shortcircuit.json`, `shortcircuit.lock.json`, `src/main.lf`,
-and a `.gitignore` entry for `.shortcircuit/` and `dist/`. It refuses to run in
-a package root; keep packages under `packages/<name>` when they share a
-repository with a project.
-
-## Commands
+## Quick Start
 
 ```bash
-shortcircuit compile circuit.lf
-shortcircuit test circuit.lf
-shortcircuit truth-table circuit.lf --circuit HalfAdder
-shortcircuit format circuit.lf --write
-shortcircuit export-ir circuit.lf --out out.json
-shortcircuit export-verilog circuit.lf --out out.v
-```
+# 1. Create a project
+shortcircuit init my-adder
+cd my-adder
 
-Every command exits with 0 on success and 1 on a diagnostic error or a failed
-test, so it works in a pipeline. `--json` prints machine-readable output where
-it is available.
+# 2. Install the gates package (provides AND, XOR, etc.)
+shortcircuit package install @shortcircuit/gates
 
-The CLI bundles the compiler and simulator. It does **not** ship the default
-package snapshot used by the web studio. Install or link the packages a project
-imports before compiling it.
-
-## Packages
-
-Packages are scoped npm-style names. The package name is separate from the
-export it provides, for example package `@samip101/com16bit` exports
-`COM16BIT`.
-
-The compiler kernel provides `NAND`. Everything else comes from packages:
-
-```logicflow
+# 3. Write a circuit (src/main.lf created by init)
+cat > src/main.lf << 'EOF'
 IMPORT "@shortcircuit/gates"
 
 CIRCUIT HalfAdder
   INPUT a
   INPUT b
-  sum = XOR(a, b)
+  sum   = XOR(a, b)
   carry = AND(a, b)
   OUTPUT sum
   OUTPUT carry
 END
+
+TEST HalfAdder
+  CASE "1 + 1"
+    INPUT a = 1
+    INPUT b = 1
+    EXPECT sum   = 0
+    EXPECT carry = 1
+  END
+END
+EOF
+
+# 4. Compile and test
+shortcircuit compile src/main.lf
+shortcircuit test src/main.lf
 ```
 
-### Project commands
+---
+
+## Commands
+
+### Core Commands
+
+| Command | Description |
+|---------|-------------|
+| `shortcircuit compile <file.lf> [options]` | Compile to IR, validate, print diagnostics |
+| `shortcircuit test <file.lf> [options]` | Run all `TEST` blocks in the file |
+| `shortcircuit truth-table <file.lf> --circuit <name> [options]` | Exhaustive enumeration for combinational circuits |
+| `shortcircuit format <file.lf> [--write]` | Canonical formatting (like Prettier for LogicFlow) |
+| `shortcircuit export-ir <file.lf> --out <file.json>` | Write portable IR (`shortcircuit.ir/v1`) |
+| `shortcircuit export-verilog <file.lf> --out <file.v>` | Write Verilog module + testbench |
+
+**Common options:**
+- `--json` — Machine-readable output (where available)
+- `--package <dir>` — Load additional local package (repeatable)
+- `--help` — Command-specific help
+
+### Project Management
+
+| Command | Description |
+|---------|-------------|
+| `shortcircuit init [dir] [--registry <url>]` | Scaffold project (`shortcircuit.json`, `shortcircuit.lock.json`, `src/main.lf`, `.gitignore`) |
+| `shortcircuit package list [--json] [upstream] [--refresh]` | List installed or available registry packages |
+| `shortcircuit package install [<name>[@<version>]] [options]` | Install registry packages to `.shortcircuit/packages` |
+| `shortcircuit package update [<name>] [--latest]` | Update installed packages |
+| `shortcircuit package uninstall <name>` | Remove dependency from project |
+| `shortcircuit package link <name\|path>` | Link local package (stores `path:` dependency, no symlinks) |
+
+### Package Authoring
+
+| Command | Description |
+|---------|-------------|
+| `shortcircuit package init [dir] [options]` | Scaffold new package (interactive or `--yes` for non-interactive) |
+| `shortcircuit package add-export --export <NAME> --kind <macro\|circuit>` | Add export to existing package |
+| `shortcircuit package build` | Validate manifests and write `dist/packages.json` |
+| `shortcircuit package test` | Run package tests |
+| `shortcircuit package check` | Build + test in one command |
+| `shortcircuit package register --dry-run` | Validate and create registry submission bundle |
+
+---
+
+## Package Management
+
+### Installing Registry Packages
 
 ```bash
-shortcircuit package list
-shortcircuit package list --json
-shortcircuit package list upstream
-shortcircuit package list upstream --refresh
-
-shortcircuit package install
+# Install latest compatible version
 shortcircuit package install @shortcircuit/gates
+
+# Install specific version/range
 shortcircuit package install @shortcircuit/gates@^0.1.0
 shortcircuit package install @shortcircuit/gates --save-exact
 
-shortcircuit package update
-shortcircuit package update @shortcircuit/gates
-shortcircuit package update @shortcircuit/gates --latest
-
-shortcircuit package uninstall @shortcircuit/gates
+# Install all from shortcircuit.json
+shortcircuit package install
 ```
 
-Registry packages are downloaded into `.shortcircuit/packages` and recorded in
-`shortcircuit.lock.json` with their resolved URL and SHA-256 integrity. One
-version of a package name is active at a time. `package install` with no name
-installs everything in `shortcircuit.json`.
+**Useful flags:**
+| Flag | Purpose |
+|------|---------|
+| `--registry <url>` | Override registry index (supports `file://`) |
+| `--offline` | Use only cached data |
+| `--refresh` | Ignore cache, fetch fresh |
+| `--frozen` | Fail if lockfile/store incomplete (CI) |
+| `--force` | Replace conflicting dependency |
+| `--save-exact` | Pin exact version |
+| `--latest` | Save latest version as range |
 
-Useful flags:
+Default registry: `https://raw.githubusercontent.com/samTime101/ShortCircuit-Packages/main/registry.json`  
+Override with `SHORTCIRCUIT_REGISTRY_URL` env var or project `registry` field.
 
-| Flag | Meaning |
-| --- | --- |
-| `--registry <url>` | Use a specific registry index, including a `file://` fixture. |
-| `--offline` | Use only cached registry data and package archives. |
-| `--refresh` | Ignore cached registry data. |
-| `--frozen` | Fail if the lockfile or `.shortcircuit/packages` is incomplete. |
-| `--force` | Replace a conflicting dependency or generated file. |
-| `--save-exact` | Save an exact version instead of a caret range. |
-| `--latest` | Change the saved range to the latest version. |
-
-The default registry is
-`https://raw.githubusercontent.com/samTime101/ShortCircuit-Packages/main/registry.json`.
-Set `SHORTCIRCUIT_REGISTRY_URL` or a project's `registry` field to override it.
-Cached data lives in `SHORTCIRCUIT_CACHE`, then `$XDG_CACHE_HOME/shortcircuit`,
-then `~/.cache/shortcircuit`.
-
-### Local packages
-
-`package link` records a `path:` dependency in `shortcircuit.json`:
+### Linking Local Packages
 
 ```bash
+# Link by short name (from project root)
 shortcircuit package link com16bit
+
+# Link by scoped name
+shortcircuit package link @samip101/com16bit
+
+# Link by path
 shortcircuit package link packages/com16bit
 shortcircuit package link /absolute/path/to/com16bit
 ```
 
-The package is read in place. No files are copied and no symlink is created.
-`package uninstall` removes the dependency entry but never deletes the linked
-package directory.
+Linked packages are read in-place — no files copied, no symlinks created.  
+`package uninstall` removes the dependency entry but **never deletes** the linked package.
 
-For a one-off compile without changing the project, use `--package`:
+### One-off Compilation with Local Packages
 
 ```bash
 shortcircuit compile circuit.lf --package packages/com16bit
+shortcircuit compile circuit.lf --package /path/to/pkg/manifest.json
 ```
 
-`--package` is repeatable.
+`--package` is repeatable. The loader inlines source, docs, and tests — same layout works with the engine API.
 
-### Authoring packages
+---
 
-Package authoring works in any directory. It does not require a checkout of the
-package registry:
+## Creating a Package
 
-From an empty directory:
+Package authoring works **anywhere** — no registry checkout needed.
+
+### From an Empty Directory
 
 ```bash
 shortcircuit package init \
@@ -164,53 +191,137 @@ shortcircuit package init \
   --yes
 ```
 
-From a project root, always give the package a subdirectory:
+### From a Project Root (Monorepo Style)
 
 ```bash
+# Create package in subdirectory
 shortcircuit package init packages/com1bit \
   --name @shortcircuit/com1bit \
   --export COM1BIT \
   --kind circuit \
   --yes
+
+# Link it into the project
 shortcircuit package link @shortcircuit/com1bit
 ```
 
-Add more exports to an existing package:
+### Export Kinds
+
+| Kind | Description | Example |
+|------|-------------|---------|
+| `macro` | Reusable expression, expands at use site | `AND(a, b)` |
+| `circuit` | Reusable block with named ports, instantiated as node | `HALF_ADDER(a, b)` |
+
+The scaffold creates:
+- `package.json` / `manifest.json` (catalog metadata)
+- `.lf` source file (implementation)
+- `docs/` (markdown documentation)
+- `tests/` (package test suite)
+- `.gitignore`
+
+### Build, Test, and Register
 
 ```bash
-shortcircuit package add-export --export COM2 --kind circuit
+shortcircuit package build   # Validate + write dist/packages.json
+shortcircuit package test    # Run package tests
+shortcircuit package check   # Build + test
+shortcircuit package register --dry-run  # Create submission bundle
 ```
 
-Then build and test:
+`package register` writes a validated bundle to `.shortcircuit/register/<pkg>-<version>/`. Opening the registry PR is manual. See [Package Authoring Guide](../docs/PACKAGES.md) for complete workflow.
+
+---
+
+## Configuration
+
+### Project: `shortcircuit.json`
+
+```json
+{
+  "name": "my-project",
+  "version": "0.1.0",
+  "registry": "https://custom.registry/registry.json",
+  "dependencies": {
+    "@shortcircuit/gates": "^0.1.0"
+  }
+}
+```
+
+### Lockfile: `shortcircuit.lock.json`
+
+Records exact versions, URLs, and SHA-256 integrity for reproducible builds. Commit this file.
+
+### Cache Location
+
+```
+SHORTCIRCUIT_CACHE
+→ $XDG_CACHE_HOME/shortcircuit
+→ ~/.cache/shortcircuit
+```
+
+---
+
+## Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success |
+| `1` | Diagnostic error or test failure |
+
+All commands respect this for pipeline/CI usage.
+
+---
+
+## Using the Engine API Directly
+
+For embedding in tools, scripts, or other languages:
 
 ```bash
-shortcircuit package build   # validate and write dist/packages.json
-shortcircuit package test    # run the package's .lf tests
-shortcircuit package check   # build and test
-shortcircuit package register --dry-run
+npm install @shortcircuit/engine
 ```
 
-`package init` explains the two export kinds before creating files:
+```ts
+import { compile, simulate, test, format, exportVerilog } from "@shortcircuit/engine";
 
-- **MACRO** is a reusable expression such as `AND(a, b)`. Macros expand into
-  the circuit that uses them.
-- **CIRCUIT** is a reusable block with named ports. Circuits are instantiated
-  as nodes.
+const result = compile(source, {
+  packages: bundle,           // PackageBundle or manifest[]
+  disableDefaultPackages: false,
+});
 
-The scaffold writes `package.json`, `manifest.json`, `.lf` source, docs, tests,
-an empty lockfile, and a `.gitignore`. Use `shortcircuit package init --help`
-for every flag.
+if (!result.ok) {
+  console.error(result.diagnostics);
+  process.exit(1);
+}
 
-`package register` validates the package, runs its tests, records the payload
-integrity, and writes a submission bundle under
-`.shortcircuit/register/<package>-<version>/`. `--dry-run` prints the registry
-entry, integrity, and file list without writing. Opening the registry pull
-request is still a manual step.
+const sim = simulate(result.ir, { inputs: { a: 1, b: 0 } });
+console.log(sim.values);  // { sum: 1, carry: 0 }
+```
 
-Packages can declare registry dependencies. `package test` and
-`package register` resolve them from the package's own `shortcircuit.lock.json`
-after `shortcircuit package install` in that directory.
+See [IR.md](../docs/IR.md) for the portable IR schema and [ARCHITECTURE.md](../docs/ARCHITECTURE.md) for extension points.
 
-## Source
+---
 
-[github.com/samTime101/ShortCircuit](https://github.com/samTime101/ShortCircuit)
+## Development
+
+```bash
+# From ShortCircuit repo root
+npm ci
+npm run cli:build       # Build CLI to packages/cli/dist/cli.js
+npx shortcircuit help   # Test local build
+npm run test:cli-packed # Test exact publish tarball
+```
+
+---
+
+## License
+
+MIT — see [LICENSE](../../LICENSE) in the main repository.
+
+---
+
+## Links
+
+- **Main Repository**: [github.com/samTime101/ShortCircuit](https://github.com/samTime101/ShortCircuit)
+- **Package Registry**: [github.com/samTime101/ShortCircuit-Packages](https://github.com/samTime101/ShortCircuit-Packages)
+- **Language Reference**: [docs/LANGUAGE.md](../docs/LANGUAGE.md)
+- **Package Authoring**: [docs/PACKAGES.md](../docs/PACKAGES.md)
