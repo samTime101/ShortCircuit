@@ -40,7 +40,7 @@ export function getStudioHtml(
 ): string {
   const modelJson = serializeModel(initialModel);
   const initialTabJson = JSON.stringify(options.initialTab ?? "circuit");
-  const version = options.version ?? "0.1.2";
+  const version = options.version ?? "0.1.3";
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -214,6 +214,15 @@ export function getStudioHtml(
       background: var(--panel-2);
       border-color: var(--line-strong);
       color: var(--text);
+    }
+
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
+    .btn-action.is-refreshing svg {
+      animation: spin 0.6s cubic-bezier(0.4, 0, 0.2, 1);
     }
 
     /* Diagnostics Banner */
@@ -2022,9 +2031,13 @@ export function getStudioHtml(
 
     // Refresh buttons
     btnRefresh.addEventListener("click", function () {
+      btnRefresh.classList.add("is-refreshing");
+      setTimeout(function () { btnRefresh.classList.remove("is-refreshing"); }, 600);
       vscode.postMessage({ type: "refresh" });
     });
     btnEmptyRefresh.addEventListener("click", function () {
+      btnEmptyRefresh.classList.add("is-refreshing");
+      setTimeout(function () { btnEmptyRefresh.classList.remove("is-refreshing"); }, 600);
       vscode.postMessage({ type: "refresh" });
     });
 
@@ -2512,18 +2525,35 @@ export function getStudioHtml(
       if (pathActive) pathActive.setAttribute("d", activeEdgePath);
     }
 
-    function render(newModel) {
+    function render(newModel, forceReset) {
       const previousCircuit = model ? model.activeCircuit : null;
       const circuitChanged = previousCircuit !== (newModel ? newModel.activeCircuit : null);
       model = newModel;
       requested = {};
 
-      if (circuitChanged) {
-        // Reset cached layout for new circuit
+      if (model && model.layout) {
+        fullLayoutNodes = model.layout.nodes || [];
+        fullLayoutEdges = model.layout.edges || [];
+        fullNodesById = new Map();
+        fullLayoutNodes.forEach(function (n) { fullNodesById.set(n.id, n); });
+        layoutNeighbors = new Map();
+        if (model.layout.neighbors) {
+          Object.keys(model.layout.neighbors).forEach(function (key) {
+            layoutNeighbors.set(key, new Set(model.layout.neighbors[key]));
+          });
+        }
+      } else {
         fullLayoutNodes = [];
         fullLayoutEdges = [];
         fullNodesById = new Map();
         layoutNeighbors = new Map();
+      }
+
+      if (circuitChanged || forceReset) {
+        lastCullPanX = 40;
+        lastCullPanY = 40;
+        lastCullScale = 1.0;
+        selectNode(null);
       }
 
       if (!model) {
@@ -2576,7 +2606,7 @@ export function getStudioHtml(
 
       ensureTabData();
 
-      if (previousCircuit !== activeCircuit.name) {
+      if (previousCircuit !== activeCircuit.name || forceReset) {
         setTimeout(fitGraph, 40);
       }
     }
@@ -3504,7 +3534,7 @@ export function getStudioHtml(
     // Message listener from extension host
     window.addEventListener("message", function (event) {
       const message = event.data || {};
-      if (message.type === "update") render(message.payload || null);
+      if (message.type === "update") render(message.payload || null, Boolean(message.forceReset));
       else if (message.type === "simulation") applySimulation(message.payload);
       else if (message.type === "derived") applyDerived(message.kind, message.payload);
       else if (message.type === "setTab") setActiveTab(message.tab);

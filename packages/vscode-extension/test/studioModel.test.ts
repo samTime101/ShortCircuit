@@ -231,11 +231,15 @@ END`;
     const { getStudioHtml } = await import("../src/studioHtml");
     const vm = await import("node:vm");
 
-    const htmlNull = getStudioHtml(null, { version: "0.1.2" });
-    expect(htmlNull).toContain("v0.1.2");
+    const htmlNull = getStudioHtml(null, { version: "0.1.3" });
+    expect(htmlNull).toContain("v0.1.3");
     const scriptNullMatch = htmlNull.match(/<script>([\s\S]*?)<\/script>/);
     expect(scriptNullMatch).toBeTruthy();
     expect(() => new vm.Script(scriptNullMatch![1])).not.toThrow();
+
+    // Default version fallback should be 0.1.3
+    const htmlDefault = getStudioHtml(null);
+    expect(htmlDefault).toContain("v0.1.3");
 
     const result = compileWithPackages(HALF_ADDER);
     const circuit = result.circuits[0]!;
@@ -258,7 +262,7 @@ END`;
       irText: null,
       diagnostics: [],
     };
-    const htmlModel = getStudioHtml(model, { version: "0.1.2" });
+    const htmlModel = getStudioHtml(model, { version: "0.1.3" });
     const scriptModelMatch = htmlModel.match(/<script>([\s\S]*?)<\/script>/);
     expect(scriptModelMatch).toBeTruthy();
     expect(() => new vm.Script(scriptModelMatch![1])).not.toThrow();
@@ -270,11 +274,16 @@ END`;
     expect(htmlModel).toContain("pane-resizer vertical");
     expect(htmlModel).toContain("--sim-dock-height");
     expect(htmlModel).toContain("--sim-split");
+
+    // Verify refresh animation styles and forceReset handler are present
+    expect(htmlModel).toContain("@keyframes spin");
+    expect(htmlModel).toContain("is-refreshing");
+    expect(htmlModel).toContain("Boolean(message.forceReset)");
   });
 
-  it("ensures no duplicate refreshStudio in view/title and version is 0.1.2", async () => {
+  it("ensures no duplicate refreshStudio in view/title and version is 0.1.3", async () => {
     const pkg = await import("../package.json");
-    expect(pkg.version).toBe("0.1.2");
+    expect(pkg.version).toBe("0.1.3");
     const menus = (pkg.contributes as { menus?: { "view/title"?: unknown[] } }).menus;
     const viewTitle = menus?.["view/title"] || [];
     const hasRefreshInTitle = viewTitle.some((item) =>

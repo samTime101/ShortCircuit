@@ -98,7 +98,7 @@ export function activate(context: vscode.ExtensionContext): void {
   }
 
   // 2. Studio state manager and sidebar webview
-  const extensionVersion = (context.extension?.packageJSON?.version as string) || "0.1.2";
+  const extensionVersion = (context.extension?.packageJSON?.version as string) || "0.1.3";
   const provider = new ShortCircuitStudioProvider(context.extensionUri, extensionVersion);
   studioProvider = provider;
   context.subscriptions.push(
@@ -292,6 +292,35 @@ function visibleLogicflowDocument(): vscode.TextDocument | undefined {
   )?.document;
 }
 
+function findTargetLogicflowDocument(
+  provider: ShortCircuitStudioProvider,
+): vscode.TextDocument | undefined {
+  const active = vscode.window.activeTextEditor;
+  if (active && active.document.languageId === "logicflow" && !active.document.isClosed) {
+    return active.document;
+  }
+  const activeTab = vscode.window.tabGroups.activeTabGroup?.activeTab;
+  if (activeTab && activeTab.input instanceof vscode.TabInputText) {
+    const doc = vscode.workspace.textDocuments.find(
+      (d) => d.uri.toString() === (activeTab.input as vscode.TabInputText).uri.toString(),
+    );
+    if (doc && doc.languageId === "logicflow" && !doc.isClosed) {
+      return doc;
+    }
+  }
+  const current = provider.getCurrentDocument();
+  if (current && !current.isClosed) {
+    return current;
+  }
+  const visible = visibleLogicflowDocument();
+  if (visible && !visible.isClosed) {
+    return visible;
+  }
+  return vscode.workspace.textDocuments.find(
+    (d) => d.languageId === "logicflow" && !d.isClosed,
+  );
+}
+
 function isOpenDocument(uri: vscode.Uri): boolean {
   return vscode.workspace.textDocuments.some(
     (document) => document.uri.toString() === uri.toString(),
@@ -479,7 +508,7 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
 
   constructor(
     private readonly extensionUri: vscode.Uri,
-    private readonly extensionVersion: string = "0.1.2",
+    private readonly extensionVersion: string = "0.1.3",
   ) {}
 
   public getVersion(): string {
@@ -546,22 +575,12 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
 
   public refresh(): void {
     invalidatePackageCache();
-    const active = vscode.window.activeTextEditor;
-    if (active && active.document.languageId === "logicflow") {
-      this.updateForDocument(active.document, { force: true });
-      return;
-    }
-    const current =
-      this.currentDocument && !this.currentDocument.isClosed
-        ? this.currentDocument
-        : undefined;
-    if (current) {
-      this.updateForDocument(current, { force: true });
-      return;
-    }
-    const visible = visibleLogicflowDocument();
-    if (visible) {
-      this.updateForDocument(visible, { force: true });
+    this.lastCompiledKey = undefined;
+    this.derivedCache = {};
+
+    const targetDoc = findTargetLogicflowDocument(this);
+    if (targetDoc) {
+      this.updateForDocument(targetDoc, { force: true, resetState: true });
       return;
     }
     this.clear();
@@ -569,7 +588,7 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
 
   public updateForDocument(
     document: vscode.TextDocument,
-    options: { force?: boolean } = {},
+    options: { force?: boolean; resetState?: boolean } = {},
   ): void {
     if (this.disposed || document.isClosed) return;
 
@@ -579,7 +598,7 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
 
     const documentChanged =
       this.currentDocument?.uri.toString() !== document.uri.toString();
-    if (documentChanged) {
+    if (documentChanged || options.resetState) {
       this.stopClockRunner();
       this.activeCircuitName = undefined;
       this.currentInputs = {};
@@ -589,7 +608,7 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
 
     this.currentDocument = document;
     this.lastCompiledKey = key;
-    this.compileAndBroadcast(source);
+    this.compileAndBroadcast(source, Boolean(options.resetState));
   }
 
   public async handleMessage(message: unknown): Promise<void> {
@@ -799,7 +818,7 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private compileAndBroadcast(source: string): void {
+  private compileAndBroadcast(source: string, forceReset = false): void {
     this.derivedCache = {};
     const filePath = this.currentDocument?.fileName || "";
 
@@ -826,7 +845,7 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
           declarations[0]?.name ?? "",
           mapDiagnostics(diagnostics),
         );
-        this.post({ type: "update", payload: this.lastModel });
+        this.post({ type: "update", payload: this.lastModel, forceReset });
         return;
       }
 
@@ -847,7 +866,7 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
         this.activeCircuit = undefined;
         this.activeSimulator = undefined;
         this.lastModel = this.emptyModel([], "", diagnostics);
-        this.post({ type: "update", payload: this.lastModel });
+        this.post({ type: "update", payload: this.lastModel, forceReset });
         return;
       }
 
@@ -896,7 +915,7 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
         diagnostics,
       };
 
-      this.post({ type: "update", payload: this.lastModel });
+      this.post({ type: "update", payload: this.lastModel, forceReset });
     } catch (error) {
       this.stopClockRunner();
       const diagnostic: StudioDiagnostic = {
@@ -908,7 +927,7 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
       this.activeCircuit = undefined;
       this.activeSimulator = undefined;
       this.lastModel = this.emptyModel([], "", [diagnostic]);
-      this.post({ type: "update", payload: this.lastModel });
+      this.post({ type: "update", payload: this.lastModel, forceReset });
       console.error("Compilation error in StudioProvider:", error);
     }
   }
