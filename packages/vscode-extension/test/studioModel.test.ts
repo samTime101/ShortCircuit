@@ -226,4 +226,41 @@ END`;
     expect(run.passed).toBe(2);
     expect(run.failed).toBe(0);
   });
+
+  it("produces syntactically valid script in getStudioHtml", async () => {
+    const { getStudioHtml } = await import("../src/studioHtml");
+    const vm = await import("node:vm");
+
+    const htmlNull = getStudioHtml(null, { version: "0.1.1" });
+    expect(htmlNull).toContain("v0.1.1");
+    const scriptNullMatch = htmlNull.match(/<script>([\s\S]*?)<\/script>/);
+    expect(scriptNullMatch).toBeTruthy();
+    expect(() => new vm.Script(scriptNullMatch![1])).not.toThrow();
+
+    const result = compileWithPackages(HALF_ADDER);
+    const circuit = result.circuits[0]!;
+    const model = {
+      circuits: [{
+        name: circuit.name,
+        stats: { nodes: 2, states: 0, events: 0, maxDepth: 1, maxWidth: 1 },
+        sequential: false,
+        inputs: circuit.inputs.map((i) => ({ name: i.name, width: i.width })),
+        outputs: circuit.outputs.map((o) => ({ name: o.name, width: o.width })),
+      }],
+      activeCircuit: circuit.name,
+      inputs: { a: "0", b: "0" },
+      snapshot: { nodes: {}, outputs: {} },
+      layout: null,
+      truthTable: null,
+      waveform: null,
+      tests: null,
+      ir: null,
+      irText: null,
+      diagnostics: [],
+    };
+    const htmlModel = getStudioHtml(model, { version: "0.1.1" });
+    const scriptModelMatch = htmlModel.match(/<script>([\s\S]*?)<\/script>/);
+    expect(scriptModelMatch).toBeTruthy();
+    expect(() => new vm.Script(scriptModelMatch![1])).not.toThrow();
+  });
 });

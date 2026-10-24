@@ -98,7 +98,8 @@ export function activate(context: vscode.ExtensionContext): void {
   }
 
   // 2. Studio state manager and sidebar webview
-  const provider = new ShortCircuitStudioProvider(context.extensionUri);
+  const extensionVersion = (context.extension?.packageJSON?.version as string) || "0.1.1";
+  const provider = new ShortCircuitStudioProvider(context.extensionUri, extensionVersion);
   studioProvider = provider;
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider("shortcircuit.studioView", provider),
@@ -236,9 +237,12 @@ export function activate(context: vscode.ExtensionContext): void {
       if (editor && editor.document.languageId === "logicflow") {
         provider.updateForDocument(editor.document);
       } else if (!editor) {
+        // Focus changed to a webview, terminal, or sidebar panel.
+        // Don't wipe the studio if the current document is still open.
         const visible = visibleLogicflowDocument();
-        if (visible) provider.updateForDocument(visible);
-        else provider.clear();
+        if (visible && visible.uri.toString() !== provider.getCurrentDocument()?.uri.toString()) {
+          provider.updateForDocument(visible);
+        }
       } else {
         const visible = visibleLogicflowDocument();
         if (visible) provider.updateForDocument(visible);
@@ -473,7 +477,14 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
   private runningClockName?: string;
   private clockSpeed = 2;
 
-  constructor(private readonly extensionUri: vscode.Uri) {}
+  constructor(
+    private readonly extensionUri: vscode.Uri,
+    private readonly extensionVersion: string = "0.1.1",
+  ) {}
+
+  public getVersion(): string {
+    return this.extensionVersion;
+  }
 
   public resolveWebviewView(
     webviewView: vscode.WebviewView,
@@ -487,7 +498,9 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
       enableScripts: true,
       localResourceRoots: [this.extensionUri],
     };
-    webviewView.webview.html = getStudioHtml(this.lastModel ?? null);
+    webviewView.webview.html = getStudioHtml(this.lastModel ?? null, {
+      version: this.extensionVersion,
+    });
 
     this.viewDisposables.push(
       webviewView.webview.onDidReceiveMessage((message) => {
@@ -587,6 +600,16 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
       case "ready":
         if (this.lastModel) {
           this.post({ type: "update", payload: this.lastModel });
+        } else if (this.currentDocument && !this.currentDocument.isClosed) {
+          this.updateForDocument(this.currentDocument, { force: true });
+        } else {
+          const active = vscode.window.activeTextEditor;
+          if (active && active.document.languageId === "logicflow") {
+            this.updateForDocument(active.document, { force: true });
+          } else {
+            const visible = visibleLogicflowDocument();
+            if (visible) this.updateForDocument(visible, { force: true });
+          }
         }
         return;
 
@@ -782,8 +805,9 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
 
     try {
       const isMacroFile =
-        /^\s*MACRO\b/im.test(source) ||
-        filePath.replace(/\\/g, "/").includes("/macros/");
+        !/^\s*CIRCUIT\b/im.test(source) &&
+        (/^\s*MACRO\b/im.test(source) ||
+          filePath.replace(/\\/g, "/").includes("/macros/"));
 
       if (isMacroFile) {
         this.stopClockRunner();
@@ -996,6 +1020,7 @@ export class StudioPanel {
 
     this.panel.webview.html = getStudioHtml(provider.getModel() ?? null, {
       initialTab,
+      version: provider.getVersion(),
     });
 
     this.panel.webview.onDidReceiveMessage(

@@ -40,6 +40,7 @@ export function getStudioHtml(
 ): string {
   const modelJson = serializeModel(initialModel);
   const initialTabJson = JSON.stringify(options.initialTab ?? "circuit");
+  const version = options.version ?? "0.1.1";
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -156,6 +157,18 @@ export function getStudioHtml(
       display: flex;
       align-items: center;
       gap: 8px;
+    }
+
+    .version-tag {
+      font-size: 10px;
+      font-family: var(--font-mono);
+      color: var(--text-faint);
+      padding: 2px 6px;
+      border-radius: var(--radius-sm);
+      background: var(--panel-2);
+      border: 1px solid var(--line);
+      user-select: none;
+      white-space: nowrap;
     }
 
     .circuit-select {
@@ -1514,6 +1527,7 @@ export function getStudioHtml(
         Refresh
       </button>
       <button id="btn-expand" class="btn-action" title="Open in Editor Beside">⤢ Expand</button>
+      <span class="version-tag" title="Short Circuit Extension Version">v${version}</span>
     </div>
   </div>
 
@@ -1730,7 +1744,6 @@ export function getStudioHtml(
     let truthRowEls = new Map();
     let activeTruthRowEl = null;
     let requested = {};
-    let transformFrame = null;
     const outputDisplayModes = Object.assign({}, persistedState.outputDisplayModes || {});
 
     // Elements
@@ -1989,6 +2002,9 @@ export function getStudioHtml(
     let dragRef = null;
     let transformFrame = null;
     let lastRenderedLodScale = 1.0;
+    let lastCullPanX = 40;
+    let lastCullPanY = 40;
+    let lastCullScale = 1.0;
 
     // Cached layout for culling/LOD
     let fullLayoutNodes = [];
@@ -1997,13 +2013,24 @@ export function getStudioHtml(
     let currentVisibleNodes = [];
     let currentVisibleEdges = [];
 
-    function scheduleTransform() {
+    function scheduleTransform(forceRender) {
       if (transformFrame !== null) return;
       transformFrame = requestAnimationFrame(function () {
         transformFrame = null;
         graphWorld.setAttribute("transform", "translate(" + panX + " " + panY + ") scale(" + zoomScale + ")");
-        if (crossesLodThreshold(lastRenderedLodScale, zoomScale)) {
+
+        const lodChanged = crossesLodThreshold(lastRenderedLodScale, zoomScale);
+        const overscanThreshold = Math.max(32, (VIEW_OVERSCAN * zoomScale) * 0.4);
+        const pannedPastOverscan =
+          Math.abs(panX - lastCullPanX) > overscanThreshold ||
+          Math.abs(panY - lastCullPanY) > overscanThreshold ||
+          Math.abs(zoomScale - lastCullScale) / lastCullScale > 0.06;
+
+        if (forceRender || lodChanged || pannedPastOverscan) {
           lastRenderedLodScale = zoomScale;
+          lastCullPanX = panX;
+          lastCullPanY = panY;
+          lastCullScale = zoomScale;
           renderGraph();
         }
       });
@@ -2029,10 +2056,11 @@ export function getStudioHtml(
       panY = cy - (cy - panY) * ratio;
       zoomScale = nextScale;
       applyTransform();
-      if (crossesLodThreshold(lastRenderedLodScale, zoomScale)) {
-        lastRenderedLodScale = zoomScale;
-        renderGraph();
-      }
+      lastRenderedLodScale = zoomScale;
+      lastCullPanX = panX;
+      lastCullPanY = panY;
+      lastCullScale = zoomScale;
+      renderGraph();
     }
 
     document.getElementById("btn-zoom-in").addEventListener("click", function () {
@@ -2045,7 +2073,6 @@ export function getStudioHtml(
 
     document.getElementById("btn-zoom-fit").addEventListener("click", function () {
       fitGraph();
-      renderGraph();
     });
 
     circuitGraphSvg.addEventListener("pointerdown", function (event) {
@@ -2085,9 +2112,10 @@ export function getStudioHtml(
         }
       } catch (_) {}
       if (hadMoved) {
-        if (zoomScale >= MIN_NODE_BATCH_SCALE && fullLayoutNodes.length > currentVisibleNodes.length) {
-          renderGraph();
-        }
+        lastCullPanX = panX;
+        lastCullPanY = panY;
+        lastCullScale = zoomScale;
+        renderGraph();
       }
     }
 
@@ -2149,20 +2177,23 @@ export function getStudioHtml(
       const viewHeight = rect.height || 400;
       const layoutWidth = model.layout.width || 600;
       const layoutHeight = model.layout.height || 400;
-      const fitScale = Math.min(
-        (viewWidth - 64) / layoutWidth,
-        (viewHeight - 64) / layoutHeight
+      // Match web CircuitGraph: Never zoom out past the point where labels stop being readable (0.62)
+      const scale = Math.max(
+        0.62,
+        Math.min(
+          1.05,
+          (viewWidth - 64) / layoutWidth,
+          (viewHeight - 64) / layoutHeight
+        )
       );
-      // For large graphs (>90 nodes, e.g. ALU8 with 1,104 nodes), fit the whole overview down to MIN_ZOOM.
-      // For smaller graphs, keep text readable by not shrinking below 0.62.
-      const isLarge = Boolean(model.layout.nodes && model.layout.nodes.length > 90);
-      const minFit = isLarge ? MIN_ZOOM : FIT_MIN_ZOOM;
-      const scale = Math.max(minFit, Math.min(FIT_MAX_ZOOM, fitScale));
       zoomScale = scale;
       panX = (viewWidth - layoutWidth * scale) / 2;
       panY = (viewHeight - layoutHeight * scale) / 2;
       applyTransform();
       lastRenderedLodScale = zoomScale;
+      lastCullPanX = panX;
+      lastCullPanY = panY;
+      lastCullScale = zoomScale;
       renderGraph();
     }
 
@@ -2352,7 +2383,7 @@ export function getStudioHtml(
       diagText.textContent = "Line " + first.line + ": " + first.message;
       diagText.title = diagnostics.map(function (diagnostic) {
         return "Line " + diagnostic.line + ": " + diagnostic.message;
-      }).join("\n");
+      }).join("\\n");
     }
 
     function resetViews() {
@@ -2367,6 +2398,9 @@ export function getStudioHtml(
       fullLayoutNodes = [];
       fullLayoutEdges = [];
       layoutNeighbors = new Map();
+      lastCullPanX = 40;
+      lastCullPanY = 40;
+      lastCullScale = 1.0;
       inputRowEls = new Map();
       outputRowEls = new Map();
       stateRowEls = new Map();

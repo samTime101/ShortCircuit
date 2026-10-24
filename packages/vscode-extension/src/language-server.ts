@@ -167,8 +167,9 @@ function openSources(): Map<string, string> {
 
 function isMacroFile(source: string, filePath: string): boolean {
   return (
-    /^\s*MACRO\b/im.test(source) ||
-    filePath.replace(/\\/g, "/").includes("/macros/")
+    !/^\s*CIRCUIT\b/im.test(source) &&
+    (/^\s*MACRO\b/im.test(source) ||
+      filePath.replace(/\\/g, "/").includes("/macros/"))
   );
 }
 

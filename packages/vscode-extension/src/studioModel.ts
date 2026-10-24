@@ -157,6 +157,7 @@ export interface StudioModel {
 
 export interface StudioHtmlOptions {
   initialTab?: "circuit" | "truth" | "waveform" | "tests" | "ir";
+  version?: string;
 }
 
 export type StudioDerivedKind = "truthTable" | "waveform" | "irText";
