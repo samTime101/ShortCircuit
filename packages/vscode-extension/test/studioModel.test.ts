@@ -281,9 +281,9 @@ END`;
     expect(htmlModel).toContain("Boolean(message.forceReset)");
   });
 
-  it("ensures no duplicate refreshStudio in view/title and version is 0.1.4", async () => {
+  it("ensures no duplicate refreshStudio in view/title and version is 0.1.5", async () => {
     const pkg = await import("../package.json");
-    expect(pkg.version).toBe("0.1.4");
+    expect(pkg.version).toBe("0.1.5");
     const menus = (pkg.contributes as { menus?: { "view/title"?: unknown[] } }).menus;
     const viewTitle = menus?.["view/title"] || [];
     const hasRefreshInTitle = viewTitle.some((item) =>
