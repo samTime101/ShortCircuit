@@ -101,6 +101,46 @@ The workflow:
 If the version is already published, the workflow skips the test, build, and
 publish steps. Bump the version if you intended to release.
 
+## Releasing the VS Code extension
+
+The Marketplace extension is `samTime101.shortcircuit`. The
+`Release VS Code Extension` workflow in `.github/workflows/release-vscode.yml`
+publishes it automatically when `main` receives a change to:
+
+- extension source, assets, syntaxes, or packaging files;
+- engine source (the engine is bundled into the extension);
+- the `vendor/ShortCircuit-Packages` submodule pointer (its default package
+  bundle is also bundled into the extension).
+
+Every automatic run bumps the **patch** version, commits the bumped
+`packages/vscode-extension/package.json` and lockfile with `[skip ci]`, and
+publishes to the Marketplace. Use the workflow's manual **Run workflow**
+button with `minor` or `major` to release a larger version jump.
+
+### One-time setup
+
+1. Create an Azure DevOps personal access token for the Marketplace publisher.
+   Grant the **Marketplace: Manage** scope for **all accessible organizations**.
+2. Add it to the repository as the `VSCE_PAT` secret.
+3. If `main` is protected and does not allow the default `GITHUB_TOKEN` to
+   push, create a GitHub token with `contents: write` and add it as the
+   `RELEASE_TOKEN` secret. The workflow uses `RELEASE_TOKEN` when present and
+   falls back to `GITHUB_TOKEN` otherwise.
+
+Until `VSCE_PAT` is configured, the workflow skips the release with a notice
+instead of failing.
+
+### Manual publishing
+
+To publish without the workflow, bump the extension version first because the
+Marketplace rejects duplicate versions:
+
+```bash
+npm version patch --no-git-tag-version -w shortcircuit
+npm run build -w shortcircuit
+npx @vscode/vsce@4 publish --skip-duplicate
+```
+
 ## Releasing a web package snapshot change
 
 The web studio's default packages live in the `vendor/ShortCircuit-Packages`

@@ -1,0 +1,119 @@
+name: Release VS Code Extension
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/vscode-extension/src/**"
+      - "packages/vscode-extension/media/**"
+      - "packages/vscode-extension/syntaxes/**"
+      - "packages/vscode-extension/icons/**"
+      - "packages/vscode-extension/language-configuration.json"
+      - "packages/vscode-extension/package.json"
+      - "packages/vscode-extension/.vscodeignore"
+      - "packages/vscode-extension/build.js"
+      - "packages/vscode-extension/icon.png"
+      - "packages/vscode-extension/LICENSE"
+      - "packages/vscode-extension/*.md"
+      - "packages/engine/src/**"
+      - "packages/engine/package.json"
+      - "vendor/ShortCircuit-Packages"
+      - "vendor/ShortCircuit-Packages/**"
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump"
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+        default: patch
+
+permissions:
+  contents: write
+
+concurrency:
+  group: vscode-extension-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Publish shortcircuit
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip ci]') }}
+    steps:
+      - name: Check the Marketplace token
+        id: token
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          if [ -z "$VSCE_PAT" ]; then
+            echo "::notice::VSCE_PAT is not configured. Add it to the repository secrets to release the extension."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out the repository
+        if: steps.token.outputs.configured == 'true'
+        uses: actions/checkout@v4
+        with:
+          # Prefer a token that may bypass branch protection on main. The
+          # default GITHUB_TOKEN works when main allows Actions to push.
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Set up Node.js
+        if: steps.token.outputs.configured == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        if: steps.token.outputs.configured == 'true'
+        run: npm ci
+
+      - name: Typecheck the extension
+        if: steps.token.outputs.configured == 'true'
+        run: npm run typecheck -w shortcircuit
+
+      - name: Test the extension
+        if: steps.token.outputs.configured == 'true'
+        run: npm test -w shortcircuit
+
+      - name: Build the extension
+        if: steps.token.outputs.configured == 'true'
+        run: npm run build -w shortcircuit
+
+      - name: Bump the extension version
+        if: steps.token.outputs.configured == 'true'
+        id: version
+        env:
+          BUMP: ${{ github.event.inputs.bump || 'patch' }}
+        run: |
+          npm version "$BUMP" --no-git-tag-version -w shortcircuit
+          version="$(node -p "require('./packages/vscode-extension/package.json').version")"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Extension versions must use stable x.y.z semver." >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Releasing shortcircuit@$version"
+
+      - name: Commit the version bump
+        if: steps.token.outputs.configured == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packages/vscode-extension/package.json package-lock.json
+          git commit -m "chore(vscode): release v${{ steps.version.outputs.version }} [skip ci]"
+          git push origin HEAD:main
+
+      - name: Publish to the Visual Studio Marketplace
+        if: steps.token.outputs.configured == 'true'
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: npx --yes @vscode/vsce@4.0.0 publish --skip-duplicate

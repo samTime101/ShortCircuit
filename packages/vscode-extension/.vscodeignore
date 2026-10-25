@@ -16,7 +16,7 @@ build.js
 .vscode/
 
 # Ignore build artifacts
-*.map
+**/*.map
 *.tsbuildinfo
 *.vsix
 
