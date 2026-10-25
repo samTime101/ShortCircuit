@@ -15,6 +15,7 @@ import {
   TextEdit,
   DocumentFormattingParams,
   DidChangeConfigurationNotification,
+  DidChangeWatchedFilesParams,
   HoverParams,
   CompletionParams,
 } from "vscode-languageserver/node";
@@ -41,7 +42,7 @@ import {
 const connection = createConnection(ProposedFeatures.all);
 const documents = new TextDocuments(TextDocument);
 
-const VALIDATE_DELAY_MS = 140;
+const VALIDATE_DELAY_MS = 260;
 const validationTimers = new Map<string, NodeJS.Timeout>();
 
 interface DocumentAnalysis {
@@ -100,11 +101,32 @@ connection.onDidChangeConfiguration(() => {
   scheduleValidationOfAllDocuments();
 });
 
-connection.onDidChangeWatchedFiles(() => {
+connection.onDidChangeWatchedFiles((params: DidChangeWatchedFilesParams) => {
   invalidatePackageCache();
+
+  // Saving an already-open .lf file is followed by a normal content change,
+  // which validates it with the correct version. Revalidating every open file
+  // for each watcher echo is what made diagnostics feel jumpy.
+  const changes = params.changes ?? [];
+  const needsRevalidation =
+    changes.length === 0 ||
+    changes.some(
+      (change) => isPackageConfiguration(change.uri) || !documents.get(change.uri),
+    );
+  if (!needsRevalidation) return;
+
   analyses.clear();
   scheduleValidationOfAllDocuments();
 });
+
+function isPackageConfiguration(uri: string): boolean {
+  const pathname = uri.toLowerCase();
+  return (
+    pathname.endsWith("/manifest.json") ||
+    pathname.endsWith("/shortcircuit.json") ||
+    pathname.endsWith("/shortcircuit.lock.json")
+  );
+}
 
 documents.onDidChangeContent((change) => {
   scheduleValidation(change.document.uri);
@@ -216,9 +238,23 @@ function analyzeDocument(document: TextDocument): DocumentAnalysis {
 async function validateTextDocument(textDocument: TextDocument): Promise<void> {
   try {
     const analysis = analyzeDocument(textDocument);
-    const diagnostics: Diagnostic[] = analysis.diagnostics.map(convertDiagnostic);
-    connection.sendDiagnostics({ uri: textDocument.uri, diagnostics });
+    const current = documents.get(textDocument.uri);
+    // A newer edit is already scheduled; publishing this older analysis would
+    // put diagnostics on the wrong characters for a moment.
+    if (!current || current.version !== analysis.version) return;
+
+    const lines = analysis.source.split(/\r\n|\r|\n/);
+    const diagnostics: Diagnostic[] = analysis.diagnostics.map((diagnostic) =>
+      convertDiagnostic(diagnostic, lines),
+    );
+    connection.sendDiagnostics({
+      uri: textDocument.uri,
+      version: analysis.version,
+      diagnostics,
+    });
   } catch (err) {
+    const current = documents.get(textDocument.uri);
+    if (!current) return;
     const diagnostics: Diagnostic[] = [
       {
         severity: DiagnosticSeverity.Error,
@@ -227,15 +263,22 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
         source: "shortcircuit",
       },
     ];
-    connection.sendDiagnostics({ uri: textDocument.uri, diagnostics });
+    connection.sendDiagnostics({
+      uri: textDocument.uri,
+      version: current.version,
+      diagnostics,
+    });
   }
 }
 
-function convertDiagnostic(d: EngineDiagnostic): Diagnostic {
-  const startCol = Math.max(0, (d.column ?? 1) - 1);
-  const startLine = Math.max(0, (d.line ?? 1) - 1);
+function convertDiagnostic(d: EngineDiagnostic, lines: string[]): Diagnostic {
+  const lineCount = Math.max(1, lines.length);
+  const startLine = Math.min(Math.max(0, (d.line ?? 1) - 1), lineCount - 1);
+  const line = lines[startLine] ?? "";
+  const startCol = Math.min(Math.max(0, (d.column ?? 1) - 1), line.length);
   const length = Math.max(1, d.length ?? 1);
-  const range = Range.create(startLine, startCol, startLine, startCol + length);
+  const endCol = Math.min(line.length, Math.max(startCol + 1, startCol + length));
+  const range = Range.create(startLine, startCol, startLine, endCol);
   return {
     severity:
       d.severity === "error"

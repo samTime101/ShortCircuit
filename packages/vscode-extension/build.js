@@ -29,13 +29,19 @@ async function main() {
     outfile: path.join(__dirname, "out", "language-server.js")
   });
 
+  const workerCtx = await esbuild.context({
+    ...commonOptions,
+    entryPoints: [path.join(__dirname, "src", "studioWorker.ts")],
+    outfile: path.join(__dirname, "out", "studio-worker.js")
+  });
+
   if (isWatch) {
-    await Promise.all([extCtx.watch(), lsCtx.watch()]);
+    await Promise.all([extCtx.watch(), lsCtx.watch(), workerCtx.watch()]);
     console.log("Watching for changes...");
   } else {
-    await Promise.all([extCtx.rebuild(), lsCtx.rebuild()]);
-    await Promise.all([extCtx.dispose(), lsCtx.dispose()]);
-    console.log("Extension and Language Server built successfully.");
+    await Promise.all([extCtx.rebuild(), lsCtx.rebuild(), workerCtx.rebuild()]);
+    await Promise.all([extCtx.dispose(), lsCtx.dispose(), workerCtx.dispose()]);
+    console.log("Extension, language server, and studio worker built successfully.");
   }
 }
 

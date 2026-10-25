@@ -40,6 +40,9 @@ export function getStudioHtml(
 ): string {
   const modelJson = serializeModel(initialModel);
   const initialTabJson = JSON.stringify(options.initialTab ?? "circuit");
+  const revisionJson = String(
+    Number.isFinite(options.revision) ? Math.max(0, Math.floor(options.revision!)) : 0,
+  );
   const version = options.version ?? "0.1.3";
 
   return `<!DOCTYPE html>
@@ -1824,6 +1827,7 @@ export function getStudioHtml(
     const initialTab = ${initialTabJson};
     const validTabs = ["circuit", "truth", "waveform", "tests", "ir"];
     let model = ${modelJson};
+    let modelRevision = ${revisionJson};
     let activeTab = validTabs.indexOf(persistedState.activeTab) >= 0 ? persistedState.activeTab : initialTab;
     let selectedNodeId = null;
     let hoveredNodeId = null;
@@ -1850,6 +1854,9 @@ export function getStudioHtml(
     let truthRowEls = new Map();
     let activeTruthRowEl = null;
     let requested = {};
+    let derivedLoaded = {};
+    let derivedErrors = {};
+    let structureHash = null;
     const outputDisplayModes = Object.assign({}, persistedState.outputDisplayModes || {});
     let dockHeight = Number(persistedState.dockHeight) || 220;
     let simSplit = Number(persistedState.simSplit) || 50;
@@ -1998,17 +2005,20 @@ export function getStudioHtml(
 
     function ensureTabData() {
       if (!model || !model.circuits || model.circuits.length === 0) return;
-      if (activeTab === "truth" && !model.truthTable) requestData("truthTable");
-      if (activeTab === "waveform" && !model.waveform) requestData("waveform");
-      if (activeTab === "ir" && (model.irText === null || model.irText === undefined)) requestData("irText");
+      if (activeTab === "truth" && !model.truthTable && !derivedLoaded.truthTable) requestData("truthTable");
+      if (activeTab === "waveform" && !model.waveform && !derivedLoaded.waveform) requestData("waveform");
+      if (activeTab === "tests" && !model.tests && !derivedLoaded.tests) requestData("tests");
+      if (activeTab === "ir" && (model.irText === null || model.irText === undefined) && !derivedLoaded.irText) requestData("irText");
     }
 
     function requestData(kind) {
       if (requested[kind]) return;
       requested[kind] = true;
+      derivedErrors[kind] = null;
       vscode.postMessage({ type: "requestData", kind: kind });
       if (kind === "truthTable") renderTruthTable();
       if (kind === "waveform") renderWaveform();
+      if (kind === "tests") renderTests();
       if (kind === "irText") renderIr();
     }
 
@@ -2525,13 +2535,96 @@ export function getStudioHtml(
       if (pathActive) pathActive.setAttribute("d", activeEdgePath);
     }
 
+    function structureHashFor(nextModel) {
+      if (!nextModel) return "none";
+      if (typeof nextModel.structureKey === "string") return nextModel.structureKey;
+      try {
+        return JSON.stringify({
+          circuits: nextModel.circuits,
+          activeCircuit: nextModel.activeCircuit,
+          layout: nextModel.layout,
+          ir: nextModel.ir
+        });
+      } catch (_) {
+        return String(nextModel.activeCircuit) + ":" + (nextModel.layout && nextModel.layout.nodes ? nextModel.layout.nodes.length : 0);
+      }
+    }
+
     function render(newModel, forceReset) {
+      const previousModel = model;
       const previousCircuit = model ? model.activeCircuit : null;
-      const circuitChanged = previousCircuit !== (newModel ? newModel.activeCircuit : null);
+      const nextHash = structureHashFor(newModel);
+      const structureChanged = Boolean(forceReset) || nextHash !== structureHash;
       model = newModel;
       requested = {};
+      derivedLoaded = {};
+      derivedErrors = {};
 
-      if (model && model.layout) {
+      const derivedChanged =
+        !previousModel || previousModel.derivedKey !== model?.derivedKey;
+      if (!structureChanged && model && previousModel && !derivedChanged) {
+        // These views depend on circuit semantics, not simulation values, so
+        // keep them while the user types inside unchanged logic.
+        model.truthTable = previousModel.truthTable;
+        model.waveform = previousModel.waveform;
+        model.irText = previousModel.irText;
+      }
+
+      if (!model) {
+        structureHash = nextHash;
+        showEmpty("No LogicFlow file active", "Open or focus a .lf file in the editor to start live circuit simulation.");
+        resetViews();
+        return;
+      }
+
+      renderDiagnostics();
+
+      if (!model.circuits || model.circuits.length === 0) {
+        structureHash = nextHash;
+        const hasError = (model.diagnostics || []).some(function (diagnostic) { return diagnostic.severity === "error"; });
+        showEmpty(
+          hasError ? "Could not compile this file" : "No circuits in this file",
+          hasError ? "Fix the highlighted error to resume live simulation." : "Add a CIRCUIT block to start simulating."
+        );
+        resetViews();
+        return;
+      }
+
+      const activeCircuit = model.circuits.find(function (circuit) { return circuit.name === model.activeCircuit; }) || model.circuits[0];
+      if (!activeCircuit) return;
+
+      if (!structureChanged) {
+        // Value-only update: patch existing inputs, outputs, and graph nodes
+        // instead of rebuilding the DOM and losing scroll/focus state.
+        activeCircuitData = activeCircuit;
+        circuitNodeCount.textContent = activeCircuit.stats.nodes;
+        graphNodesCount.textContent = activeCircuit.stats.nodes + " nodes";
+        graphLayersCount.textContent = (model.layout ? model.layout.depth : 0) + " layers";
+        graphCircuitName.textContent = activeCircuit.name;
+        graphMeta.textContent = activeCircuit.stats.nodes + " nodes • " + activeCircuit.stats.maxDepth + " deep • " + (activeCircuit.stats.maxWidth || 1) + "b max width";
+        graphModeBadge.textContent = activeCircuit.sequential ? "Sequential" : "Combinational";
+        graphModeBadge.classList.toggle("sequential", activeCircuit.sequential);
+        graphWarning.style.display = activeCircuit.stats.nodes > 90 ? "block" : "none";
+
+        updateInputValues();
+        updateOutputValues();
+        updateGraphValues();
+        updateTruthSelection();
+        if (selectedNodeId) {
+          const node = layoutNodeById.get(selectedNodeId);
+          if (node) updateInspector(node);
+        }
+        ensureTabData();
+        return;
+      }
+
+      structureHash = nextHash;
+      lastCullPanX = 40;
+      lastCullPanY = 40;
+      lastCullScale = 1.0;
+      selectNode(null);
+
+      if (model.layout) {
         fullLayoutNodes = model.layout.nodes || [];
         fullLayoutEdges = model.layout.edges || [];
         fullNodesById = new Map();
@@ -2549,39 +2642,12 @@ export function getStudioHtml(
         layoutNeighbors = new Map();
       }
 
-      if (circuitChanged || forceReset) {
-        lastCullPanX = 40;
-        lastCullPanY = 40;
-        lastCullScale = 1.0;
-        selectNode(null);
-      }
-
-      if (!model) {
-        showEmpty("No LogicFlow file active", "Open or focus a .lf file in the editor to start live circuit simulation.");
-        resetViews();
-        return;
-      }
-
-      renderDiagnostics();
-
-      if (!model.circuits || model.circuits.length === 0) {
-        const hasError = (model.diagnostics || []).some(function (diagnostic) { return diagnostic.severity === "error"; });
-        showEmpty(
-          hasError ? "Could not compile this file" : "No circuits in this file",
-          hasError ? "Fix the highlighted error to resume live simulation." : "Add a CIRCUIT block to start simulating."
-        );
-        resetViews();
-        return;
-      }
-
       emptyState.style.display = "none";
       document.querySelectorAll(".tab-content").forEach(function (content) { content.style.display = ""; });
       syncTabButtons();
 
       syncCircuitPicker();
 
-      const activeCircuit = model.circuits.find(function (circuit) { return circuit.name === model.activeCircuit; }) || model.circuits[0];
-      if (!activeCircuit) return;
       activeCircuitData = activeCircuit;
 
       circuitNodeCount.textContent = activeCircuit.stats.nodes;
@@ -2606,7 +2672,7 @@ export function getStudioHtml(
 
       ensureTabData();
 
-      if (previousCircuit !== activeCircuit.name || forceReset) {
+      if (previousCircuit !== activeCircuit.name || forceReset || previousModel === null) {
         setTimeout(fitGraph, 40);
       }
     }
@@ -3339,7 +3405,10 @@ export function getStudioHtml(
       if (!model) return;
       if (!model.truthTable) {
         truthRowCount.textContent = "0";
-        truthTableView.innerHTML = '<div class="empty-state">' + (requested.truthTable ? "Computing truth table…" : "Open the Truth table tab to compute it.") + '</div>';
+        let message = "Open the Truth table tab to compute it.";
+        if (requested.truthTable) message = "Computing truth table…";
+        else if (derivedErrors.truthTable) message = derivedErrors.truthTable;
+        truthTableView.innerHTML = '<div class="empty-state">' + escapeHtml(message) + '</div>';
         return;
       }
 
@@ -3397,7 +3466,10 @@ export function getStudioHtml(
     function renderWaveform() {
       if (!model) return;
       if (!model.waveform) {
-        waveformChart.innerHTML = '<div class="empty-state">' + (requested.waveform ? "Computing waveform preview…" : "Open the Waveform tab to compute the preview.") + '</div>';
+        let message = "Open the Waveform tab to compute the preview.";
+        if (requested.waveform) message = "Computing waveform preview…";
+        else if (derivedErrors.waveform) message = derivedErrors.waveform;
+        waveformChart.innerHTML = '<div class="empty-state">' + escapeHtml(message) + '</div>';
         return;
       }
 
@@ -3439,6 +3511,18 @@ export function getStudioHtml(
 
     function renderTests() {
       if (!model) return;
+      if (requested.tests) {
+        testsCount.textContent = "…";
+        testsSummary.innerHTML = "";
+        testsList.innerHTML = '<div class="empty-state">Running tests…</div>';
+        return;
+      }
+      if (derivedErrors.tests) {
+        testsCount.textContent = "0";
+        testsSummary.innerHTML = "";
+        testsList.innerHTML = '<div class="empty-state">' + escapeHtml(derivedErrors.tests) + '</div>';
+        return;
+      }
       if (!model.tests || !model.tests.suites) {
         testsList.innerHTML = '<div class="empty-state">No tests found in source.</div>';
         testsCount.textContent = "0";
@@ -3497,8 +3581,12 @@ export function getStudioHtml(
       }
       if (model.irText !== null && model.irText !== undefined) {
         irPre.textContent = model.irText;
+      } else if (requested.irText) {
+        irPre.textContent = "Loading lowered IR…";
+      } else if (derivedErrors.irText) {
+        irPre.textContent = "Could not load the lowered IR: " + derivedErrors.irText;
       } else {
-        irPre.textContent = requested.irText ? "Loading lowered IR…" : "Open the IR tab to load the lowered IR.";
+        irPre.textContent = "Open the IR tab to load the lowered IR.";
       }
     }
 
@@ -3516,15 +3604,20 @@ export function getStudioHtml(
       }
     }
 
-    function applyDerived(kind, payload) {
+    function applyDerived(kind, payload, error) {
+      requested[kind] = false;
+      derivedLoaded[kind] = true;
+      derivedErrors[kind] = error || null;
       if (!model) return;
-      requested[kind] = true;
       if (kind === "truthTable") {
         model.truthTable = payload;
         renderTruthTable();
       } else if (kind === "waveform") {
         model.waveform = payload;
         renderWaveform();
+      } else if (kind === "tests") {
+        model.tests = payload;
+        renderTests();
       } else if (kind === "irText") {
         model.irText = payload;
         renderIr();
@@ -3534,10 +3627,17 @@ export function getStudioHtml(
     // Message listener from extension host
     window.addEventListener("message", function (event) {
       const message = event.data || {};
-      if (message.type === "update") render(message.payload || null, Boolean(message.forceReset));
-      else if (message.type === "simulation") applySimulation(message.payload);
-      else if (message.type === "derived") applyDerived(message.kind, message.payload);
-      else if (message.type === "setTab") setActiveTab(message.tab);
+      if (message.type === "update") {
+        if (typeof message.revision === "number" && message.revision < modelRevision) return;
+        if (typeof message.revision === "number") modelRevision = message.revision;
+        render(message.payload || null, Boolean(message.forceReset));
+      } else if (message.type === "simulation") {
+        if (typeof message.revision === "number" && message.revision !== modelRevision) return;
+        applySimulation(message.payload);
+      } else if (message.type === "derived") {
+        if (typeof message.revision === "number" && message.revision !== modelRevision) return;
+        applyDerived(message.kind, message.payload, message.error);
+      } else if (message.type === "setTab") setActiveTab(message.tab);
     });
 
     syncTabButtons();

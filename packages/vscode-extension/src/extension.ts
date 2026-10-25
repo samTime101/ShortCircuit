@@ -12,24 +12,15 @@ import {
   runTests,
   formatSource,
   formatBinary,
-  parsePackageMacroSource,
   parseSimulationInput,
   type CircuitIR,
   type CompileResult,
   type SimulationSnapshot,
 } from "@shortcircuit/engine";
-import { buildLayout } from "./graphLayout";
 import { getStudioHtml } from "./studioHtml";
 import {
-  buildCircuitSummaries,
-  buildIrSummary,
-  buildIrText,
-  buildTestsModel,
-  buildTruthTable,
-  buildWaveform,
   findTestAtPosition,
   inputBitAt,
-  mapDiagnostics,
   normalizeInputs,
   normalizeInputValue,
   snapshotToModel,
@@ -37,6 +28,13 @@ import {
   type StudioDiagnostic,
   type StudioModel,
 } from "./studioModel";
+import {
+  compileStudioSource,
+  computeStudioDerived,
+  type StudioCompileData,
+  type StudioDerivedPayload,
+} from "./studioCompute";
+import { StudioWorkerClient } from "./studioWorkerClient";
 import { resolveWorkspaceContext, invalidatePackageCache } from "./packageResolver";
 
 let client: LanguageClient | undefined;
@@ -45,7 +43,7 @@ let changeTimer: NodeJS.Timeout | undefined;
 let packageRefreshTimer: NodeJS.Timeout | undefined;
 let testOutputChannel: vscode.OutputChannel | undefined;
 
-const CHANGE_DELAY_MS = 140;
+const CHANGE_DELAY_MS = 180;
 const PACKAGE_REFRESH_DELAY_MS = 250;
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -99,7 +97,11 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // 2. Studio state manager and sidebar webview
   const extensionVersion = (context.extension?.packageJSON?.version as string) || "0.1.3";
-  const provider = new ShortCircuitStudioProvider(context.extensionUri, extensionVersion);
+  const provider = new ShortCircuitStudioProvider(
+    context.extensionUri,
+    extensionVersion,
+    context.asAbsolutePath(path.join("out", "studio-worker.js")),
+  );
   studioProvider = provider;
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider("shortcircuit.studioView", provider),
@@ -487,7 +489,16 @@ async function runFileTests(
   }
 }
 
-type StudioDerivedCache = Partial<Record<StudioDerivedKind, unknown>>;
+type StudioDerivedCache = Partial<Record<StudioDerivedKind, StudioDerivedPayload>>;
+
+interface CompileJob {
+  seq: number;
+  document: vscode.TextDocument;
+  source: string;
+  filePath: string;
+  forceReset: boolean;
+  activeCircuitName?: string;
+}
 
 /** Manages simulation state and communication with WebviewView (sidebar) and WebviewPanel */
 export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
@@ -500,7 +511,15 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
   private activeSimulator?: Simulator;
   private activeCircuit?: CircuitIR;
   private lastModel?: StudioModel;
+  private lastCompileData?: StudioCompileData;
   private derivedCache: StudioDerivedCache = {};
+  private derivedPending = new Set<StudioDerivedKind>();
+  private compileWorker?: StudioWorkerClient;
+  private derivedWorker?: StudioWorkerClient;
+  private compileSeq = 0;
+  private compileInFlight = false;
+  private queuedCompile?: CompileJob;
+  private revision = 0;
   private disposed = false;
   private clockTimer?: NodeJS.Timeout;
   private runningClockName?: string;
@@ -509,10 +528,20 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly extensionVersion: string = "0.1.3",
-  ) {}
+    workerPath?: string,
+  ) {
+    if (workerPath) {
+      this.compileWorker = new StudioWorkerClient(workerPath, "studio compile");
+      this.derivedWorker = new StudioWorkerClient(workerPath, "studio preview");
+    }
+  }
 
   public getVersion(): string {
     return this.extensionVersion;
+  }
+
+  public getRevision(): number {
+    return this.revision;
   }
 
   public resolveWebviewView(
@@ -529,11 +558,15 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
     };
     webviewView.webview.html = getStudioHtml(this.lastModel ?? null, {
       version: this.extensionVersion,
+      revision: this.revision,
     });
 
     this.viewDisposables.push(
       webviewView.webview.onDidReceiveMessage((message) => {
         void this.handleMessage(message);
+      }),
+      webviewView.onDidChangeVisibility(() => {
+        if (webviewView.visible) this.ensureUpdated();
       }),
       webviewView.onDidDispose(() => {
         if (this.view === webviewView) this.view = undefined;
@@ -560,23 +593,53 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
     return this.currentDocument;
   }
 
+  /** True when at least one studio webview is actually on screen. */
+  public isVisible(): boolean {
+    if (this.view?.visible) return true;
+    return StudioPanel.currentPanel?.isVisible() ?? false;
+  }
+
+  /** Recompiles the current document even if a hidden view skipped updates. */
+  public ensureUpdated(): void {
+    const document =
+      this.currentDocument && !this.currentDocument.isClosed
+        ? this.currentDocument
+        : findTargetLogicflowDocument(this);
+    if (document) this.updateForDocument(document, { force: true });
+  }
+
   public clear(): void {
     this.stopClockRunner();
+    this.compileSeq += 1;
+    this.queuedCompile = undefined;
+    this.revision += 1;
     this.currentDocument = undefined;
     this.lastCompiledKey = undefined;
     this.lastModel = undefined;
+    this.lastCompileData = undefined;
     this.activeCircuit = undefined;
     this.activeSimulator = undefined;
     this.activeCircuitName = undefined;
     this.currentInputs = {};
     this.derivedCache = {};
-    this.post({ type: "update", payload: null });
+    this.derivedPending.clear();
+    this.derivedWorker?.restart();
+    this.post({ type: "update", payload: null, revision: this.revision });
   }
 
   public refresh(): void {
     invalidatePackageCache();
+    this.compileWorker?.invalidate();
+    this.derivedWorker?.invalidate();
+    this.derivedWorker?.restart();
+    this.revision += 1;
     this.lastCompiledKey = undefined;
+    this.lastCompileData = undefined;
     this.derivedCache = {};
+    this.derivedPending.clear();
+
+    // A hidden studio will pick up the refreshed state when it is shown.
+    if (!this.isVisible()) return;
 
     const targetDoc = findTargetLogicflowDocument(this);
     if (targetDoc) {
@@ -607,8 +670,18 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
     }
 
     this.currentDocument = document;
+
+    // Typing should stay free when the studio is not on screen. The next
+    // visibility change (or the ready message) compiles the latest source.
+    if (!options.force && !this.isVisible()) return;
+
     this.lastCompiledKey = key;
-    this.compileAndBroadcast(source, Boolean(options.resetState));
+    this.enqueueCompile(
+      document,
+      source,
+      Boolean(options.resetState),
+      this.activeCircuitName,
+    );
   }
 
   public async handleMessage(message: unknown): Promise<void> {
@@ -617,18 +690,12 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
 
     switch (msg.type) {
       case "ready":
-        if (this.lastModel) {
+        // A newly opened or restored webview needs the newest source, not the
+        // cached model from before the studio was hidden. The compile queue
+        // coalesces this with any job that is already running.
+        this.ensureUpdated();
+        if (!this.compileInFlight && !this.queuedCompile && this.lastModel) {
           this.post({ type: "update", payload: this.lastModel });
-        } else if (this.currentDocument && !this.currentDocument.isClosed) {
-          this.updateForDocument(this.currentDocument, { force: true });
-        } else {
-          const active = vscode.window.activeTextEditor;
-          if (active && active.document.languageId === "logicflow") {
-            this.updateForDocument(active.document, { force: true });
-          } else {
-            const visible = visibleLogicflowDocument();
-            if (visible) this.updateForDocument(visible, { force: true });
-          }
         }
         return;
 
@@ -749,10 +816,15 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
 
       case "requestData": {
         const kind = msg.kind;
-        if (kind !== "truthTable" && kind !== "waveform" && kind !== "irText") {
+        if (
+          kind !== "truthTable" &&
+          kind !== "waveform" &&
+          kind !== "tests" &&
+          kind !== "irText"
+        ) {
           return;
         }
-        this.sendDerived(kind);
+        void this.sendDerived(kind);
         return;
       }
 
@@ -764,6 +836,10 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
   public dispose(): void {
     this.stopClockRunner();
     this.disposed = true;
+    this.compileWorker?.dispose();
+    this.derivedWorker?.dispose();
+    this.compileWorker = undefined;
+    this.derivedWorker = undefined;
     this.disposeViewListeners();
   }
 
@@ -818,118 +894,186 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private compileAndBroadcast(source: string, forceReset = false): void {
-    this.derivedCache = {};
-    const filePath = this.currentDocument?.fileName || "";
+  /**
+   * Queues a compile and coalesces rapid edits. Only the newest job is kept,
+   * and a stale worker result is discarded before it can reach the webview.
+   */
+  private enqueueCompile(
+    document: vscode.TextDocument,
+    source: string,
+    resetState: boolean,
+    activeCircuitName: string | undefined,
+  ): void {
+    const seq = this.compileSeq + 1;
+    this.compileSeq = seq;
+    this.queuedCompile = {
+      seq,
+      document,
+      source,
+      filePath: document.fileName || "",
+      forceReset: resetState,
+      activeCircuitName,
+    };
+    void this.runCompileQueue().catch((error) => {
+      console.error("[ShortCircuit] Studio compile queue failed:", error);
+    });
+  }
 
+  private async runCompileQueue(): Promise<void> {
+    if (this.compileInFlight) return;
+    this.compileInFlight = true;
     try {
-      const isMacroFile =
-        !/^\s*CIRCUIT\b/im.test(source) &&
-        (/^\s*MACRO\b/im.test(source) ||
-          filePath.replace(/\\/g, "/").includes("/macros/"));
+      while (!this.disposed && this.queuedCompile) {
+        const job = this.queuedCompile;
+        this.queuedCompile = undefined;
 
-      if (isMacroFile) {
-        this.stopClockRunner();
-        const fileName = filePath ? path.basename(filePath) : "package macro";
-        const { declarations, diagnostics } = parsePackageMacroSource(source, fileName);
-        this.activeCircuit = undefined;
-        this.activeSimulator = undefined;
-        this.lastModel = this.emptyModel(
-          declarations.map((declaration) => ({
-            name: declaration.name,
-            stats: { nodes: 0, states: 0, events: 0, maxDepth: 0, maxWidth: 0 },
-            sequential: false,
-            inputs: declaration.args.map((argument) => ({ name: argument, width: 1 })),
-            outputs: [{ name: "out", width: 1 }],
-          })),
-          declarations[0]?.name ?? "",
-          mapDiagnostics(diagnostics),
-        );
-        this.post({ type: "update", payload: this.lastModel, forceReset });
-        return;
+        let data: StudioCompileData;
+        try {
+          data = await this.computeCompile(job);
+        } catch (error) {
+          if (!this.disposed && job.seq === this.compileSeq) {
+            this.applyCompileFailure(job, error);
+          }
+          continue;
+        }
+
+        if (this.disposed || job.seq !== this.compileSeq) continue;
+        this.applyCompileData(job, data);
       }
+    } finally {
+      this.compileInFlight = false;
+    }
+  }
 
-      const context = filePath
-        ? resolveWorkspaceContext(filePath, source, {
-            openSources: collectOpenSources(),
-          })
-        : null;
-      const result = compile(source, {
-        packages: context?.bundle,
-        implicitImports: context?.implicitImports,
-        maxDiagnostics: 100,
-      });
-      const diagnostics = mapDiagnostics(result.diagnostics);
-
-      if (result.circuits.length === 0) {
-        this.stopClockRunner();
-        this.activeCircuit = undefined;
-        this.activeSimulator = undefined;
-        this.lastModel = this.emptyModel([], "", diagnostics);
-        this.post({ type: "update", payload: this.lastModel, forceReset });
-        return;
-      }
-
-      let circuit = result.circuits.find(
-        (candidate) => candidate.name === this.activeCircuitName,
-      );
-      if (!circuit) {
-        circuit = result.circuits[0]!;
-        this.activeCircuitName = circuit.name;
-      }
-      this.activeCircuit = circuit;
-
-      this.currentInputs = normalizeInputs(circuit, this.currentInputs);
-      let snapshot: SimulationSnapshot;
+  private async computeCompile(job: CompileJob): Promise<StudioCompileData> {
+    const openSources = collectOpenSources();
+    const worker = this.compileWorker;
+    if (worker?.available) {
       try {
-        this.activeSimulator = new Simulator(circuit);
-        snapshot = this.activeSimulator.setInputs({ ...this.currentInputs });
-      } catch (error) {
-        this.activeSimulator = undefined;
-        throw error;
-      }
-
-      let layout = null;
-      try {
-        layout = buildLayout(circuit);
-      } catch (error) {
-        diagnostics.push({
-          message: `Could not build the circuit graph: ${error instanceof Error ? error.message : String(error)}`,
-          severity: "warning",
-          line: 1,
-          column: 1,
+        const response = await worker.request({
+          type: "compile",
+          filePath: job.filePath,
+          source: job.source,
+          activeCircuitName: job.activeCircuitName,
+          openSources: [...openSources.entries()],
         });
+        if (response.type === "compileResult") return response.data;
+        if (response.type === "error") throw new Error(response.message);
+        throw new Error("Unexpected response from the studio compile worker.");
+      } catch (error) {
+        if (this.disposed) throw error;
+        // A worker that is still healthy reported a real compile failure;
+        // retrying synchronously would only throw again.
+        if (worker.available) throw error;
+        console.warn(
+          "[ShortCircuit] Studio worker unavailable; compiling synchronously.",
+          error,
+        );
       }
+    }
 
-      this.lastModel = {
-        circuits: buildCircuitSummaries(result.circuits),
-        activeCircuit: circuit.name,
-        inputs: this.currentInputs,
-        snapshot: snapshotToModel(snapshot),
-        layout,
-        truthTable: null,
-        waveform: null,
-        tests: buildTestsModel(result),
-        ir: buildIrSummary(circuit),
-        irText: null,
-        diagnostics,
-      };
+    return compileStudioSource(job.filePath, job.source, {
+      activeCircuitName: job.activeCircuitName,
+      openSources,
+    });
+  }
 
-      this.post({ type: "update", payload: this.lastModel, forceReset });
-    } catch (error) {
+  private applyCompileData(job: CompileJob, data: StudioCompileData): void {
+    this.revision += 1;
+    this.resetDerivedForCompile();
+    this.lastCompileData = data;
+
+    if (data.macro || !data.activeCircuit) {
       this.stopClockRunner();
-      const diagnostic: StudioDiagnostic = {
-        message: `The studio could not compile this file: ${error instanceof Error ? error.message : String(error)}`,
-        severity: "error",
-        line: 1,
-        column: 1,
-      };
       this.activeCircuit = undefined;
       this.activeSimulator = undefined;
-      this.lastModel = this.emptyModel([], "", [diagnostic]);
-      this.post({ type: "update", payload: this.lastModel, forceReset });
-      console.error("Compilation error in StudioProvider:", error);
+      this.lastModel = this.buildModel(data, {}, null);
+      this.post({
+        type: "update",
+        payload: this.lastModel,
+        forceReset: job.forceReset,
+      });
+      return;
     }
+
+    const circuit = data.activeCircuit;
+    this.activeCircuitName = data.activeCircuitName;
+    this.activeCircuit = circuit;
+    this.currentInputs = normalizeInputs(circuit, this.currentInputs);
+
+    let snapshot: SimulationSnapshot;
+    try {
+      this.activeSimulator = new Simulator(circuit);
+      snapshot = this.activeSimulator.setInputs({ ...this.currentInputs });
+    } catch (error) {
+      this.activeSimulator = undefined;
+      this.applyCompileFailure(job, error);
+      return;
+    }
+
+    this.lastModel = this.buildModel(
+      data,
+      this.currentInputs,
+      snapshotToModel(snapshot),
+    );
+    this.post({
+      type: "update",
+      payload: this.lastModel,
+      forceReset: job.forceReset,
+    });
+  }
+
+  private buildModel(
+    data: StudioCompileData,
+    inputs: Record<string, string>,
+    snapshot: StudioModel["snapshot"],
+  ): StudioModel {
+    return {
+      circuits: data.circuits,
+      activeCircuit: data.activeCircuitName,
+      inputs,
+      snapshot,
+      layout: data.layout,
+      truthTable: null,
+      waveform: null,
+      tests: null,
+      ir: data.ir,
+      irText: null,
+      diagnostics: data.diagnostics,
+      revision: this.revision,
+      structureKey: data.structureKey,
+      derivedKey: data.derivedKey,
+    };
+  }
+
+  private applyCompileFailure(job: CompileJob, error: unknown): void {
+    if (this.disposed) return;
+    this.stopClockRunner();
+    const diagnostic: StudioDiagnostic = {
+      message: `The studio could not compile this file: ${error instanceof Error ? error.message : String(error)}`,
+      severity: "error",
+      line: 1,
+      column: 1,
+    };
+    this.revision += 1;
+    this.resetDerivedForCompile();
+    this.lastCompileData = undefined;
+    this.activeCircuit = undefined;
+    this.activeSimulator = undefined;
+    this.lastModel = this.emptyModel([], "", [diagnostic]);
+    this.post({
+      type: "update",
+      payload: this.lastModel,
+      forceReset: job.forceReset,
+    });
+    console.error("Compilation error in StudioProvider:", error);
+  }
+
+  /** Drops cached derived views and cancels an expensive background run. */
+  private resetDerivedForCompile(): void {
+    this.derivedCache = {};
+    this.derivedPending.clear();
+    if (this.derivedWorker?.busy) this.derivedWorker.restart();
   }
 
   private emptyModel(
@@ -949,6 +1093,9 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
       ir: null,
       irText: null,
       diagnostics,
+      revision: this.revision,
+      structureKey: "empty",
+      derivedKey: "empty",
     };
   }
 
@@ -980,28 +1127,93 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  private sendDerived(kind: StudioDerivedKind): void {
-    if (!this.activeCircuit || !this.lastModel) return;
+  private async sendDerived(kind: StudioDerivedKind): Promise<void> {
+    if (this.disposed) return;
+    if (!this.activeCircuit || !this.lastModel) {
+      this.post({
+        type: "derived",
+        kind,
+        payload: null,
+        error: "No active circuit is available.",
+      });
+      return;
+    }
+
+    if (this.derivedPending.has(kind)) return;
     const cached = this.derivedCache[kind];
     if (cached !== undefined) {
       this.post({ type: "derived", kind, payload: cached });
       return;
     }
 
-    let payload: unknown;
-    if (kind === "truthTable") {
-      payload = buildTruthTable(this.activeCircuit);
-      this.lastModel.truthTable = payload as StudioModel["truthTable"];
-    } else if (kind === "waveform") {
-      payload = buildWaveform(this.activeCircuit);
-      this.lastModel.waveform = payload as StudioModel["waveform"];
-    } else {
-      payload = buildIrText(this.activeCircuit);
-      this.lastModel.irText = payload as string;
-    }
+    const revision = this.revision;
+    const circuit = this.activeCircuit;
+    // Only tests need every compiled circuit; avoid cloning large IR arrays
+    // across the worker boundary for the other views.
+    const allCircuits =
+      kind === "tests" ? (this.lastCompileData?.allCircuits ?? [circuit]) : [];
+    const tests = kind === "tests" ? (this.lastCompileData?.tests ?? []) : [];
+    this.derivedPending.add(kind);
 
-    this.derivedCache[kind] = payload;
-    this.post({ type: "derived", kind, payload });
+    try {
+      let payload: StudioDerivedPayload;
+      const worker = this.derivedWorker;
+      if (worker?.available) {
+        try {
+          const response = await worker.request({
+            type: "derive",
+            kind,
+            circuit,
+            allCircuits,
+            tests,
+          });
+          if (response.type === "deriveResult") payload = response.payload;
+          else if (response.type === "error") throw new Error(response.message);
+          else throw new Error("Unexpected response from the studio preview worker.");
+        } catch (error) {
+          if (this.disposed) throw error;
+          if (!worker.available && revision === this.revision) {
+            console.warn(
+              "[ShortCircuit] Studio worker unavailable; computing preview synchronously.",
+              error,
+            );
+            payload = computeStudioDerived(kind, circuit, allCircuits, tests);
+          } else {
+            throw error;
+          }
+        }
+      } else {
+        payload = computeStudioDerived(kind, circuit, allCircuits, tests);
+      }
+
+      if (this.disposed || revision !== this.revision) return;
+
+      this.derivedCache[kind] = payload;
+      if (this.lastModel) {
+        if (kind === "truthTable") {
+          this.lastModel.truthTable = payload as StudioModel["truthTable"];
+        } else if (kind === "waveform") {
+          this.lastModel.waveform = payload as StudioModel["waveform"];
+        } else if (kind === "tests") {
+          this.lastModel.tests = payload as StudioModel["tests"];
+        } else {
+          this.lastModel.irText = payload as string;
+        }
+      }
+      this.post({ type: "derived", kind, payload });
+    } catch (error) {
+      if (this.disposed || revision !== this.revision) return;
+      this.post({
+        type: "derived",
+        kind,
+        payload: null,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      // A newer compile clears this set and may start a fresh request for the
+      // same kind; do not remove that newer request when this one settles.
+      if (revision === this.revision) this.derivedPending.delete(kind);
+    }
   }
 
   private clockNameFor(circuit: CircuitIR, clockNodeId: string): string | undefined {
@@ -1009,10 +1221,14 @@ export class ShortCircuitStudioProvider implements vscode.WebviewViewProvider {
     return node?.inputName ?? clockNodeId;
   }
 
-  private post(message: unknown): void {
+  private post(message: Record<string, unknown>): void {
     if (this.disposed) return;
-    if (this.view) void this.view.webview.postMessage(message);
-    StudioPanel.currentPanel?.postMessage(message);
+    const envelope =
+      typeof message.revision === "number"
+        ? message
+        : { ...message, revision: this.revision };
+    if (this.view) void this.view.webview.postMessage(envelope);
+    StudioPanel.currentPanel?.postMessage(envelope);
   }
 }
 
@@ -1040,11 +1256,20 @@ export class StudioPanel {
     this.panel.webview.html = getStudioHtml(provider.getModel() ?? null, {
       initialTab,
       version: provider.getVersion(),
+      revision: provider.getRevision(),
     });
 
     this.panel.webview.onDidReceiveMessage(
       (message) => {
         void provider.handleMessage(message);
+      },
+      null,
+      this.disposables,
+    );
+
+    this.panel.onDidChangeViewState(
+      (event) => {
+        if (event.webviewPanel.visible) provider.ensureUpdated();
       },
       null,
       this.disposables,
@@ -1063,6 +1288,7 @@ export class StudioPanel {
         type: "setTab",
         tab: initialTab,
       });
+      provider.ensureUpdated();
       return;
     }
 
@@ -1082,6 +1308,10 @@ export class StudioPanel {
   public postMessage(message: unknown): void {
     if (this.disposed) return;
     void this.panel.webview.postMessage(message);
+  }
+
+  public isVisible(): boolean {
+    return !this.disposed && this.panel.visible;
   }
 
   public dispose(): void {

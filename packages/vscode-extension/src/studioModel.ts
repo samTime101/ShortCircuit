@@ -153,14 +153,21 @@ export interface StudioModel {
   irText?: string | null;
   diagnostics: StudioDiagnostic[];
   isSidebar?: boolean;
+  /** Monotonic compile revision, used to discard stale async results. */
+  revision?: number;
+  /** Structural identity used by the webview to patch instead of rebuilding. */
+  structureKey?: string;
+  /** Circuit-semantics identity; derived views stay valid while this matches. */
+  derivedKey?: string;
 }
 
 export interface StudioHtmlOptions {
   initialTab?: "circuit" | "truth" | "waveform" | "tests" | "ir";
   version?: string;
+  revision?: number;
 }
 
-export type StudioDerivedKind = "truthTable" | "waveform" | "irText";
+export type StudioDerivedKind = "truthTable" | "waveform" | "tests" | "irText";
 
 export function mapDiagnostics(
   diagnostics: EngineDiagnostic[],
