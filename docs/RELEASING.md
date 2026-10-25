@@ -103,75 +103,30 @@ publish steps. Bump the version if you intended to release.
 
 ## Releasing the VS Code extension
 
-The Marketplace extension is `samTime101.shortcircuit`. The
-`Release VS Code Extension` workflow in `.github/workflows/release-vscode.yml`
-publishes it automatically when `main` receives a change to:
+The Marketplace extension is `samTime101.shortcircuit`. It is published
+manually; there is no Marketplace publishing workflow.
 
-- extension source, assets, syntaxes, or packaging files;
-- engine source (the engine is bundled into the extension);
-- the `vendor/ShortCircuit-Packages` submodule pointer (its default package
-  bundle is also bundled into the extension).
-
-Every automatic run bumps the **patch** version, commits the bumped
-`packages/vscode-extension/package.json` and lockfile with `[skip ci]`, and
-publishes to the Marketplace. Use the workflow's manual **Run workflow**
-button with `minor` or `major` to release a larger version jump.
-
-### Marketplace authentication
-
-The workflow supports two authentication methods:
-
-- **Trusted publishing (OIDC)** — preferred, but not available yet. As of
-  October 25, 2026, the Marketplace token exchange still returns
-  `TrustedPublishingNotSupportedException`; Microsoft is targeting
-  October 30, 2026. There is also no publisher setting to configure the
-  trusted publishing policy yet. See
-  [microsoft/vsmarketplace#1422](https://github.com/microsoft/vsmarketplace/issues/1422).
-- **Personal access token** — the interim method. Create an Azure DevOps PAT
-  with the **Marketplace: Manage** scope and add it as the `VSCE_PAT` secret.
-
-The workflow selects the method with the `VSCE_AUTH` repository variable:
-
-| `VSCE_AUTH` | Behavior |
-| --- | --- |
-| unset or `pat` | Use `VSCE_PAT`; skip with a notice if it is not configured |
-| `oidc` | Use `vsce publish --oidc`; no PAT needed |
-
-#### Switching to trusted publishing
-
-Once the Marketplace publisher management page offers trusted publishing:
-
-1. Create a trusted publishing policy for `samTime101/ShortCircuit` and the
-   `Release VS Code Extension` workflow. Match the repository and workflow
-   names exactly.
-2. Add a repository variable `VSCE_AUTH` with the value `oidc`.
-3. Run the workflow manually once with the `patch` bump. If it succeeds, delete
-   the `VSCE_PAT` secret.
-
-`--oidc` does not fall back to a PAT, so a failed OIDC exchange fails the
-workflow instead of publishing with the old secret.
-
-#### Version-bump pushes
-
-If `main` is protected and does not allow the default `GITHUB_TOKEN` to push,
-create a GitHub token with `contents: write` and add it as the `RELEASE_TOKEN`
-secret. The workflow uses `RELEASE_TOKEN` when present and falls back to
-`GITHUB_TOKEN` otherwise.
-
-Until a credential method is configured, the workflow skips the release with a
-notice instead of failing.
-
-### Manual publishing
-
-To publish without the workflow, bump the extension version first because the
+Bump the extension version as part of every extension change, because the
 Marketplace rejects duplicate versions:
 
 ```bash
 npm version patch --no-git-tag-version -w shortcircuit
+```
+
+Use `minor` or `major` for a larger jump. Commit the updated
+`packages/vscode-extension/package.json` and `package-lock.json`.
+
+To build the release artifact:
+
+```bash
 npm run build -w shortcircuit
 cd packages/vscode-extension
-npx @vscode/vsce@4 publish --skip-duplicate
+npx @vscode/vsce@4 package --no-git-tag-version
 ```
+
+This creates `shortcircuit-<version>.vsix`. Create a GitHub release tagged
+`vscode-v<version>` and attach the VSIX, then publish that VSIX manually to the
+Visual Studio Marketplace.
 
 ## Releasing a web package snapshot change
 
