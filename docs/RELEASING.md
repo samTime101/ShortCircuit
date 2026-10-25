@@ -138,6 +138,7 @@ Marketplace rejects duplicate versions:
 ```bash
 npm version patch --no-git-tag-version -w shortcircuit
 npm run build -w shortcircuit
+cd packages/vscode-extension
 npx @vscode/vsce@4 publish --skip-duplicate
 ```
 

@@ -114,6 +114,7 @@ jobs:
 
       - name: Publish to the Visual Studio Marketplace
         if: steps.token.outputs.configured == 'true'
+        working-directory: packages/vscode-extension
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: npx --yes @vscode/vsce@4.0.0 publish --skip-duplicate
