@@ -32,6 +32,8 @@ on:
 
 permissions:
   contents: write
+  # Required for Marketplace trusted publishing (vsce publish --oidc).
+  id-token: write
 
 concurrency:
   group: vscode-extension-release
@@ -43,20 +45,38 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip ci]') }}
     steps:
-      - name: Check the Marketplace token
-        id: token
+      - name: Check release credentials
+        id: auth
         env:
+          VSCE_AUTH: ${{ vars.VSCE_AUTH }}
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: |
-          if [ -z "$VSCE_PAT" ]; then
-            echo "::notice::VSCE_PAT is not configured. Add it to the repository secrets to release the extension."
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "configured=true" >> "$GITHUB_OUTPUT"
-          fi
+          case "${VSCE_AUTH:-auto}" in
+            oidc)
+              echo "mode=oidc" >> "$GITHUB_OUTPUT"
+              echo "configured=true" >> "$GITHUB_OUTPUT"
+              ;;
+            auto|pat)
+              if [ -n "$VSCE_PAT" ]; then
+                echo "mode=pat" >> "$GITHUB_OUTPUT"
+                echo "configured=true" >> "$GITHUB_OUTPUT"
+              elif [ "$VSCE_AUTH" = "pat" ]; then
+                echo "::error::VSCE_AUTH is set to 'pat' but the VSCE_PAT secret is not configured."
+                exit 1
+              else
+                echo "::notice::No Marketplace credentials configured. Add VSCE_PAT, or set the VSCE_AUTH repository variable to 'oidc' once trusted publishing is available."
+                echo "mode=none" >> "$GITHUB_OUTPUT"
+                echo "configured=false" >> "$GITHUB_OUTPUT"
+              fi
+              ;;
+            *)
+              echo "::error::VSCE_AUTH must be 'pat' or 'oidc' (got '$VSCE_AUTH')."
+              exit 1
+              ;;
+          esac
 
       - name: Check out the repository
-        if: steps.token.outputs.configured == 'true'
+        if: steps.auth.outputs.configured == 'true'
         uses: actions/checkout@v4
         with:
           # Prefer a token that may bypass branch protection on main. The
@@ -66,30 +86,30 @@ jobs:
           submodules: recursive
 
       - name: Set up Node.js
-        if: steps.token.outputs.configured == 'true'
+        if: steps.auth.outputs.configured == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
 
       - name: Install dependencies
-        if: steps.token.outputs.configured == 'true'
+        if: steps.auth.outputs.configured == 'true'
         run: npm ci
 
       - name: Typecheck the extension
-        if: steps.token.outputs.configured == 'true'
+        if: steps.auth.outputs.configured == 'true'
         run: npm run typecheck -w shortcircuit
 
       - name: Test the extension
-        if: steps.token.outputs.configured == 'true'
+        if: steps.auth.outputs.configured == 'true'
         run: npm test -w shortcircuit
 
       - name: Build the extension
-        if: steps.token.outputs.configured == 'true'
+        if: steps.auth.outputs.configured == 'true'
         run: npm run build -w shortcircuit
 
       - name: Bump the extension version
-        if: steps.token.outputs.configured == 'true'
+        if: steps.auth.outputs.configured == 'true'
         id: version
         env:
           BUMP: ${{ github.event.inputs.bump || 'patch' }}
@@ -104,7 +124,7 @@ jobs:
           echo "Releasing shortcircuit@$version"
 
       - name: Commit the version bump
-        if: steps.token.outputs.configured == 'true'
+        if: steps.auth.outputs.configured == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -113,8 +133,14 @@ jobs:
           git push origin HEAD:main
 
       - name: Publish to the Visual Studio Marketplace
-        if: steps.token.outputs.configured == 'true'
+        if: steps.auth.outputs.configured == 'true'
         working-directory: packages/vscode-extension
         env:
+          AUTH_MODE: ${{ steps.auth.outputs.mode }}
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: npx --yes @vscode/vsce@4.0.0 publish --skip-duplicate
+        run: |
+          if [ "$AUTH_MODE" = "oidc" ]; then
+            npx --yes @vscode/vsce@4.0.0 publish --oidc --skip-duplicate
+          else
+            npx --yes @vscode/vsce@4.0.0 publish --pat "$VSCE_PAT" --skip-duplicate
+          fi

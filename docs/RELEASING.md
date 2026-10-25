@@ -117,18 +117,49 @@ Every automatic run bumps the **patch** version, commits the bumped
 publishes to the Marketplace. Use the workflow's manual **Run workflow**
 button with `minor` or `major` to release a larger version jump.
 
-### One-time setup
+### Marketplace authentication
 
-1. Create an Azure DevOps personal access token for the Marketplace publisher.
-   Grant the **Marketplace: Manage** scope for **all accessible organizations**.
-2. Add it to the repository as the `VSCE_PAT` secret.
-3. If `main` is protected and does not allow the default `GITHUB_TOKEN` to
-   push, create a GitHub token with `contents: write` and add it as the
-   `RELEASE_TOKEN` secret. The workflow uses `RELEASE_TOKEN` when present and
-   falls back to `GITHUB_TOKEN` otherwise.
+The workflow supports two authentication methods:
 
-Until `VSCE_PAT` is configured, the workflow skips the release with a notice
-instead of failing.
+- **Trusted publishing (OIDC)** — preferred, but not available yet. As of
+  October 25, 2026, the Marketplace token exchange still returns
+  `TrustedPublishingNotSupportedException`; Microsoft is targeting
+  October 30, 2026. There is also no publisher setting to configure the
+  trusted publishing policy yet. See
+  [microsoft/vsmarketplace#1422](https://github.com/microsoft/vsmarketplace/issues/1422).
+- **Personal access token** — the interim method. Create an Azure DevOps PAT
+  with the **Marketplace: Manage** scope and add it as the `VSCE_PAT` secret.
+
+The workflow selects the method with the `VSCE_AUTH` repository variable:
+
+| `VSCE_AUTH` | Behavior |
+| --- | --- |
+| unset or `pat` | Use `VSCE_PAT`; skip with a notice if it is not configured |
+| `oidc` | Use `vsce publish --oidc`; no PAT needed |
+
+#### Switching to trusted publishing
+
+Once the Marketplace publisher management page offers trusted publishing:
+
+1. Create a trusted publishing policy for `samTime101/ShortCircuit` and the
+   `Release VS Code Extension` workflow. Match the repository and workflow
+   names exactly.
+2. Add a repository variable `VSCE_AUTH` with the value `oidc`.
+3. Run the workflow manually once with the `patch` bump. If it succeeds, delete
+   the `VSCE_PAT` secret.
+
+`--oidc` does not fall back to a PAT, so a failed OIDC exchange fails the
+workflow instead of publishing with the old secret.
+
+#### Version-bump pushes
+
+If `main` is protected and does not allow the default `GITHUB_TOKEN` to push,
+create a GitHub token with `contents: write` and add it as the `RELEASE_TOKEN`
+secret. The workflow uses `RELEASE_TOKEN` when present and falls back to
+`GITHUB_TOKEN` otherwise.
+
+Until a credential method is configured, the workflow skips the release with a
+notice instead of failing.
 
 ### Manual publishing
 
