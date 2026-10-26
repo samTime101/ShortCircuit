@@ -46,10 +46,22 @@ export function insertRecordedCase(source: string, recorded: RecordedCase): stri
   const match = header.exec(source);
   if (match) {
     const startLine = source.slice(0, match.index).split("\n").length - 1;
+    // CASE and STEP nest, so the TEST block ends at the first END that closes
+    // none of them. Inserting before the first END would nest the new case
+    // inside the previous one and break the file.
+    let depth = 0;
     for (let index = startLine + 1; index < lines.length; index += 1) {
-      if (lines[index]!.trim() === "END") {
-        lines.splice(index, 0, caseBlock);
-        return lines.join("\n");
+      const text = lines[index]!.trim();
+      if (/^(CASE|STEP)\b/i.test(text)) {
+        depth += 1;
+        continue;
+      }
+      if (/^END$/i.test(text)) {
+        if (depth === 0) {
+          lines.splice(index, 0, caseBlock);
+          return lines.join("\n");
+        }
+        depth -= 1;
       }
     }
   }

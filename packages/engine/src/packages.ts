@@ -95,7 +95,10 @@ export interface PackageCircuitSource {
 
 export interface PackageCatalog {
   readonly packages: PackageManifest[];
+  /** First macro registered under each unqualified name (kept for hosts and docs). */
   readonly macros: Map<string, ResolvedPackageMacro>;
+  /** Package name -> uppercase macro name -> macro, so packages never collide. */
+  readonly macrosByPackage: Map<string, Map<string, ResolvedPackageMacro>>;
   readonly circuits: PackageCircuitSource[];
   readonly diagnostics: Diagnostic[];
 }
@@ -417,6 +420,7 @@ function parsePackageCircuit(
 export function createPackageCatalog(bundles: PackageBundle[]): PackageCatalog {
   const packages: PackageManifest[] = [];
   const macros = new Map<string, ResolvedPackageMacro>();
+  const macrosByPackage = new Map<string, Map<string, ResolvedPackageMacro>>();
   const circuits: PackageCircuitSource[] = [];
   const diagnostics: Diagnostic[] = [];
 
@@ -452,14 +456,20 @@ export function createPackageCatalog(bundles: PackageBundle[]): PackageCatalog {
           }
 
           // Register every declaration in the file. The manifest names the
-          // public export; extra declarations are internal helpers.
+          // public export; extra declarations are internal helpers. Macros are
+          // namespaced by package: two packages may both export AND without
+          // one shadowing or rejecting the other.
+          const packageMacros =
+            macrosByPackage.get(manifest.name) ??
+            new Map<string, ResolvedPackageMacro>();
+          macrosByPackage.set(manifest.name, packageMacros);
           for (const declaration of parsedFile.declarations) {
             const key = declaration.name.toUpperCase();
-            if (macros.has(key)) {
+            if (packageMacros.has(key)) {
               diagnostics.push({
                 code: "E601",
                 severity: "error",
-                message: `Package macro ${declaration.name} is defined by more than one package.`,
+                message: `Package macro ${declaration.name} is defined more than once in ${manifest.name}.`,
                 line: declaration.line,
                 column: declaration.column,
               });
@@ -512,7 +522,7 @@ export function createPackageCatalog(bundles: PackageBundle[]): PackageCatalog {
                 });
               }
             }
-            macros.set(key, {
+            const resolved: ResolvedPackageMacro = {
               ...metadata,
               packageName: manifest.name,
               packageVersion: manifest.version,
@@ -526,7 +536,9 @@ export function createPackageCatalog(bundles: PackageBundle[]): PackageCatalog {
               bodyAst: parsedBody.ast,
               parseError: parsedBody.error,
               bodyCache: new Map(),
-            });
+            };
+            packageMacros.set(key, resolved);
+            if (!macros.has(key)) macros.set(key, resolved);
           }
         } else {
           const ast = parsePackageCircuit(manifest, item, diagnostics);
@@ -543,7 +555,7 @@ export function createPackageCatalog(bundles: PackageBundle[]): PackageCatalog {
     }
   }
 
-  return { packages, macros, circuits, diagnostics };
+  return { packages, macros, macrosByPackage, circuits, diagnostics };
 }
 
 function normalizeBundle(input?: PackageBundle | PackageManifest[]): PackageBundle {
@@ -692,8 +704,34 @@ export function packageClosure(
 export function findPackageMacro(
   catalog: PackageCatalog,
   name: string,
+  packageName?: string,
 ): ResolvedPackageMacro | undefined {
-  return catalog.macros.get(name.toUpperCase());
+  const key = name.toUpperCase();
+  if (packageName) {
+    const namespaced = catalog.macrosByPackage?.get(packageName)?.get(key);
+    if (namespaced) return namespaced;
+    const legacy = catalog.macros.get(key);
+    return legacy?.packageName === packageName ? legacy : undefined;
+  }
+  return catalog.macros.get(key);
+}
+
+/** Every macro with this unqualified name, across packages. */
+export function findPackageMacros(
+  catalog: PackageCatalog,
+  name: string,
+): ResolvedPackageMacro[] {
+  const key = name.toUpperCase();
+  if (catalog.macrosByPackage) {
+    const found: ResolvedPackageMacro[] = [];
+    for (const packageMacros of catalog.macrosByPackage.values()) {
+      const macro = packageMacros.get(key);
+      if (macro) found.push(macro);
+    }
+    return found;
+  }
+  const macro = catalog.macros.get(key);
+  return macro ? [macro] : [];
 }
 
 export function packageCircuitAsts(

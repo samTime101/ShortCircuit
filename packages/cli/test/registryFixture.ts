@@ -9,12 +9,14 @@ export interface RegistryPackageOptions {
   files?: Record<string, string>;
   packageJson?: boolean;
   description?: string;
+  /** Optional registry-declared integrity, normally computed by the publisher. */
+  integrity?: string;
 }
 
 export class RegistryFixture {
   readonly url = `${BASE}registry.json`;
   readonly files = new Map<string, string>();
-  readonly versions = new Map<string, Map<string, string>>();
+  readonly versions = new Map<string, Map<string, { manifest: string; integrity?: string }>>();
   readonly fetchCalls: string[] = [];
 
   readonly fetch: FetchLike = async (url) => {
@@ -46,11 +48,24 @@ export class RegistryFixture {
     for (const [path, contents] of Object.entries(options.files ?? {})) {
       this.files.set(`${BASE}${directory}/${path}`, contents);
     }
-    const versions = this.versions.get(options.name) ?? new Map<string, string>();
-    versions.set(options.version, manifestPath);
+    const versions = this.versions.get(options.name) ?? new Map();
+    versions.set(options.version, {
+      manifest: manifestPath,
+      ...(options.integrity ? { integrity: options.integrity } : {}),
+    });
     this.versions.set(options.name, versions);
     this.refreshIndex();
     return directory;
+  }
+
+  setIntegrity(name: string, version: string, integrity: string | undefined): void {
+    const entry = this.versions.get(name)?.get(version);
+    if (!entry) throw new Error(`No registry entry for ${name}@${version}`);
+    this.versions.get(name)!.set(version, {
+      manifest: entry.manifest,
+      ...(integrity ? { integrity } : {}),
+    });
+    this.refreshIndex();
   }
 
   addFile(path: string, contents: string): void {
@@ -61,7 +76,7 @@ export class RegistryFixture {
     const packages = [...this.versions.entries()].map(([name, versions]) => ({
       name,
       versions: Object.fromEntries(
-        [...versions.entries()].map(([version, manifest]) => [version, { manifest }]),
+        [...versions.entries()].map(([version, entry]) => [version, entry]),
       ),
     }));
     this.files.set(

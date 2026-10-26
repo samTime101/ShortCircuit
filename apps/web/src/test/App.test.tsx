@@ -117,17 +117,21 @@ END`);
     await waitFor(() => {
       expect(screen.getByText(/Errors detected/)).toBeInTheDocument();
     });
-    expect(window.localStorage.getItem(STORAGE_KEY)).not.toContain(
-      'IMPORT "@shortcircuit/gates"',
-    );
+    await waitFor(() => {
+      expect(window.localStorage.getItem(STORAGE_KEY)).not.toContain(
+        'IMPORT "@shortcircuit/gates"',
+      );
+    });
 
     await userEvent.click(gates);
     await waitFor(() => {
       expect(screen.getByText("Evaluation graph")).toBeInTheDocument();
     });
-    expect(window.localStorage.getItem(STORAGE_KEY)).toContain(
-      'IMPORT "@shortcircuit/gates"',
-    );
+    await waitFor(() => {
+      expect(window.localStorage.getItem(STORAGE_KEY)).toContain(
+        'IMPORT "@shortcircuit/gates"',
+      );
+    });
   });
 
   it("opens the documentation page and returns to the studio", async () => {
@@ -259,7 +263,47 @@ END`);
     await waitFor(() => {
       expect(screen.getByText("Evaluation graph")).toBeInTheDocument();
     });
-    expect(window.localStorage.getItem(STORAGE_KEY)).toBe(HALF_ADDER);
+    await waitFor(() => {
+      expect(window.localStorage.getItem(STORAGE_KEY)).toBe(HALF_ADDER);
+    });
+  });
+
+  it("keeps inputs and the waveform when a recompile leaves the circuit unchanged", async () => {
+    store(`CIRCUIT Wire
+INPUT a
+OUTPUT b
+b = a
+END`);
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Evaluation graph")).toBeInTheDocument();
+    });
+
+    const toggle = screen.getByRole("button", { name: "Toggle a" });
+    await userEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+
+    const view = EditorView.findFromDOM(
+      document.querySelector(".cm-editor") as HTMLElement,
+    )!;
+    view.dispatch({
+      changes: { from: view.state.doc.length, to: view.state.doc.length, insert: "\n// a comment" },
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: /^run/i }));
+    await userEvent.click(screen.getByRole("tab", { name: /waveform/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/1 sample recorded/)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/No trace yet/)).toBeNull();
+
+    await userEvent.click(screen.getByRole("tab", { name: /circuit/i }));
+    expect(screen.getByRole("button", { name: "Toggle a" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 
   it("maximizes the editor and gives the workbench back", async () => {
@@ -425,7 +469,9 @@ ${HALF_ADDER}`);
       expect(screen.getByText("Evaluation graph")).toBeInTheDocument();
     });
     expect(screen.queryAllByText(/not a comment/i).length).toBe(0);
-    expect(window.localStorage.getItem(STORAGE_KEY)).toContain("// an old style comment");
+    await waitFor(() => {
+      expect(window.localStorage.getItem(STORAGE_KEY)).toContain("// an old style comment");
+    });
   });
 
   it("does not add a line below the source when the keyboard formats it", async () => {

@@ -525,13 +525,37 @@ export async function fetchRemotePackage(
   index: RegistryIndex,
   entry: RegistryPackageEntry,
   version: RegistryVersion,
-  options: { cacheDir: string; fetch?: FetchLike; offline?: boolean; refresh?: boolean },
+  options: {
+    cacheDir: string;
+    fetch?: FetchLike;
+    offline?: boolean;
+    refresh?: boolean;
+    /** Accept contents that do not match the registry-declared integrity. */
+    force?: boolean;
+  },
 ): Promise<RemotePackage> {
   const cachePathValue = packageCachePath(options.cacheDir, entry.name, version.version);
   const cached = readCache(cachePathValue);
   if (!options.refresh && cached) {
     const parsed = cachedPackage(cached.data);
-    if (parsed) return parsed;
+    if (parsed) {
+      const actual = packageIntegrity(parsed.files);
+      if (!options.force && parsed.integrity !== actual) {
+        fail(
+          `Cached package ${entry.name}@${version.version} failed its integrity check: ` +
+            `it was stored as ${parsed.integrity}, but the files hash to ${actual}. ` +
+            "Remove the cache or re-run with --force to accept them.",
+        );
+      }
+      if (!options.force && version.integrity && version.integrity !== actual) {
+        fail(
+          `Integrity check failed for ${entry.name}@${version.version}: ` +
+            `the registry declares ${version.integrity}, but the cached package files hash to ${actual}. ` +
+            "Re-run with --force only if you trust this registry.",
+        );
+      }
+      return { ...parsed, integrity: actual };
+    }
   }
   if (options.offline) {
     fail(
@@ -568,12 +592,21 @@ export async function fetchRemotePackage(
     files[path] = text;
   }
 
+  const integrity = packageIntegrity(files);
+  if (!options.force && version.integrity && version.integrity !== integrity) {
+    fail(
+      `Integrity check failed for ${entry.name}@${version.version}: ` +
+        `the registry declares ${version.integrity}, but the downloaded package files hash to ${integrity}. ` +
+        "The package may have been tampered with. Re-run with --force only if you trust this registry.",
+    );
+  }
+
   const remote: RemotePackage = {
     name: entry.name,
     version: version.version,
     ...(manifest.description ? { description: manifest.description } : {}),
     files,
-    integrity: packageIntegrity(files),
+    integrity,
     manifest,
     resolved: packageRoot,
   };
@@ -587,5 +620,16 @@ export function cachedRemotePackage(
   version: string,
 ): RemotePackage | null {
   const cached = readCache(packageCachePath(cacheDir, name, version));
-  return cached ? cachedPackage(cached.data) : null;
+  if (!cached) return null;
+  const parsed = cachedPackage(cached.data);
+  if (!parsed) return null;
+  const actual = packageIntegrity(parsed.files);
+  if (parsed.integrity !== actual) {
+    fail(
+      `Cached package ${name}@${version} failed its integrity check: ` +
+        `it was stored as ${parsed.integrity}, but the files hash to ${actual}. ` +
+        "Remove the cache or re-run the command online to fetch it again.",
+    );
+  }
+  return { ...parsed, integrity: actual };
 }

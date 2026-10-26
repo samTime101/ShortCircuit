@@ -48,8 +48,8 @@ function setup(overrides: Partial<Parameters<typeof SimulatorDock>[0]> = {}) {
     onDisplayChange: vi.fn(),
     ...overrides,
   };
-  render(<SimulatorDock {...props} />);
-  return props;
+  const view = render(<SimulatorDock {...props} />);
+  return { ...props, rerender: view.rerender };
 }
 
 describe("simulator dock", () => {
@@ -86,6 +86,44 @@ describe("simulator dock", () => {
     await userEvent.clear(field);
     await userEvent.type(field, "1010{Enter}");
     expect(props.onSetState).toHaveBeenCalledWith("count", "1010");
+  });
+
+  it("keeps a state draft while the clock keeps updating the snapshot", async () => {
+    const circuit = compile(SOURCE).circuits[0]!;
+    const simulator = new Simulator(circuit);
+    const props = {
+      circuit,
+      snapshot: simulator.snapshot(),
+      inputValues: simulator.getInputValues(),
+      runtimeError: null,
+      clocks: ["clock"],
+      selectedClock: "clock",
+      onSelectClock: () => {},
+      onStep: () => {},
+      running: false,
+      onToggleRun: () => {},
+      speed: 2,
+      onSpeedChange: () => {},
+      onInputChange: () => {},
+      onSetState: () => {},
+      onReset: () => {},
+      recording: false,
+      onStartRecording: () => {},
+      onStopRecording: () => {},
+      onExpectThis: () => {},
+      displays: {},
+      onDisplayChange: () => {},
+    };
+    const { rerender } = render(<SimulatorDock {...props} />);
+    const field = screen.getByLabelText("count binary value");
+
+    await userEvent.click(field);
+    await userEvent.clear(field);
+    await userEvent.type(field, "10");
+
+    rerender(<SimulatorDock {...props} snapshot={simulator.setState("count", "1111")} />);
+
+    expect(field).toHaveValue("10");
   });
 
   it("resets the stored state", async () => {

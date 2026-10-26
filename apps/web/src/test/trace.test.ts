@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { compile } from "@shortcircuit/engine";
-import { appendSample, sampleFromSnapshot, traceToJson, traceToVcd, TRACE_LIMIT } from "../lib/trace";
+import {
+  appendSample,
+  appendSamples,
+  sampleFromSnapshot,
+  traceToJson,
+  traceToVcd,
+  TRACE_LIMIT,
+} from "../lib/trace";
 import { Simulator } from "@shortcircuit/engine";
 
 const SOURCE = `IMPORT "@shortcircuit/arithmetic"
@@ -31,6 +38,14 @@ describe("trace", () => {
     const sample = { label: "x", inputs: {}, outputs: {}, states: {}, events: [] };
     let trace = [] as ReturnType<typeof appendSample>;
     for (let index = 0; index < TRACE_LIMIT + 5; index += 1) trace = appendSample(trace, sample);
+    expect(trace).toHaveLength(TRACE_LIMIT);
+  });
+
+  it("appends a clock pulse as one batch without exceeding the cap", () => {
+    const sample = { label: "x", inputs: {}, outputs: {}, states: {}, events: [] };
+    let trace = [] as ReturnType<typeof appendSamples>;
+    for (let index = 0; index < TRACE_LIMIT - 1; index += 1) trace = appendSample(trace, sample);
+    trace = appendSamples(trace, [sample, sample]);
     expect(trace).toHaveLength(TRACE_LIMIT);
   });
 

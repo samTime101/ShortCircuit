@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   binaryToDecimal,
   formatBinary,
@@ -73,8 +73,11 @@ function BusTextField({
 }) {
   const [draft, setDraft] = useState(value);
   const [error, setError] = useState<string | null>(null);
+  const focused = useRef(false);
 
   useEffect(() => {
+    // While the user is editing, a running clock must not overwrite the draft.
+    if (focused.current) return;
     setDraft(value);
     setError(null);
   }, [value]);
@@ -96,7 +99,13 @@ function BusTextField({
         aria-label={`${name} binary value`}
         spellCheck={false}
         onChange={(event) => setDraft(event.target.value)}
-        onBlur={commit}
+        onFocus={() => {
+          focused.current = true;
+        }}
+        onBlur={() => {
+          focused.current = false;
+          commit();
+        }}
         onKeyDown={(event) => {
           if (event.key === "Enter") {
             commit();
@@ -135,8 +144,12 @@ function StateField({
 }) {
   const [draft, setDraft] = useState(value);
   const [error, setError] = useState<string | null>(null);
+  const focused = useRef(false);
 
   useEffect(() => {
+    // A live snapshot changes on every tick; leave the draft alone while the
+    // user has the caret in this field.
+    if (focused.current) return;
     setDraft(value);
     setError(null);
   }, [value]);
@@ -158,7 +171,13 @@ function StateField({
         aria-label={`${name} binary value`}
         spellCheck={false}
         onChange={(event) => setDraft(event.target.value)}
-        onBlur={commit}
+        onFocus={() => {
+          focused.current = true;
+        }}
+        onBlur={() => {
+          focused.current = false;
+          commit();
+        }}
         onKeyDown={(event) => {
           if (event.key === "Enter") {
             commit();
@@ -171,7 +190,7 @@ function StateField({
   );
 }
 
-export function SimulatorDock({
+export const SimulatorDock = memo(function SimulatorDock({
   circuit,
   snapshot,
   inputValues,
@@ -532,4 +551,4 @@ export function SimulatorDock({
       </div>
     </section>
   );
-}
+});

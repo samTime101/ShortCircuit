@@ -2,6 +2,7 @@ import type {
   CircuitIR,
   CompileResult,
   TestCaseResult,
+  TestCycleInstruction,
   TestExpectInstruction,
   TestInstructionIR,
   TestRowResult,
@@ -66,8 +67,10 @@ export function runTests(
     });
 
     const suitePass = caseResults.length > 0 && caseResults.every((entry) => entry.pass);
-    if (suitePass) passed += caseResults.length;
-    else failed += caseResults.filter((entry) => !entry.pass).length;
+    // Count cases, not suites: a suite with one passing and one failing case
+    // contributes to both totals.
+    passed += caseResults.filter((entry) => entry.pass).length;
+    failed += caseResults.filter((entry) => !entry.pass).length;
     suites.push({
       name: suite.name,
       circuit: suite.circuit,
@@ -145,6 +148,82 @@ function runCase(circuit: CircuitIR, testCase: TestSuiteIR["cases"][number]): Te
     step,
   });
 
+  /** Pulses a clock, closing a high phase first so every tick has an edge. */
+  const pulseClock = (
+    instruction: TestCycleInstruction,
+  ): TestCaseResult | null => {
+    try {
+      if (simulator.inputValue(instruction.clock) === 1n) {
+        simulator.setInput(instruction.clock, "0");
+      }
+      for (let index = 0; index < instruction.count; index += 1) {
+        step += 1;
+        simulator.setInput(instruction.clock, "1");
+        simulator.setInput(instruction.clock, "0");
+      }
+    } catch (error) {
+      return fail(error instanceof Error ? error.message : String(error));
+    }
+    rows.push({
+      kind: "input",
+      name: instruction.clock,
+      actual: `${instruction.count} cycle${instruction.count === 1 ? "" : "s"}`,
+      width: 1,
+      line: instruction.line,
+      step,
+    });
+    return null;
+  };
+
+  /**
+   * Applies one STEP group: its own input changes commit together, then the
+   * nested instructions run in source order. A nested STEP or CYCLE is a real
+   * instruction, so it is executed rather than skipped.
+   */
+  const runStep = (statements: TestInstructionIR[]): TestCaseResult | null => {
+    step += 1;
+    const values: Record<string, string> = {};
+    for (const inner of statements) {
+      if (inner.kind === "input") values[inner.name] = inner.value;
+    }
+    if (Object.keys(values).length > 0) {
+      try {
+        simulator.setInputs(values);
+      } catch (error) {
+        return fail(error instanceof Error ? error.message : String(error));
+      }
+    }
+    for (const inner of statements) {
+      if (inner.kind === "input") {
+        rows.push({
+          kind: "input",
+          name: inner.name,
+          actual: inner.value,
+          width: inner.width,
+          line: inner.line,
+          step,
+        });
+        continue;
+      }
+      if (inner.kind === "expect") {
+        const check = checkExpect(simulator, inner, step);
+        rows.push(check.row);
+        if (!check.pass) return fail(check.message);
+        continue;
+      }
+      if (inner.kind === "cycle") {
+        const failure = pulseClock(inner);
+        if (failure) return failure;
+        continue;
+      }
+      if (inner.kind === "step") {
+        const failure = runStep(inner.statements);
+        if (failure) return failure;
+      }
+    }
+    return null;
+  };
+
   const run = (instructions: TestInstructionIR[]): TestCaseResult | null => {
     for (const instruction of instructions) {
       if (instruction.kind === "input") {
@@ -184,59 +263,14 @@ function runCase(circuit: CircuitIR, testCase: TestSuiteIR["cases"][number]): Te
       }
 
       if (instruction.kind === "step") {
-        step += 1;
-        const values: Record<string, string> = {};
-        for (const inner of instruction.statements) {
-          if (inner.kind === "input") values[inner.name] = inner.value;
-        }
-        try {
-          simulator.setInputs(values);
-        } catch (error) {
-          return fail(error instanceof Error ? error.message : String(error));
-        }
-        for (const inner of instruction.statements) {
-          if (inner.kind === "input") {
-            rows.push({
-              kind: "input",
-              name: inner.name,
-              actual: inner.value,
-              width: inner.width,
-              line: inner.line,
-              step,
-            });
-            continue;
-          }
-          if (inner.kind === "expect") {
-            const check = checkExpect(simulator, inner, step);
-            rows.push(check.row);
-            if (!check.pass) return fail(check.message);
-          }
-        }
+        const failure = runStep(instruction.statements);
+        if (failure) return failure;
         continue;
       }
 
       if (instruction.kind === "cycle") {
-        try {
-          // Close a high phase first so every cycle contains a rising edge.
-          if (simulator.inputValue(instruction.clock) === 1n) {
-            simulator.setInput(instruction.clock, "0");
-          }
-          for (let index = 0; index < instruction.count; index += 1) {
-            step += 1;
-            simulator.setInput(instruction.clock, "1");
-            simulator.setInput(instruction.clock, "0");
-          }
-        } catch (error) {
-          return fail(error instanceof Error ? error.message : String(error));
-        }
-        rows.push({
-          kind: "input",
-          name: instruction.clock,
-          actual: `${instruction.count} cycle${instruction.count === 1 ? "" : "s"}`,
-          width: 1,
-          line: instruction.line,
-          step,
-        });
+        const failure = pulseClock(instruction);
+        if (failure) return failure;
         continue;
       }
 

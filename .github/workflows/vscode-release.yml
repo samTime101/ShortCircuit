@@ -1,0 +1,77 @@
+name: Release VS Code extension
+
+on:
+  push:
+    tags:
+      - "vscode-v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to release, for example vscode-v0.1.6
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: vscode-github-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and attach the VSIX
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck the extension
+        run: npm run typecheck -w shortcircuit
+
+      - name: Test the extension
+        run: npm test -w shortcircuit
+
+      - name: Build the extension
+        run: npm run build -w shortcircuit
+
+      - name: Package the VSIX
+        working-directory: packages/vscode-extension
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          expected="vscode-v${version}"
+          if [ "$TAG" != "$expected" ]; then
+            echo "Tag $TAG does not match extension version $version (expected $expected)." >&2
+            exit 1
+          fi
+          npx --yes @vscode/vsce@4 package --no-git-tag-version
+
+      - name: Create or update the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          version="$(node -p "require('./packages/vscode-extension/package.json').version")"
+          asset="packages/vscode-extension/shortcircuit-${version}.vsix"
+          title="Short Circuit VS Code v${version}"
+          notes="Short Circuit for VS Code v${version}. This release includes the code-audit bug fixes documented in reports/code-audit.md section 6."
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$asset" --clobber
+          else
+            gh release create "$TAG" "$asset" --title "$title" --notes "$notes"
+          fi

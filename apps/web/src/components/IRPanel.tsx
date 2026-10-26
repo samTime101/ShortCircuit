@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { IR_SCHEMA, exportVerilog, type ProgramIR } from "@shortcircuit/engine";
 import { Braces, Check, Copy, Download } from "./Icons";
 
@@ -7,7 +7,7 @@ interface IRPanelProps {
   onNotify(message: string): void;
 }
 
-export function IRPanel({ ir, onNotify }: IRPanelProps) {
+export const IRPanel = memo(function IRPanel({ ir, onNotify }: IRPanelProps) {
   const [copied, setCopied] = useState(false);
   const json = useMemo(() => (ir ? JSON.stringify(ir, null, 2) : ""), [ir]);
   const filename = `${ir?.circuits[0]?.name.toLowerCase() ?? "circuit"}.shortcircuit.ir.json`;
@@ -120,4 +120,4 @@ export function IRPanel({ ir, onNotify }: IRPanelProps) {
       </div>
     </div>
   );
-}
+});

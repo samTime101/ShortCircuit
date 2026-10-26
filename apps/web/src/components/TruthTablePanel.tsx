@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { TruthTable } from "@shortcircuit/engine";
 import { AlertTriangle, Table } from "./Icons";
 
@@ -17,7 +18,7 @@ function Bits({ value }: { value: string }) {
   );
 }
 
-export function TruthTablePanel({ table }: TruthTablePanelProps) {
+export const TruthTablePanel = memo(function TruthTablePanel({ table }: TruthTablePanelProps) {
   if (!table) {
     return (
       <div className="workbench-empty">
@@ -116,4 +117,4 @@ export function TruthTablePanel({ table }: TruthTablePanelProps) {
       ) : null}
     </div>
   );
-}
+});

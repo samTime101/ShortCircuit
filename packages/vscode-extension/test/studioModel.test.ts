@@ -166,8 +166,9 @@ END`;
     const failing = buildTestsModel(compileWithPackages(FAILING_TESTS));
     expect(failing).not.toBeNull();
     expect(failing!.ok).toBe(false);
-    // runTests counts: if any case fails, the whole suite fails, and only failed cases increment 'failed'
-    expect(failing!.passed).toBe(0);
+    // runTests counts cases independently: the "ok" case still passes even
+    // though the suite as a whole fails.
+    expect(failing!.passed).toBe(1);
     expect(failing!.failed).toBe(1);
     const failingSuite = failing!.suites.find((suite) => suite.name === "HalfAdder");
     expect(failingSuite).toBeDefined();
@@ -281,9 +282,9 @@ END`;
     expect(htmlModel).toContain("Boolean(message.forceReset)");
   });
 
-  it("ensures no duplicate refreshStudio in view/title and version is 0.1.5", async () => {
+  it("ensures no duplicate refreshStudio in view/title and version is 0.1.6", async () => {
     const pkg = await import("../package.json");
-    expect(pkg.version).toBe("0.1.5");
+    expect(pkg.version).toBe("0.1.6");
     const menus = (pkg.contributes as { menus?: { "view/title"?: unknown[] } }).menus;
     const viewTitle = menus?.["view/title"] || [];
     const hasRefreshInTitle = viewTitle.some((item) =>

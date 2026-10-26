@@ -377,6 +377,7 @@ async function choosePackage(
       fetch: options.fetch,
       offline: options.offline,
       refresh: options.refresh,
+      force: options.force,
     });
     return remoteResolved(remote);
   }
@@ -390,6 +391,7 @@ async function choosePackage(
     fetch: options.fetch,
     offline: options.offline,
     refresh: options.refresh,
+    force: options.force,
   });
   return remoteResolved(remote);
 }
@@ -494,6 +496,7 @@ async function installResolvedPackages(
         fetch: options.fetch,
         offline: options.offline,
         refresh: options.refresh,
+        force: options.force,
       });
     }
     await writeRemotePackage(state.context.root, remote);
@@ -697,7 +700,7 @@ export async function installPackage(
     cacheDir: options.cacheDir,
     fetch: options.fetch,
     offline: options.offline,
-    refresh: options.offline ? false : true,
+    refresh: options.refresh,
   });
   const entry = findRegistryPackage(index, parsed.name);
   const version = parsed.range

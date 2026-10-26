@@ -72,11 +72,26 @@ export class Simulator {
       this.stateInitial.set(state.node, value);
       this.stateValues.set(state.node, value);
     }
-    this.order = this.topologicalOrder();
-    // Evaluate the all-zero initial state so the simulator is usable before
-    // the host applies test inputs.
-    this.evaluate();
-    this.captureClockBaseline();
+    this.order = [];
+    try {
+      this.order = this.topologicalOrder();
+      // Evaluate the all-zero initial state so the simulator is usable before
+      // the host applies test inputs.
+      this.evaluate();
+      this.captureClockBaseline();
+    } catch (error) {
+      // A broken IR must not take the host down. Keep the failure on the
+      // snapshot so the studio can explain it and offer a reset.
+      this.initialRuntimeError =
+        error instanceof SimulationError
+          ? error
+          : new SimulationError(
+              "R500",
+              `The simulator could not start: ${error instanceof Error ? error.message : String(error)}`,
+            );
+      this.values = new Map();
+      this.clockValues = new Map();
+    }
   }
 
   /** Evaluation error captured while constructing the simulator, if any. */

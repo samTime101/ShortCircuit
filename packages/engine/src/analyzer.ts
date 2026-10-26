@@ -25,6 +25,7 @@ import {
 } from "./builtins";
 import {
   findPackageMacro,
+  findPackageMacros,
   macroBodyForArity,
   type ImportResolution,
   type PackageCatalog,
@@ -218,6 +219,8 @@ export class ProgramAnalyzer {
   private readonly tests: TestSuiteIR[] = [];
   private readonly internalCircuitNames: Set<string>;
   private readonly importedMacroNames: Set<string>;
+  /** A syntax error means semantic checks would only add cascading noise. */
+  private readonly hasParseErrors: boolean;
   private instanceCounter = 0;
   private nodeLimitReported = false;
 
@@ -229,6 +232,7 @@ export class ProgramAnalyzer {
     private readonly packageCatalog: PackageCatalog = {
       packages: [],
       macros: new Map(),
+      macrosByPackage: new Map(),
       circuits: [],
       diagnostics: [],
     },
@@ -236,13 +240,15 @@ export class ProgramAnalyzer {
   ) {
     this.options = { ...DEFAULT_OPTIONS, ...options };
     this.bag = new DiagnosticBag(this.options.maxDiagnostics);
+    this.hasParseErrors = parserDiagnostics.some((item) => item.severity === "error");
     this.internalCircuitNames = new Set(
       program.circuits
         .filter((circuit) => circuit.packageName)
         .map((circuit) => circuit.name),
     );
     this.importedMacroNames = new Set(
-      [...packageCatalog.macros.values()]
+      [...packageCatalog.macrosByPackage.values()]
+        .flatMap((macros) => [...macros.values()])
         .filter((macro) => importResolution.importedPackages.has(macro.packageName))
         .map((macro) => macro.name.toUpperCase()),
     );
@@ -260,7 +266,9 @@ export class ProgramAnalyzer {
       this.buildTopCircuit(structure);
     }
 
-    this.compileTests();
+    // Do not analyze tests on top of a broken parse: the parser already said
+    // what went wrong, and test checks such as "no EXPECT" would be noise.
+    if (!this.hasParseErrors) this.compileTests();
 
     const diagnostics = this.bag.sorted().map((diagnostic) => {
       const plain = plainFor(diagnostic);
@@ -566,7 +574,6 @@ export class ProgramAnalyzer {
   private validateEventConflicts(context: BuildContext): void {
     const seen = new Map<string, ClockEvent>();
     for (const event of context.events) {
-      const key = `${event.edge}:${event.clock}:${event.updates.map((u) => u.state).join(",")}`;
       for (const update of event.updates) {
         const stateKey = `${event.edge}:${event.clock}:${update.state}`;
         const previous = seen.get(stateKey);
@@ -592,7 +599,6 @@ export class ProgramAnalyzer {
           seen.set(stateKey, event);
         }
       }
-      void key;
     }
   }
 
@@ -1146,15 +1152,44 @@ export class ProgramAnalyzer {
   ): ResolvedPackageMacro | undefined {
     const resolved = this.resolvePackageName(name);
     if (!resolved) return undefined;
-    const macro = findPackageMacro(this.packageCatalog, resolved.exportName);
-    if (!macro) return undefined;
     if (resolved.packageName) {
-      return macro.packageName === resolved.packageName ? macro : undefined;
+      return findPackageMacro(this.packageCatalog, resolved.exportName, resolved.packageName);
     }
-    if (requesterPackage) return macro;
-    return this.importResolution.unqualifiedPackages.has(macro.packageName)
-      ? macro
-      : undefined;
+    const candidates = findPackageMacros(this.packageCatalog, resolved.exportName);
+    if (candidates.length === 0) return undefined;
+    if (requesterPackage) {
+      // A package's own macros win over a same-named export from another
+      // package. A unique name remains callable from package code, matching
+      // the old single-namespace behaviour.
+      const local = candidates.find((macro) => macro.packageName === requesterPackage);
+      if (local) return local;
+      if (candidates.length === 1) return candidates[0];
+    }
+    const available = candidates.filter((macro) =>
+      this.importResolution.unqualifiedPackages.has(macro.packageName),
+    );
+    // An unqualified name that two imported packages both export is
+    // ambiguous. Returning undefined makes the caller ask for a qualifier.
+    return available.length === 1 ? available[0] : undefined;
+  }
+
+  /**
+   * The imported macros that make an unqualified call ambiguous. A package's
+   * own macro would already have resolved, so only a true collision remains.
+   */
+  getAmbiguousPackageMacros(
+    name: string,
+    requesterPackage?: string,
+  ): ResolvedPackageMacro[] {
+    const resolved = this.resolvePackageName(name);
+    if (!resolved || resolved.packageName) return [];
+    const candidates = findPackageMacros(this.packageCatalog, resolved.exportName).filter(
+      (macro) => this.importResolution.unqualifiedPackages.has(macro.packageName),
+    );
+    if (requesterPackage && candidates.some((macro) => macro.packageName === requesterPackage)) {
+      return [];
+    }
+    return candidates.length > 1 ? candidates : [];
   }
 
   /**
@@ -1195,9 +1230,11 @@ export class ProgramAnalyzer {
   }
 
   getPackageMacros(): Iterable<ResolvedPackageMacro> {
-    return [...this.packageCatalog.macros.values()].filter((macro) =>
-      this.importResolution.unqualifiedPackages.has(macro.packageName),
-    );
+    return [...this.packageCatalog.macrosByPackage.values()]
+      .flatMap((macros) => [...macros.values()])
+      .filter((macro) =>
+        this.importResolution.unqualifiedPackages.has(macro.packageName),
+      );
   }
 
   getStructures(): Iterable<CircuitStructure> {
@@ -1708,6 +1745,18 @@ class ScopeBuilder {
         requesterPackage,
       );
     }
+    const ambiguous = this.analyzer.getAmbiguousPackageMacros(call.name, requesterPackage);
+    if (ambiguous.length > 1) {
+      const packages = ambiguous.map((macro) => macro.packageName).join(", ");
+      this.analyzer.error(
+        "E210",
+        `Component or function "${call.name}" is exported by more than one imported package: ${packages}.`,
+        call.span.line,
+        call.span.column,
+        `Import one package with an alias and qualify the call, for example Alias.${call.name}(...).`,
+      );
+      return this.fallbackRef(call.span.line, call.span.column);
+    }
     if (this.isBundleCall(call.name)) {
       this.analyzer.error(
         "E217",
@@ -1753,10 +1802,22 @@ class ScopeBuilder {
       );
     }
 
-    const refs = call.args.map((arg) =>
-      this.resolveExpression(arg.value, undefined, macroBindings, requesterPackage),
-    );
     const argExprs = call.args.map((arg) => arg.value);
+    // Widths and bounds are compile-time parameters, not signals. Resolving
+    // them would create constant nodes that no operation reads, inflating
+    // stats.nodes and leaving floating cards in the graph.
+    const compileTimeArgs = new Set<number>();
+    if (spec.name === "SLICE") {
+      compileTimeArgs.add(1);
+      compileTimeArgs.add(2);
+    } else if (spec.name === "ZEXT" || spec.name === "SEXT" || spec.name === "REPEAT") {
+      compileTimeArgs.add(1);
+    }
+    const refs = call.args.map((arg, index) =>
+      compileTimeArgs.has(index)
+        ? { node: "", width: 1 }
+        : this.resolveExpression(arg.value, undefined, macroBindings, requesterPackage),
+    );
     if (call.args.length < spec.minArgs || call.args.length > spec.maxArgs) {
       this.analyzer.error(
         "E302",

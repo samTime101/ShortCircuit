@@ -197,6 +197,135 @@ END`);
     expect(simulator.outputs["h.sum"]?.binary).toBe("0");
   });
 
+  it("keeps macros with the same name in separate package namespaces", () => {
+    const manifest = (name: string, body: string): PackageManifest => ({
+      schema: "shortcircuit.package/v1",
+      name,
+      version: "0.1.0",
+      exports: [
+        {
+          kind: "macro",
+          name: "AND",
+          source: "macros/and/macro.lf",
+          sourceText: `MACRO AND(a, b)\n  BODY ${body}\nEND\n`,
+        },
+      ],
+    });
+    const bundle: PackageBundle = {
+      schema: "shortcircuit.packages/v1",
+      packages: [
+        manifest("@test/and-one", "NAND(a, b)"),
+        manifest("@test/and-two", "NAND(NAND(a, b), NAND(a, b))"),
+      ],
+    };
+    const result = compile(
+      `IMPORT "@test/and-one" AS One
+IMPORT "@test/and-two" AS Two
+CIRCUIT Both
+INPUT a
+INPUT b
+y = One.AND(a, b)
+z = Two.AND(a, b)
+OUTPUT y
+OUTPUT z
+END`,
+      { disableDefaultPackages: true, packages: bundle },
+    );
+    expect(result.diagnostics.filter((entry) => entry.severity === "error")).toEqual([]);
+    const circuit = result.circuits[0]!;
+    const allOnes = new Simulator(circuit).setInputs({ a: "1", b: "1" });
+    expect(allOnes.outputs.y?.binary).toBe("0");
+    expect(allOnes.outputs.z?.binary).toBe("1");
+  });
+
+  it("resolves a package's own helper before another package's macro with the same name", () => {
+    const bundle: PackageBundle = {
+      schema: "shortcircuit.packages/v1",
+      packages: [
+        {
+          schema: "shortcircuit.package/v1",
+          name: "@test/other",
+          version: "0.1.0",
+          exports: [
+            {
+              kind: "macro",
+              name: "AND",
+              source: "macros/and/macro.lf",
+              sourceText: "MACRO AND(a, b)\n  BODY NAND(NAND(a, b), NAND(a, b))\nEND\n",
+            },
+          ],
+        },
+        {
+          schema: "shortcircuit.package/v1",
+          name: "@test/outer",
+          version: "0.1.0",
+          exports: [
+            {
+              kind: "macro",
+              name: "OUTER",
+              source: "macros/outer/macro.lf",
+              sourceText:
+                "MACRO AND(a, b)\n  BODY NAND(a, b)\nEND\n" +
+                "MACRO OUTER(a, b)\n  BODY AND(a, b)\nEND\n",
+            },
+          ],
+        },
+      ],
+    };
+    const result = compile(
+      `IMPORT "@test/other"
+IMPORT "@test/outer" AS Outer
+CIRCUIT Local
+INPUT a
+INPUT b
+y = Outer.OUTER(a, b)
+OUTPUT y
+END`,
+      { disableDefaultPackages: true, packages: bundle },
+    );
+    expect(result.diagnostics.filter((entry) => entry.severity === "error")).toEqual([]);
+    const output = new Simulator(result.circuits[0]!).setInputs({ a: "1", b: "1" });
+    expect(output.outputs.y?.binary).toBe("0");
+  });
+
+  it("reports an ambiguous unqualified macro instead of picking a package", () => {
+    const manifest = (name: string): PackageManifest => ({
+      schema: "shortcircuit.package/v1",
+      name,
+      version: "0.1.0",
+      exports: [
+        {
+          kind: "macro",
+          name: "AND",
+          source: "macros/and/macro.lf",
+          sourceText: "MACRO AND(a, b)\n  BODY NAND(a, b)\nEND\n",
+        },
+      ],
+    });
+    const result = compile(
+      `IMPORT "@test/and-one"
+IMPORT "@test/and-two"
+CIRCUIT Both
+INPUT a
+INPUT b
+y = AND(a, b)
+OUTPUT y
+END`,
+      {
+        disableDefaultPackages: true,
+        packages: {
+          schema: "shortcircuit.packages/v1",
+          packages: [manifest("@test/and-one"), manifest("@test/and-two")],
+        },
+      },
+    );
+    const ambiguous = result.diagnostics.find((entry) => entry.code === "E210");
+    expect(ambiguous?.message).toContain("more than one imported package");
+    expect(ambiguous?.message).toContain("@test/and-one");
+    expect(ambiguous?.message).toContain("@test/and-two");
+    expect(ambiguous?.hint).toContain("Alias.AND(...)");
+  });
+
   it("reports an import for a package that is not loaded", () => {
     const missing = compile(`IMPORT "@missing/package"
 CIRCUIT Empty

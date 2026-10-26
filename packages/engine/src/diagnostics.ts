@@ -7,20 +7,17 @@ const DEFAULT_MAX = 100;
  * The same source line can legitimately carry two different messages, so the
  * message is part of the identity.
  */
-function sameDiagnostic(a: Diagnostic, b: Diagnostic): boolean {
-  return (
-    a.code === b.code &&
-    a.severity === b.severity &&
-    a.message === b.message &&
-    a.line === b.line &&
-    a.column === b.column
-  );
+function diagnosticKey(diagnostic: Diagnostic): string {
+  return `${diagnostic.code}\u0000${diagnostic.severity}\u0000${diagnostic.line}\u0000${diagnostic.column}\u0000${diagnostic.message}`;
 }
 
 export class DiagnosticBag {
   readonly items: Diagnostic[] = [];
   private readonly max: number;
+  private readonly seen = new Set<string>();
   private hasErrors = false;
+  /** Unique reports that did not fit in the bag because of the limit. */
+  private dropped = 0;
 
   constructor(max = DEFAULT_MAX) {
     this.max = max;
@@ -58,11 +55,16 @@ export class DiagnosticBag {
   }
 
   add(diagnostic: Diagnostic): void {
-    if (this.items.length >= this.max) return;
     // A circuit that another circuit instantiates is analyzed once on its own
     // and again while expanding the instance. Both passes describe the same
     // source position, so keep the first report instead of showing it twice.
-    if (this.items.some((item) => sameDiagnostic(item, diagnostic))) return;
+    const key = diagnosticKey(diagnostic);
+    if (this.seen.has(key)) return;
+    this.seen.add(key);
+    if (this.items.length >= this.max) {
+      this.dropped += 1;
+      return;
+    }
     this.items.push(diagnostic);
     if (diagnostic.severity === "error") this.hasErrors = true;
   }
@@ -72,9 +74,24 @@ export class DiagnosticBag {
   }
 
   sorted(): Diagnostic[] {
-    return [...this.items].sort(
+    const sorted = [...this.items].sort(
       (a, b) => a.line - b.line || a.column - b.column || a.code.localeCompare(b.code),
     );
+    if (this.dropped > 0) {
+      // A truncated list must say so; otherwise a file with 300 errors looks
+      // like a file with 100. Append after sorting so the notice stays last.
+      const lastLine = sorted.at(-1)?.line ?? 1;
+      sorted.push({
+        code: "W900",
+        severity: "warning",
+        message: `Showing ${this.items.length} of ${this.items.length + this.dropped} diagnostics.`,
+        line: lastLine,
+        column: 1,
+        length: 1,
+        hint: "Fix the errors shown, then compile again to see the rest.",
+      });
+    }
+    return sorted;
   }
 }
 

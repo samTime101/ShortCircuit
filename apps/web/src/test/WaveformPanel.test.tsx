@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { compile, Simulator } from "@shortcircuit/engine";
 import { WaveformPanel } from "../components/WaveformPanel";
 import { sampleFromSnapshot, type TraceSample } from "../lib/trace";
@@ -58,6 +58,28 @@ describe("waveform panel", () => {
       expect.stringContaining("shortcircuit.trace/v1"),
       "application/json",
     );
+  });
+
+  it("only mounts a window of a long trace and pages through it", () => {
+    const { circuit, samples } = trace();
+    const longTrace = Array.from({ length: 500 }, (_, index) => ({
+      ...samples[index % samples.length]!,
+      label: `sample-${index}`,
+    }));
+
+    const { container } = render(
+      <WaveformPanel circuit={circuit} trace={longTrace} onDownload={() => {}} />,
+    );
+
+    expect(container.querySelectorAll(".wave-axis")).toHaveLength(200);
+    expect(screen.getByText(/Showing samples 301–500 of 500/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Earlier" }));
+    expect(container.querySelectorAll(".wave-axis")).toHaveLength(200);
+    expect(screen.getByText(/Showing samples 101–300 of 500/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Latest" }));
+    expect(screen.getByText(/Showing samples 301–500 of 500/)).toBeInTheDocument();
   });
 
   it("explains that nothing has been recorded yet", () => {

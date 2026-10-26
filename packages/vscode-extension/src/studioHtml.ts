@@ -1844,6 +1844,7 @@ export function getStudioHtml(
     let fullNodesById = new Map();
     let layoutNodeById = new Map();
     let graphNodeEls = new Map();
+    let graphValueEls = new Map();
     let graphEdgeEls = [];
     let graphEdgesByNode = new Map();
     let activeNodeEl = null;
@@ -2711,6 +2712,7 @@ export function getStudioHtml(
       activeCircuitData = null;
       layoutNodeById = new Map();
       graphNodeEls = new Map();
+      graphValueEls = new Map();
       graphEdgesByNode = new Map();
       graphEdgeEls = [];
       fullLayoutNodes = [];
@@ -3198,6 +3200,7 @@ export function getStudioHtml(
         graphWidthsLayer.innerHTML = "";
         graphNodesLayer.innerHTML = "";
         graphNodeEls = new Map();
+        graphValueEls = new Map();
         layoutNodeById = new Map();
         fullLayoutNodes = [];
         fullLayoutEdges = [];
@@ -3338,8 +3341,12 @@ export function getStudioHtml(
 
       // Rebuild element maps for fast in-place value updates
       graphNodeEls = new Map();
+      graphValueEls = new Map();
       graphNodesLayer.querySelectorAll("[data-graph-node]").forEach(function (element) {
-        graphNodeEls.set(element.getAttribute("data-id"), element);
+        const id = element.getAttribute("data-id");
+        graphNodeEls.set(id, element);
+        const value = element.querySelector(".node-value");
+        if (value) graphValueEls.set(id, value);
       });
 
       lastRenderedLodScale = zoomScale;
@@ -3372,7 +3379,7 @@ export function getStudioHtml(
             element.classList.remove("value-high", "value-low", "value-unknown");
             element.classList.add(toneClass);
           }
-          const valueLabel = element.querySelector(".node-value");
+          const valueLabel = graphValueEls.get(node.id);
           if (valueLabel) {
             const compact = compactValue(value, node.width);
             if (valueLabel.textContent !== compact) valueLabel.textContent = compact;

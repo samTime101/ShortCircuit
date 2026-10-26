@@ -103,8 +103,9 @@ publish steps. Bump the version if you intended to release.
 
 ## Releasing the VS Code extension
 
-The Marketplace extension is `samTime101.shortcircuit`. It is published
-manually; there is no Marketplace publishing workflow.
+The Marketplace extension is `samTime101.shortcircuit`. Marketplace publishing
+is still manual; the repository only automates the GitHub release and VSIX
+attachment.
 
 Bump the extension version as part of every extension change, because the
 Marketplace rejects duplicate versions:
@@ -114,19 +115,31 @@ npm version patch --no-git-tag-version -w shortcircuit
 ```
 
 Use `minor` or `major` for a larger jump. Commit the updated
-`packages/vscode-extension/package.json` and `package-lock.json`.
-
-To build the release artifact:
+`packages/vscode-extension/package.json` and `package-lock.json`, then push the
+commit to `main` and push a matching tag:
 
 ```bash
-npm run build -w shortcircuit
-cd packages/vscode-extension
-npx @vscode/vsce@4 package --no-git-tag-version
+git tag vscode-v<version>
+git push origin main vscode-v<version>
 ```
 
-This creates `shortcircuit-<version>.vsix`. Create a GitHub release tagged
-`vscode-v<version>` and attach the VSIX, then publish that VSIX manually to the
-Visual Studio Marketplace.
+The `Release VS Code extension` workflow builds and tests the extension,
+packages `shortcircuit-<version>.vsix`, and creates the GitHub release tagged
+`vscode-v<version>` with the VSIX attached. It rejects a tag that does not match
+the version in `packages/vscode-extension/package.json`.
+
+To publish the release to the Visual Studio Marketplace, download the VSIX from
+the GitHub release (or build it locally with `npm run build -w shortcircuit`
+followed by `npx @vscode/vsce@4 package --no-git-tag-version` in the extension
+workspace), then run:
+
+```bash
+cd packages/vscode-extension
+npx @vscode/vsce@4 publish --packagePath shortcircuit-<version>.vsix
+```
+
+`vsce` needs a Marketplace personal access token. It reads `VSCE_PAT` or prompts
+for login.
 
 ## Releasing a web package snapshot change
 

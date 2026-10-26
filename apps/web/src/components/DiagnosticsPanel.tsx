@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import type { Diagnostic, DiagnosticFix } from "@shortcircuit/engine";
 import { AlertTriangle, Check, ChevronDown, Copy, Info, X } from "./Icons";
 import { countLabel, formatDiagnostics } from "../lib/diagnosticsText";
@@ -15,7 +15,7 @@ interface DiagnosticsPanelProps {
 
 type CopyState = "idle" | "copied" | "failed";
 
-export function DiagnosticsPanel({
+export const DiagnosticsPanel = memo(function DiagnosticsPanel({
   diagnostics,
   source,
   compiling,
@@ -125,68 +125,62 @@ export function DiagnosticsPanel({
                 const sourceLine = lines[Math.max(0, diagnostic.line - 1)] ?? "";
                 const headline = diagnostic.plain?.headline;
                 return (
-                  <button
+                  <div
                     className={`diagnostic-item severity-${diagnostic.severity}`}
                     key={`${diagnostic.code}-${diagnostic.line}-${diagnostic.column}-${index}`}
-                    onClick={() => onSelect(diagnostic)}
-                    title={`Jump to line ${diagnostic.line}`}
                   >
-                    <span className="diagnostic-icon">
-                      {diagnostic.severity === "error" ? (
-                        <X size={13} />
-                      ) : diagnostic.severity === "warning" ? (
-                        <AlertTriangle size={13} />
-                      ) : (
-                        <Info size={13} />
-                      )}
-                    </span>
-                    <span className="diagnostic-main">
-                      <span className="diagnostic-line">
-                        <span className="diag-code">{diagnostic.code}</span>
-                        <span className="diagnostic-headline">{headline ?? diagnostic.message}</span>
-                        <span className="diagnostic-location">
-                          L{diagnostic.line}:{diagnostic.column}
-                        </span>
+                    <button
+                      type="button"
+                      className="diagnostic-select"
+                      onClick={() => onSelect(diagnostic)}
+                      title={`Jump to line ${diagnostic.line}`}
+                    >
+                      <span className="diagnostic-icon">
+                        {diagnostic.severity === "error" ? (
+                          <X size={13} />
+                        ) : diagnostic.severity === "warning" ? (
+                          <AlertTriangle size={13} />
+                        ) : (
+                          <Info size={13} />
+                        )}
                       </span>
-                      {headline && headline !== diagnostic.message ? (
-                        <span className="diagnostic-message">{diagnostic.message}</span>
-                      ) : null}
-                      {diagnostic.plain ? (
-                        <span className="diagnostic-hint">{diagnostic.plain.detail}</span>
-                      ) : null}
-                      {diagnostic.hint && diagnostic.hint !== diagnostic.plain?.detail ? (
-                        <span className="diagnostic-hint">{diagnostic.hint}</span>
-                      ) : null}
-                      {diagnostic.plain?.fix ? (
-                        <span className="diagnostic-fix">
-                          <span
-                            role="button"
-                            tabIndex={0}
-                            className="fix-button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              onApplyFix(diagnostic.plain!.fix!);
-                            }}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter" || event.key === " ") {
-                                event.preventDefault();
-                                event.stopPropagation();
-                                onApplyFix(diagnostic.plain!.fix!);
-                              }
-                            }}
-                          >
-                            {diagnostic.plain.fix.label}
+                      <span className="diagnostic-main">
+                        <span className="diagnostic-line">
+                          <span className="diag-code">{diagnostic.code}</span>
+                          <span className="diagnostic-headline">{headline ?? diagnostic.message}</span>
+                          <span className="diagnostic-location">
+                            L{diagnostic.line}:{diagnostic.column}
                           </span>
                         </span>
-                      ) : null}
-                      {sourceLine.trim() ? (
-                        <span className="diagnostic-snippet">
-                          <span className="snippet-gutter">{diagnostic.line}</span>
-                          <span className="snippet-code">{sourceLine.trim()}</span>
-                        </span>
-                      ) : null}
-                    </span>
-                  </button>
+                        {headline && headline !== diagnostic.message ? (
+                          <span className="diagnostic-message">{diagnostic.message}</span>
+                        ) : null}
+                        {diagnostic.plain ? (
+                          <span className="diagnostic-hint">{diagnostic.plain.detail}</span>
+                        ) : null}
+                        {diagnostic.hint && diagnostic.hint !== diagnostic.plain?.detail ? (
+                          <span className="diagnostic-hint">{diagnostic.hint}</span>
+                        ) : null}
+                        {sourceLine.trim() ? (
+                          <span className="diagnostic-snippet">
+                            <span className="snippet-gutter">{diagnostic.line}</span>
+                            <span className="snippet-code">{sourceLine.trim()}</span>
+                          </span>
+                        ) : null}
+                      </span>
+                    </button>
+                    {diagnostic.plain?.fix ? (
+                      <div className="diagnostic-fix">
+                        <button
+                          type="button"
+                          className="fix-button"
+                          onClick={() => onApplyFix(diagnostic.plain!.fix!)}
+                        >
+                          {diagnostic.plain.fix.label}
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
                 );
               })}
             </div>
@@ -195,4 +189,4 @@ export function DiagnosticsPanel({
       ) : null}
     </section>
   );
-}
+});

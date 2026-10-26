@@ -247,11 +247,16 @@ function expressionFor(node: CircuitNode, context: ModuleContext): string {
     }
     case "ZEXT": {
       const sourceWidth = Number(node.params?.sourceWidth ?? node.width);
-      return `{{${Math.max(0, node.width - sourceWidth)}{1'b0}}, ${operands[0] ?? "0"}}`;
+      const extra = Math.max(0, node.width - sourceWidth);
+      // Zero-width replication is not legal Verilog, so widen nothing.
+      if (extra === 0) return operands[0] ?? "0";
+      return `{{${extra}{1'b0}}, ${operands[0] ?? "0"}}`;
     }
     case "SEXT": {
       const sourceWidth = Number(node.params?.sourceWidth ?? node.width);
-      return `{{${Math.max(0, node.width - sourceWidth)}{${operands[0] ?? "0"}[${Math.max(0, sourceWidth - 1)}]}}, ${operands[0] ?? "0"}}`;
+      const extra = Math.max(0, node.width - sourceWidth);
+      if (extra === 0) return operands[0] ?? "0";
+      return `{{${extra}{${operands[0] ?? "0"}[${Math.max(0, sourceWidth - 1)}]}}, ${operands[0] ?? "0"}}`;
     }
     case "REPEAT": {
       const count = Number(node.params?.count ?? 1);
@@ -290,7 +295,8 @@ function testbenchFor(
     lines.push(`  reg  ${portWidth(input.width)}${context.ports.get(input.name)};`);
   }
   for (const output of circuit.outputs) {
-    lines.push(`  wire ${portWidth(output.width)}${context.outputs.get(output.node) ?? sanitize(output.name)};`);
+    const wire = context.outputs.get(output.node) ?? sanitize(output.name);
+    lines.push(`  wire ${portWidth(output.width)}${wire};`);
   }
   lines.push("");
   lines.push(`  ${prefix}${sanitize(circuit.name)} dut (`);
@@ -298,7 +304,12 @@ function testbenchFor(
     ...circuit.inputs.map(
       (input) => `.${context.ports.get(input.name)}(${context.ports.get(input.name)})`,
     ),
-    ...circuit.outputs.map((output) => `.${sanitize(output.name)}(${sanitize(output.name)})`),
+    ...circuit.outputs.map((output) => {
+      // Use the name moduleFor reserved: two output names can sanitize to the
+      // same identifier, and the second one has a suffix.
+      const wire = context.outputs.get(output.node) ?? sanitize(output.name);
+      return `.${wire}(${wire})`;
+    }),
   ];
   lines.push(`    ${connections.join(",\n    ")}`);
   lines.push("  );");
@@ -337,7 +348,12 @@ function testbenchFor(
         continue;
       }
       if (instruction.kind === "expect") {
-        const signal = context.outputs.get(instruction.actualName) ?? instruction.actualName;
+        const output = circuit.outputs.find(
+          (entry) => entry.name === instruction.actualName || entry.portName === instruction.actualName,
+        );
+        const signal = output
+          ? (context.outputs.get(output.node) ?? sanitize(output.name))
+          : instruction.actualName;
         lines.push(
           `    if (${signal} !== ${literal(instruction.value, instruction.width)}) $display("FAIL %s: expected %b, got %b", "${testCase.label}: ${instruction.actualName}", ${literal(instruction.value, instruction.width)}, ${signal});`,
         );

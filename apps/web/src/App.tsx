@@ -9,6 +9,7 @@ import {
   runTests,
   type CircuitIR,
   type CompileResult,
+  type Diagnostic,
   type DiagnosticFix,
   type SimulationSnapshot,
   type TestRunResult,
@@ -35,7 +36,6 @@ import { TestsPanel } from "./components/TestsPanel";
 import { TruthTablePanel } from "./components/TruthTablePanel";
 import { WaveformPanel } from "./components/WaveformPanel";
 import type { DisplayMode } from "./components/OutputDisplay";
-import { DocsPage } from "./pages/DocsPage";
 import {
   Activity,
   AlertTriangle,
@@ -62,7 +62,12 @@ import type { SourceEditorHandle } from "./editor/SourceEditor";
 import { DEFAULT_EXAMPLE, EXAMPLES, type Example } from "./lib/examples";
 import { insertRecordedCase, suggestCaseName } from "./lib/recordTest";
 import { migrateLegacyComments } from "./lib/legacyComments";
-import { appendSample, sampleFromSnapshot, type TraceSample } from "./lib/trace";
+import {
+  appendSample,
+  appendSamples,
+  sampleFromSnapshot,
+  type TraceSample,
+} from "./lib/trace";
 import { useRoute } from "./lib/router";
 import { createCompilerClient, type CompilerClient } from "./lib/compilerClient";
 import {
@@ -92,6 +97,7 @@ import {
 const STORAGE_KEY = "shortcircuit.source.v1";
 const DISPLAY_STORAGE_KEY = "shortcircuit.displays.v1";
 const COMPILE_DELAY = 360;
+const SOURCE_WRITE_DELAY = 300;
 
 /** Keep enough of the graph visible that it never gets squeezed away. */
 const GRAPH_MIN_HEIGHT = 140;
@@ -101,6 +107,11 @@ const RESIZER_STRIP = 10;
 // shell and compiler can paint before the editor bundle arrives.
 const SourceEditor = lazy(() =>
   import("./editor/SourceEditor").then((module) => ({ default: module.SourceEditor })),
+);
+
+// The documentation is a separate route and is not needed for the first paint.
+const DocsPage = lazy(() =>
+  import("./pages/DocsPage").then((module) => ({ default: module.DocsPage })),
 );
 
 type Tab = "circuit" | "truth" | "waveform" | "tests" | "ir";
@@ -152,7 +163,17 @@ export default function App() {
   const [route, navigate] = useRoute();
   const [mode, setMode] = useState<StudioMode>(readMode);
   if (route === "docs") {
-    return <DocsPage onBack={() => navigate("studio")} beginner={mode === "beginner"} />;
+    return (
+      <Suspense
+        fallback={
+          <div className="docs-loading" role="status">
+            Loading the documentation…
+          </div>
+        }
+      >
+        <DocsPage onBack={() => navigate("studio")} beginner={mode === "beginner"} />
+      </Suspense>
+    );
   }
   return (
     <Studio
@@ -208,6 +229,9 @@ function Studio({
   const lastCompiledSource = useRef<string | null>(null);
   const debounceTimer = useRef<number | null>(null);
   const activeCircuitRef = useRef(DEFAULT_EXAMPLE.focusCircuit);
+  const activeCircuitIR = useRef<CircuitIR | null>(null);
+  const simulatorRef = useRef<Simulator | null>(null);
+  const latestSource = useRef(source);
   const toastSeq = useRef(0);
 
   const notify = useCallback((message: string) => {
@@ -226,12 +250,29 @@ function Studio({
   }, [compiler]);
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(STORAGE_KEY, source);
-    } catch {
-      // Persistence is a convenience; private browsing can reject writes.
-    }
+    latestSource.current = source;
+    // Typing should not synchronously write the whole document on every key.
+    // Keep the newest value and persist it once the burst settles.
+    const timer = window.setTimeout(() => {
+      try {
+        window.localStorage.setItem(STORAGE_KEY, source);
+      } catch {
+        // Persistence is a convenience; private browsing can reject writes.
+      }
+    }, SOURCE_WRITE_DELAY);
+    return () => window.clearTimeout(timer);
   }, [source]);
+
+  useEffect(() => {
+    // Flush the pending source when the studio unmounts or the route changes.
+    return () => {
+      try {
+        window.localStorage.setItem(STORAGE_KEY, latestSource.current);
+      } catch {
+        // Ignore storage failures during teardown too.
+      }
+    };
+  }, []);
 
   useEffect(() => {
     writeMode(mode);
@@ -254,8 +295,14 @@ function Studio({
     }
   }, [displays]);
 
+  const installSimulator = useCallback((next: Simulator | null) => {
+    simulatorRef.current = next;
+    setSimulator(next);
+  }, []);
+
   const activateCircuit = useCallback((circuit: CircuitIR) => {
     activeCircuitRef.current = circuit.name;
+    activeCircuitIR.current = circuit;
     setActiveCircuitName(circuit.name);
     setTruthTable(generateTruthTable(circuit));
     setRuntimeError(null);
@@ -264,7 +311,7 @@ function Studio({
     try {
       const nextSimulator = new Simulator(circuit);
       const nextSnapshot = nextSimulator.snapshot();
-      setSimulator(nextSimulator);
+      installSimulator(nextSimulator);
       setInputValues(nextSimulator.getInputValues());
       if (nextSnapshot.runtimeError) {
         setSnapshot(null);
@@ -273,12 +320,12 @@ function Studio({
         setSnapshot(nextSnapshot);
       }
     } catch (error) {
-      setSimulator(null);
+      installSimulator(null);
       setSnapshot(null);
       setInputValues({});
       setRuntimeError(`Could not start the simulator: ${errorText(error)}`);
     }
-  }, []);
+  }, [installSimulator]);
 
   const compileNow = useCallback(
     (nextSource: string, preferredCircuit?: string) => {
@@ -301,7 +348,7 @@ function Studio({
           setCompiling(false);
 
           if (!next.ok) {
-            setSimulator(null);
+            installSimulator(null);
             setSnapshot(null);
             setInputValues({});
             setRuntimeError(null);
@@ -316,10 +363,22 @@ function Studio({
             next.circuits[0];
 
           if (!circuit) {
-            setSimulator(null);
+            installSimulator(null);
             setSnapshot(null);
             setInputValues({});
             setTruthTable(null);
+            setTestResult(runTests(next));
+            return;
+          }
+
+          // A comment-only edit must not throw away inputs, state or the
+          // waveform. Rebuild the simulator only when the IR actually changed.
+          const previous = activeCircuitIR.current;
+          const unchanged =
+            simulatorRef.current !== null &&
+            previous !== null &&
+            JSON.stringify(previous) === JSON.stringify(circuit);
+          if (unchanged) {
             setTestResult(runTests(next));
             return;
           }
@@ -332,7 +391,7 @@ function Studio({
           setCompiling(false);
         });
     },
-    [activateCircuit, compiler],
+    [activateCircuit, compiler, installSimulator],
   );
 
   const togglePackage = useCallback(
@@ -375,7 +434,7 @@ function Studio({
     if (!simulator || !selectedClock) return;
     setRecording((current) =>
       current
-        ? { ...current, lines: [...current.lines, `STEP`, `  INPUT ${selectedClock} = 1`, "END"] }
+        ? { ...current, lines: [...current.lines, `CYCLE ${selectedClock} 1`] }
         : current,
     );
     try {
@@ -386,8 +445,12 @@ function Studio({
       setInputValues(simulator.getInputValues());
       setRuntimeError(null);
       // Keep both halves of the pulse so the edge that fired is on the trace.
-      setTrace((current) => appendSample(current, sampleFromSnapshot(rising, selectedClock)));
-      setTrace((current) => appendSample(current, sampleFromSnapshot(after, selectedClock)));
+      setTrace((current) =>
+        appendSamples(current, [
+          sampleFromSnapshot(rising, selectedClock),
+          sampleFromSnapshot(after, selectedClock),
+        ]),
+      );
     } catch (error) {
       setSnapshot(null);
       setRuntimeError(errorText(error));
@@ -491,12 +554,15 @@ function Studio({
     [result],
   );
 
-  const switchCircuit = (name: string) => {
-    if (!result?.ok) return;
-    const circuit = result.circuits.find((entry) => entry.name === name);
-    if (!circuit) return;
-    activateCircuit(circuit);
-  };
+  const switchCircuit = useCallback(
+    (name: string) => {
+      if (!result?.ok) return;
+      const circuit = result.circuits.find((entry) => entry.name === name);
+      if (!circuit) return;
+      activateCircuit(circuit);
+    },
+    [activateCircuit, result],
+  );
 
   const dockHeightLimit = () => {
     const available = circuitTabRef.current?.clientHeight ?? 0;
@@ -525,24 +591,27 @@ function Studio({
     if (measured > 0) setDockHeight(clampSimDockHeight(measured));
   };
 
-  const onInputChange = (name: string, value: string) => {
-    if (!simulator) return;
-    setRecording((current) =>
-      current ? { ...current, lines: [...current.lines, `INPUT ${name} = ${value}`] } : current,
-    );
-    try {
-      const next = simulator.setInput(name, value);
-      setSnapshot(next);
-      setInputValues(simulator.getInputValues());
-      setRuntimeError(null);
-      setTrace((current) => appendSample(current, sampleFromSnapshot(next, name)));
-    } catch (error) {
-      setSnapshot(null);
-      setRuntimeError(errorText(error));
-    }
-  };
+  const onInputChange = useCallback(
+    (name: string, value: string) => {
+      if (!simulator) return;
+      setRecording((current) =>
+        current ? { ...current, lines: [...current.lines, `INPUT ${name} = ${value}`] } : current,
+      );
+      try {
+        const next = simulator.setInput(name, value);
+        setSnapshot(next);
+        setInputValues(simulator.getInputValues());
+        setRuntimeError(null);
+        setTrace((current) => appendSample(current, sampleFromSnapshot(next, name)));
+      } catch (error) {
+        setSnapshot(null);
+        setRuntimeError(errorText(error));
+      }
+    },
+    [simulator],
+  );
 
-  const resetSimulation = () => {
+  const resetSimulation = useCallback(() => {
     if (!simulator) return;
     try {
       const next = simulator.reset();
@@ -555,12 +624,24 @@ function Studio({
       setSnapshot(null);
       setRuntimeError(errorText(error));
     }
-  };
+  }, [notify, simulator]);
 
-  const runNow = () => {
+  const runNow = useCallback(() => {
     compileNow(source, activeCircuitRef.current);
     notify("Rebuilding the circuit graph");
-  };
+  }, [compileNow, notify, source]);
+
+  const selectDiagnostic = useCallback((diagnostic: Diagnostic) => {
+    editorRef.current?.gotoLine(diagnostic.line, diagnostic.column);
+  }, []);
+
+  const toggleRun = useCallback(() => {
+    setRunning((current) => !current);
+  }, []);
+
+  const changeDisplay = useCallback((name: string, mode: DisplayMode) => {
+    setDisplays((current) => ({ ...current, [name]: mode }));
+  }, []);
 
   const handleFormat = useCallback(() => {
     const formatted = formatSourceForEditor(source);
@@ -668,10 +749,6 @@ function Studio({
     },
     [source, compileNow, notify],
   );
-
-  const jumpToDiagnostic = (line: number, column: number) => {
-    editorRef.current?.gotoLine(line, column);
-  };
 
   const tabs: Array<{ id: Tab; label: string; icon: ReactNode; count?: string; alert?: boolean }> = [
     {
@@ -878,7 +955,7 @@ function Studio({
             compiling={compiling}
             circuitCount={result?.circuits.length ?? 0}
             nodeCount={totalNodes}
-            onSelect={(diagnostic) => jumpToDiagnostic(diagnostic.line, diagnostic.column)}
+            onSelect={selectDiagnostic}
             onApplyFix={applyFix}
           />
         </section>
@@ -945,7 +1022,7 @@ function Studio({
                       onSelectClock={setSelectedClock}
                       onStep={stepClock}
                       running={running}
-                      onToggleRun={() => setRunning((current) => !current)}
+                      onToggleRun={toggleRun}
                       speed={clockSpeed}
                       onSpeedChange={setClockSpeed}
                       onInputChange={onInputChange}
@@ -957,9 +1034,7 @@ function Studio({
                       onExpectThis={expectThis}
                       displays={displays}
                       beginner={mode === "beginner"}
-                      onDisplayChange={(name, mode) =>
-                        setDisplays((current) => ({ ...current, [name]: mode }))
-                      }
+                      onDisplayChange={changeDisplay}
                     />
                   </div>
 

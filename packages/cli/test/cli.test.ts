@@ -512,6 +512,57 @@ describe("registry-backed package commands", () => {
     expect(installedUpstream.stdout).toContain("0.1.0");
   });
 
+  it("rejects tampered package contents unless --force is given", async () => {
+    const cwd = tempDir();
+    await runCli(["init"], { cwd });
+    const registry = setupRegistry();
+    registry.setIntegrity("@test/double", "0.1.0", "sha256-deadbeef");
+    const env = { ...process.env, SHORTCIRCUIT_CACHE: join(cwd, ".cache") };
+
+    const rejected = await runPackage(
+      ["install", "@test/double", "--registry", registry.url],
+      { cwd, fetch: registry.fetch, env },
+    );
+    expect(rejected.code).toBe(1);
+    expect(rejected.stderr).toContain("Integrity check failed");
+    expect(rejected.stderr).toContain("--force");
+    expect(
+      existsSync(join(cwd, ".shortcircuit/packages/@test/double/manifest.json")),
+    ).toBe(false);
+
+    const forced = await runPackage(
+      ["install", "@test/double", "--registry", registry.url, "--force"],
+      { cwd, fetch: registry.fetch, env },
+    );
+    expect(forced.code).toBe(0);
+    const lock = readJson<{
+      packages: Record<string, { integrity: string }>;
+    }>(join(cwd, "shortcircuit.lock.json"));
+    expect(lock.packages["@test/double"]!.integrity).toMatch(/^sha256-[a-f0-9]{64}$/);
+    expect(lock.packages["@test/double"]!.integrity).not.toBe("sha256-deadbeef");
+  });
+
+  it("reuses a fresh registry index instead of refetching it on install", async () => {
+    const cwd = tempDir();
+    await runCli(["init"], { cwd });
+    const registry = setupRegistry();
+    const env = { ...process.env, SHORTCIRCUIT_CACHE: join(cwd, ".cache") };
+
+    await runPackage(
+      ["list", "upstream", "--registry", registry.url, "--refresh"],
+      { cwd, fetch: registry.fetch, env },
+    );
+    registry.fetchCalls.length = 0;
+
+    const install = await runPackage(
+      ["install", "@test/double", "--registry", registry.url],
+      { cwd, fetch: registry.fetch, env },
+    );
+
+    expect(install.code).toBe(0);
+    expect(registry.fetchCalls).not.toContain(registry.url);
+  });
+
   it("updates within a range and supports --latest", async () => {
     const cwd = tempDir();
     await runCli(["init"], { cwd });

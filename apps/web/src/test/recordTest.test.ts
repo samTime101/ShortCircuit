@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { compile } from "@shortcircuit/engine";
 import { insertRecordedCase, suggestCaseName } from "../lib/recordTest";
 
 describe("recording a test case", () => {
@@ -41,5 +42,32 @@ END`;
     expect(result.match(/TEST Counter4/g)).toHaveLength(1);
     expect(result).toContain('CASE "two"');
     expect(result.indexOf('CASE "two"')).toBeGreaterThan(result.indexOf('CASE "one"'));
+  });
+
+  it("keeps the source compiling when the test block already has a case", () => {
+    const source = `CIRCUIT Inv
+INPUT a
+y = NAND(a, a)
+OUTPUT y
+END
+
+TEST Inv
+CASE "one"
+  INPUT a = 0
+  EXPECT y = 1
+END
+END`;
+    const result = insertRecordedCase(source, {
+      circuit: "Inv",
+      label: "two",
+      lines: ["INPUT a = 1", "EXPECT y = 0"],
+    });
+    // The new case must close before the TEST block's own END, not nest inside
+    // the previous CASE.
+    const errors = compile(result).diagnostics.filter(
+      (item) => item.severity === "error",
+    );
+    expect(errors.map((item) => item.code)).toEqual([]);
+    expect(result.match(/^END$/gm)).toHaveLength(3);
   });
 });

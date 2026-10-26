@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { TestRunResult } from "@shortcircuit/engine";
 import { AlertTriangle, Check, CircleX, Flask, Info, X } from "./Icons";
 
@@ -5,7 +6,7 @@ interface TestsPanelProps {
   result: TestRunResult;
 }
 
-export function TestsPanel({ result }: TestsPanelProps) {
+export const TestsPanel = memo(function TestsPanel({ result }: TestsPanelProps) {
   if (result.suites.length === 0) {
     return (
       <div className="workbench-empty">
@@ -143,4 +144,4 @@ END`}</pre>
       </div>
     </div>
   );
-}
+});

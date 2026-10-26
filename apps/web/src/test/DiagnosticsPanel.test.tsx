@@ -151,4 +151,23 @@ describe("diagnostics panel", () => {
 
     expect(onSelect).toHaveBeenCalledWith(ERROR);
   });
+
+  it("keeps a one-click fix outside the diagnostic button", () => {
+    const fix = { label: "Replace with 0100", text: "0100", line: 3, column: 26, length: 4 };
+    const fixable: Diagnostic = {
+      ...ERROR,
+      plain: { ...ERROR.plain!, fix },
+    };
+    const onApplyFix = vi.fn();
+    const { container } = renderPanel([fixable], { onApplyFix });
+
+    for (const button of container.querySelectorAll("button")) {
+      expect(button.querySelector("button")).toBeNull();
+    }
+
+    const action = screen.getByRole("button", { name: "Replace with 0100" });
+    fireEvent.click(action);
+
+    expect(onApplyFix).toHaveBeenCalledWith(fix);
+  });
 });

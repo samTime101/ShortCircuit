@@ -46,10 +46,23 @@ function mapValues(signals: Record<string, { binary: string }>): Record<string, 
   return result;
 }
 
+/**
+ * Appends samples in one pass, dropping the oldest ones when the cap is
+ * reached. Clock steps produce two samples at once, so batching avoids
+ * copying the trace list twice per tick.
+ */
+export function appendSamples(
+  trace: TraceSample[],
+  samples: TraceSample[],
+): TraceSample[] {
+  if (samples.length === 0) return trace;
+  const next = [...trace, ...samples];
+  return next.length > TRACE_LIMIT ? next.slice(next.length - TRACE_LIMIT) : next;
+}
+
 /** Appends a sample, dropping the oldest one when the cap is reached. */
 export function appendSample(trace: TraceSample[], sample: TraceSample): TraceSample[] {
-  const next = [...trace, sample];
-  return next.length > TRACE_LIMIT ? next.slice(next.length - TRACE_LIMIT) : next;
+  return appendSamples(trace, [sample]);
 }
 
 /** The signal rows of the waveform, in a stable order. */

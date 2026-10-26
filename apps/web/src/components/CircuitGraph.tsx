@@ -576,10 +576,11 @@ const GraphNodeView = memo(function GraphNodeView({
   );
 });
 
-export function CircuitGraph({ circuit, snapshot }: CircuitGraphProps) {
+function CircuitGraphView({ circuit, snapshot }: CircuitGraphProps) {
   const stageRef = useRef<HTMLDivElement>(null);
   const size = useElementSize(stageRef);
   const layout = useMemo(() => buildLayout(circuit), [circuit]);
+  const circuitKey = useMemo(() => JSON.stringify(circuit), [circuit]);
   const [view, setView] = useState<GraphView>({ scale: 1, x: 0, y: 0 });
   const viewRef = useRef<GraphView>(view);
   const frameRef = useRef(0);
@@ -642,9 +643,16 @@ export function CircuitGraph({ circuit, snapshot }: CircuitGraphProps) {
     });
   }, [applyView, layout.width, layout.height, size.width, size.height]);
 
+  /* Fit once per circuit, and once when the stage is first measured. A window
+     or dock resize must not throw away a pan or zoom the user chose, and a
+     comment-only recompile must not either. */
+  const fittedKeyRef = useRef<string | null>(null);
   useEffect(() => {
+    if (!size.width || !size.height) return;
+    if (fittedKeyRef.current === circuitKey) return;
+    fittedKeyRef.current = circuitKey;
     fit();
-  }, [circuit, fit]);
+  }, [circuitKey, fit, size.width, size.height]);
 
   useEffect(() => {
     setSelectedId(null);
@@ -1099,3 +1107,5 @@ export function CircuitGraph({ circuit, snapshot }: CircuitGraphProps) {
     </div>
   );
 }
+
+export const CircuitGraph = memo(CircuitGraphView);
